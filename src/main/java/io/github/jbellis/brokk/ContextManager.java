@@ -37,6 +37,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -1132,8 +1133,12 @@ public class ContextManager implements IContextManager {
             if (result.status() == OperationStatus.SUCCESS) {
                 // Add result to read-only snippet with the command as description
                 if (result.message() != null) {
-                    addStringFragment(command, result.message());
-                }
+                    List<String> commitMessages = parseAsGitDiffs(result.message());
+                    String description = commitMessages.isEmpty() 
+                    ? command 
+                    : "diff: " + String.join(", ", commitMessages);
+                addStringFragment(description, result.message());
+            }
             }
             else {
                 assert result.status() == OperationStatus.ERROR;
@@ -1607,6 +1612,31 @@ public class ContextManager implements IContextManager {
                 : text;
 
         return locStr + "  " + trimmed;
+    }
+
+    /**
+     * Parse a string containing git diffs and extract the first line of each commit message.
+     * @param text String that may contain git diffs (hash + author + date)
+     * @return List of commit message first lines, or empty list if no diffs found
+     */
+    public static List<String> parseAsGitDiffs(String text) {
+        if (text == null || text.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        List<String> messages = new ArrayList<>();
+        Pattern pattern = Pattern.compile("commit ([a-f0-9]+).*?\\n.*?\\n\\n(.*?)(?=\\ncommit|$)", Pattern.DOTALL);
+        Matcher matcher = pattern.matcher(text);
+        
+        while (matcher.find()) {
+            String message = matcher.group(2).trim();
+            String firstLine = message.lines().findFirst().orElse("").trim();
+            if (!firstLine.isEmpty()) {
+                messages.add(firstLine);
+            }
+        }
+        
+        return messages;
     }
 
     private static String formatLoc(int loc) {
