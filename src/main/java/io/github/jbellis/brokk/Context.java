@@ -115,6 +115,9 @@ public class Context {
         if (newFragments.equals(virtualFragments)) {
             return this;
         }
+        for (int i = 0; i < newFragments.size(); i++) {
+            newFragments.get(i).renumber(i);
+        }
         return withVirtualFragments(newFragments).refresh();
     }
     
@@ -205,7 +208,7 @@ public class Context {
             debug("pagerank disabled");
             return ContextFragment.AutoContext.DISABLED;
         }
-        var seeds = Streams.concat(editableFiles.stream(), readonlyFiles.stream(), virtualFragments.stream().filter(f -> !(f instanceof ContextFragment.AutoContext)))
+        var seeds = Streams.concat(editableFiles.stream(), readonlyFiles.stream(), virtualFragments.stream())
                 .flatMap(f -> f.classnames(analyzer).stream())
                 .collect(Collectors.toSet());
 

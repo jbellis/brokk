@@ -39,12 +39,29 @@ public interface ContextFragment {
         }
     }
 
-    interface VirtualFragment extends ContextFragment {
-        int position();
+    abstract class VirtualFragment implements ContextFragment {
+        private int position;
 
-        // implementations should override this if they have a better option!
+        protected VirtualFragment(int position) {
+            this.position = position;
+        }
+
+        public int position() {
+            return position;
+        }
+
         @Override
-        default Set<String> classnames(Analyzer analyzer) {
+        public String source() {
+            // 1-based label in brackets
+            return "[%d]".formatted(position + 1);
+        }
+
+        public final void renumber(int newPosition) {
+            this.position = newPosition;
+        }
+
+        @Override
+        public Set<String> classnames(Analyzer analyzer) {
             return ContextManager.getTrackedFiles().stream().parallel()
                     .filter(f -> text().contains(f.toString()))
                     .flatMap(f -> analyzer.classesInFile(f).stream())
@@ -52,14 +69,27 @@ public interface ContextFragment {
         }
 
         @Override
-        String text(); // no exceptions
+        public abstract String text(); // no exceptions
     }
 
-    record StringFragment(int position, String text, String description) implements VirtualFragment {
+    class StringFragment extends VirtualFragment {
+        private final String text;
+        private final String description;
+
+        public StringFragment(int position, String text, String description) {
+            super(position);
+            this.text = text;
+            this.description = description;
+        }
+
         @Override
-        public String source() {
-            // 1-based label in brackets
-            return "[%d]".formatted(position + 1);
+        public String text() {
+            return text;
+        }
+
+        @Override
+        public String description() {
+            return description;
         }
 
         @Override
@@ -68,11 +98,19 @@ public interface ContextFragment {
         }
     }
 
-    record PasteFragment(int position, String text, Future<String> descriptionFuture) implements VirtualFragment {
+    class PasteFragment extends VirtualFragment {
+        private final String text;
+        private final Future<String> descriptionFuture;
+
+        public PasteFragment(int position, String text, Future<String> descriptionFuture) {
+            super(position);
+            this.text = text;
+            this.descriptionFuture = descriptionFuture;
+        }
+
         @Override
-        public String source() {
-            // 1-based label in brackets
-            return "[%d]".formatted(position + 1);
+        public String text() {
+            return text;
         }
 
         @Override
@@ -93,11 +131,18 @@ public interface ContextFragment {
         }
     }
 
-    record StacktraceFragment(int position, Set<String> classnames, String original, String exception, String code) implements VirtualFragment {
-        @Override
-        public String source() {
-            // 1-based label in brackets
-            return "[%d]".formatted(position + 1);
+    class StacktraceFragment extends VirtualFragment {
+        private final Set<String> classnames;
+        private final String original;
+        private final String exception;
+        private final String code;
+
+        public StacktraceFragment(int position, Set<String> classnames, String original, String exception, String code) {
+            super(position);
+            this.classnames = classnames;
+            this.original = original;
+            this.exception = exception;
+            this.code = code;
         }
 
         @Override
@@ -124,42 +169,44 @@ public interface ContextFragment {
         return methodname.substring(0, lastDot);
     }
 
-    record UsageFragment(int position, String targetIdentifier, Set<String> classnames, String code) implements VirtualFragment {
-        public String source() {
-            // 1-based label in brackets
-            return "[%d]".formatted(position + 1);
+    class UsageFragment extends VirtualFragment {
+        private final String targetIdentifier;
+        private final Set<String> classnames;
+        private final String code;
+
+        public UsageFragment(int position, String targetIdentifier, Set<String> classnames, String code) {
+            super(position);
+            this.targetIdentifier = targetIdentifier;
+            this.classnames = classnames;
+            this.code = code;
         }
 
+        @Override
         public String text() {
             return "Uses of %s:\n\n%s".formatted(targetIdentifier, code);
-        }
-
-        public String description() {
-            return "Uses of %s".formatted(targetIdentifier);
         }
 
         @Override
         public Set<String> classnames(Analyzer analyzer) {
             return classnames;
         }
+
+        @Override
+        public String description() {
+            return "Uses of %s".formatted(targetIdentifier);
+        }
     }
 
-    class SkeletonFragment implements VirtualFragment {
-        private final int position;
+    class SkeletonFragment extends VirtualFragment {
         private final List<String> shortClassnames;
         private final Set<String> classnames;
         private final String skeletonText;
 
         public SkeletonFragment(int position, List<String> shortClassnames, Set<String> classnames, String skeletonText) {
-            this.position = position;
+            super(position);
             this.shortClassnames = shortClassnames;
             this.classnames = classnames;
             this.skeletonText = skeletonText;
-        }
-
-        @Override
-        public String source() {
-            return "[%d]".formatted(position + 1);
         }
 
         @Override
@@ -170,11 +217,6 @@ public interface ContextFragment {
         @Override
         public Set<String> classnames(Analyzer analyzer) {
             return classnames;
-        }
-
-        @Override
-        public int position() {
-            return position;
         }
 
         @Override
