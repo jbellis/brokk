@@ -123,13 +123,16 @@ public class Environment implements Closeable {
         var stderr = result.stderr().trim();
         var combinedOut = new StringBuilder();
         if (!stdout.isEmpty()) {
-            combinedOut.append("stdout: ").append(stdout);
+            if (!stderr.isEmpty()) {
+                combinedOut.append("stdout: ");
+            }
+            combinedOut.append(stdout);
         }
         if (!stderr.isEmpty()) {
-            if (!combinedOut.isEmpty()) {
-                combinedOut.append("\n\n");
+            if (!stdout.isEmpty()) {
+                combinedOut.append("\n\n").append("stderr: ");
             }
-            combinedOut.append("stderr: ").append(stderr);
+            combinedOut.append(stderr);
         }
         var output = combinedOut.toString();
 
