@@ -289,14 +289,14 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
   def getSkeleton(className: String): Option[String] = {
     val decls = cpg.typeDecl.fullNameExact(className).l
     if (decls.isEmpty) {
-      throw new IllegalArgumentException(s"'$className' not found")
+      return None // TODO log?
     }
     val td = decls.head
     val rootDir = cpg.metaData.root.head
     val file = new File(rootDir, td.filename).getAbsoluteFile
 
     if (!file.exists()) {
-      None
+      None // TODO log?
     } else {
       Using(Source.fromFile(file)) { source =>
         val lines = source.getLines().toIndexedSeq
