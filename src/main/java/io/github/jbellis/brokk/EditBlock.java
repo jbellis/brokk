@@ -403,7 +403,11 @@ public class EditBlock {
                 newFile.add(adjusted);
             }
             // if the replacement is longer, add leftover lines
-            newFile.addAll(Arrays.asList(truncatedReplace).subList(needed, truncatedReplace.length));
+            if (needed < truncatedReplace.length) {
+                newFile.addAll(
+                    Arrays.asList(truncatedReplace).subList(needed, truncatedReplace.length)
+                );
+            }
             // everything after the match
             newFile.addAll(Arrays.asList(wholeLines).subList(start + needed, wholeLines.length));
             return String.join("", newFile);
