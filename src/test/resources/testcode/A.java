@@ -9,6 +9,11 @@ public class A {
         return "prefix_" + input;
     }
 
+    public String method2(String input, int otherInput) {
+        // overload of method2
+        return "prefix_" + input + " " + otherInput;
+    }
+
     public Function<Integer, Integer> method3() {
         return x -> x + 1;
     }

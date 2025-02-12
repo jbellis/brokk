@@ -842,9 +842,9 @@ public class ContextManager implements IContextManager {
                     code.append("In ").append(classname).append(":\n\n");
                     currentClass = classname;
                 }
-                
-                String source = analyzer.getMethodSource(method);
-                if (source != null) {
+
+                var source = analyzer.getMethodSource(method);
+                if (source.isDefined()) {
                     classnames.add(classname);
                     code.append(source).append("\n\n");
                 }
@@ -907,8 +907,8 @@ public class ContextManager implements IContextManager {
             }
 
             String methodFullName = methodLine.substring(0, parenIndex);
-            String methodSource = analyzer.getMethodSource(methodFullName);
-            if (methodSource != null) {
+            var methodSource = analyzer.getMethodSource(methodFullName);
+            if (methodSource.isDefined()) {
                 classnames.add(ContextFragment.toClassname(methodFullName));
                 content.append(methodFullName).append(":\n");
                 content.append(methodSource).append("\n\n");

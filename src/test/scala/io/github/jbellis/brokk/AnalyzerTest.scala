@@ -33,11 +33,16 @@ class AnalyzerTest {
   @Test
   def extractsMethodSource(): Unit = {
     val analyzer = getAnalyzer
-    val source = analyzer.getMethodSource("A.method2")
+    val source = analyzer.getMethodSource("A.method2").get
 
     val expected =
       """    public String method2(String input) {
         |        return "prefix_" + input;
+        |    }
+        |
+        |    public String method2(String input, int otherInput) {
+        |        // overload of method2
+        |        return "prefix_" + input + " " + otherInput;
         |    }""".stripMargin
 
     assertEquals(expected, source)
@@ -79,6 +84,7 @@ class AnalyzerTest {
       """public class A {
         |  public void method1() {...}
         |  public String method2(String input) {...}
+        |  public String method2(String input, int otherInput) {...}
         |  public Function method3() {...}
         |  public static int method4(double foo, Integer bar) {...}
         |}""".stripMargin
@@ -161,9 +167,7 @@ class AnalyzerTest {
   @Test
   def getUsesMethodExistingTest(): Unit = {
     val analyzer = getAnalyzer
-    // This is the fully qualified Joern style:
-    //    "A.method2:java.lang.String(java.lang.String)"
-    val symbol = "A.method2:java.lang.String(java.lang.String)"
+    val symbol = "A.method2"
     val usages = analyzer.getUses(symbol)
 
     // Expect references in B.callsIntoA() because it calls a.method2("test")

@@ -142,11 +142,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
   }
 
   /**
-   * Retrieve the source code for the given method name.
-   * Returns null if the method is not found or the source filename is missing.
-   */
-  /**
-   * Creates a method signature including return type, name and parameters
+   * Return the method signature as a String, including return type, name and parameters
    */
   private[brokk] def methodSignature(m: Method): String = {
     val modifiers = m.modifier.map { modNode =>
@@ -167,7 +163,15 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     s"$modString$returnType ${m.name}($paramList)"
   }
 
-  def getMethodSource(methodName: String): String = {
+  def methodsFromName(resolvedMethodName: String): List[Method] = {
+    // Joern's method names look like this
+    //   org.apache.cassandra.db.DeletionPurger.shouldPurge:boolean(org.apache.cassandra.db.DeletionTime)
+    // constructor of a nested class:
+    //   org.apache.cassandra.db.Directories$SSTableLister.<init>:void(org.apache.cassandra.io.util.File[])
+    cpg.method.fullName(resolvedMethodName + ":.*").l
+  }
+
+  def getMethodSource(methodName: String): Option[String] = {
     // Joern's lambdas do not know their parent method, they just look like this
     //   Foo.<lambda>0:java.lang.Comparable(java.lang.Object)
     // Our workaround is to transform Java lambdas like
@@ -180,29 +184,25 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
       case _ => methodName
     }
 
-    // Joern's method names look like this
-    //   org.apache.cassandra.db.DeletionPurger.shouldPurge:boolean(org.apache.cassandra.db.DeletionTime)
-    // constructor of a nested class:
-    //   org.apache.cassandra.db.Directories$SSTableLister.<init>:void(org.apache.cassandra.io.util.File[])
-    val methodIt = cpg.method.fullName(resolvedMethodName + ":.*")
-    if (methodIt.isEmpty) {
-      return null
-    }
-    val method = methodIt.head
-    val file = toFile(method.filename)
-    if (file == null) { // wtf Joern
-      return null
-    }
+    val methods = methodsFromName(resolvedMethodName)
 
-    val source = Source.fromFile(file.absPath.toFile)
-    try {
-      source
-        .getLines()
-        .slice(method.lineNumber.get - 1, method.lineNumberEnd.get)
-        .mkString("\n")
-    } finally {
-      source.close()
-    }
+    val sources = methods.flatMap { method =>
+      for {
+        file <- Option(toFile(method.filename)) // TODO log empty filenames
+        startLine <- method.lineNumber
+        endLine <- method.lineNumberEnd
+      } yield {
+        scala.util.Using(Source.fromFile(file.absPath.toFile)) { source =>
+          source
+            .getLines()
+            .slice(startLine - 1, endLine)
+            .mkString("\n")
+        }.toOption
+      }
+    }.flatten
+
+    if (sources.isEmpty) None
+    else Some(sources.mkString("\n\n"))
   }
 
   /**
@@ -790,11 +790,10 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
    * If symbol is not found at all, throws IllegalArgumentException.
    */
   def getUses(symbol: String): SymbolUsages = {
-
     //
     // 1) If symbol is recognized as a method name
     //
-    val methodMatches = cpg.method.fullNameExact(symbol).l
+    val methodMatches = methodsFromName(symbol)
     if (methodMatches.nonEmpty) {
       // Do NOT exclude self references in the method branch
       val calls = methodMatches.flatMap(m => callersOfMethodNode(m, excludeSelfRefs = false)).distinct
