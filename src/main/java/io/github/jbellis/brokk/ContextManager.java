@@ -258,7 +258,7 @@ public class ContextManager implements IContextManager {
                 .filter(name -> !name.contains("$"))
                 .collect(Collectors.toSet());
         if (classesInFile.isEmpty()) {
-            return OperationResult.error("No non-inner classes found in " + file);
+            classesInFile = analyzer.classesInFile(file);
         }
 
         return summarizeClasses(classesInFile);
