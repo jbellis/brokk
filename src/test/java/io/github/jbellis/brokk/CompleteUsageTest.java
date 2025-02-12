@@ -234,8 +234,8 @@ public class CompleteUsageTest {
 
     @Test
     void testPackageOnly() {
-        assertTrue(findClassesForMemberAccess("a", allClasses).isEmpty());
-        assertTrue(findClassesForMemberAccess("a.b", allClasses).isEmpty());
+        assertEquals(Set.of(), findClassesForMemberAccess("a", allClasses));
+        assertEquals(Set.of(), findClassesForMemberAccess("a.b", allClasses));
     }
 
     @Test
@@ -256,14 +256,20 @@ public class CompleteUsageTest {
     }
 
     @Test
+    void testClassWithMemberName() {
+        Set<String> expected = Set.of("a.b.Do");
+        assertEquals(expected, findClassesForMemberAccess("a.b.Do.foo", allClasses));
+    }
+
+    @Test
     void testInnerClassReference() {
-        assertTrue(findClassesForMemberAccess("Do$Re", allClasses).isEmpty());
+        assertEquals(Set.of(), findClassesForMemberAccess("Do$Re", allClasses));
+        assertEquals(Set.of("a.b.Do$Re$Sub"), findClassesForMemberAccess("Do$Re$Sub", allClasses));
     }
 
     @Test
     void testInnerClassWithDot() {
-        Set<String> expected = Set.of("a.b.Do$Re");
-        assertEquals(expected, findClassesForMemberAccess("Do$Re.", allClasses));
+        assertEquals(Set.of("a.b.Do$Re"), findClassesForMemberAccess("Do$Re.", allClasses));
     }
 
     @Test

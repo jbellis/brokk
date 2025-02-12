@@ -29,6 +29,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -212,6 +213,11 @@ public class ContextManager implements IContextManager {
         return completeUsage(input, analyzer);
     }
 
+    @VisibleForTesting
+    static List<Candidate> completeUsage(String input, IAnalyzer analyzer) {
+        return completeClassesAndMembers(input, analyzer, true);
+    }
+
     private List<Candidate> completeSummarize(String input) {
         List<Candidate> candidates = new ArrayList<>();
                 candidates.addAll(completeDrop(input)); // Add fragment completion
@@ -310,7 +316,7 @@ public class ContextManager implements IContextManager {
         String partial = input.trim();
 
         var matchingClasses = findClassesForMemberAccess(input, allClasses);
-        if (!matchingClasses.isEmpty()) {
+        if (matchingClasses.size() == 1) {
             // find matching members
             List<Candidate> results = new ArrayList<>();
             for (var matchedClass : matchingClasses) {
@@ -319,7 +325,7 @@ public class ContextManager implements IContextManager {
                 var trueMembers = analyzer.getMembersInClass(matchedClass).stream().filter(m -> !m.contains("$")).toList();
                 for (String fqMember : trueMembers) {
                     String shortMember = fqMember.substring(fqMember.lastIndexOf('.') + 1);
-                    if (shortMember.toLowerCase().startsWith(memberPrefix)) {
+                    if (shortMember.startsWith(memberPrefix)) {
                         String display = returnFqn ? fqMember : getShortClassName(matchedClass) + "." + shortMember;
                         results.add(new Candidate(display, display, null, null, null, null, true));
                     }
@@ -356,8 +362,7 @@ public class ContextManager implements IContextManager {
     }
 
     /**
-     * Return the FQCNs corresponding to input if it identifies one or more classes in the [FQ] allClasses,
-     * AND it contains a . after the classname (with or without more charcacters).
+     * Return the FQCNs corresponding to input if it identifies an unambiguous class in [the FQ] allClasses
      */
     static Set<String> findClassesForMemberAccess(String input, List<String> allClasses) {
         // suppose allClasses = [a.b.Do, a.b.Do$Re, d.Do, a.b.Do$Re$Sub]
@@ -371,55 +376,34 @@ public class ContextManager implements IContextManager {
         // Do.foo -> [a.b.Do, d.Do]
         // foo -> []
         // Do$Re -> []
-        // Do$Re. -> [a.b.Do$Re]        
+        // Do$Re. -> [a.b.Do$Re]
+        // Do$Re$Sub -> [a.b.Do$ReSub]
 
         // Handle empty or null inputs
         if (input == null || input.isEmpty() || allClasses == null) {
-            return Collections.emptySet();
+            return Set.of();
         }
 
-        // Handle trailing dot case (e.g., "a.b.Do." or "Do.")
-        if (input.endsWith(".")) {
-            String searchPattern = input.substring(0, input.length() - 1);
-            return allClasses.stream()
-                    .filter(className -> {
-                        if (searchPattern.contains(".")) {
-                            // For fully qualified names (a.b.Do.)
-                            return className.equals(searchPattern);
-                        } else {
-                            // For simple names (Do.)
-                            return getShortClassName(className).equals(searchPattern);
-                        }
-                    })
-                    .collect(Collectors.toSet());
+        // first look for an unambiguous match to the entire input
+        var lowerCase = input.toLowerCase();
+        var prefixMatches = allClasses.stream()
+                .filter(className -> className.toLowerCase().startsWith(lowerCase)
+                        || getShortClassName(className).toLowerCase().startsWith(lowerCase))
+                .collect(Collectors.toSet());
+        if (prefixMatches.size() == 1) {
+            return prefixMatches;
         }
 
-        // Handle method reference case (e.g., "Do.foo")
-        if (input.contains(".")) {
-            String baseClassName = input.substring(0, input.indexOf("."));
-            return allClasses.stream()
-                    .filter(className -> getShortClassName(className).equals(baseClassName))
-                    .collect(Collectors.toSet());
+        if (input.lastIndexOf(".") < 0) {
+            return Set.of();
         }
 
-        // Handle inner class case (e.g., "Do$Re")
-        if (input.contains("$")) {
-            return Collections.emptySet();
-        }
-
-        // For all other cases, if it's not a class reference, return empty
-        if (allClasses.stream()
-                .map(ContextManager::getShortClassName)
-                .noneMatch(className -> className.equals(input))) {
-            return Collections.emptySet();
-        }
-
-        return Collections.emptySet();
-    }
-
-    @VisibleForTesting
-    static List<Candidate> completeUsage(String input, IAnalyzer analyzer) {
-        return completeClassesAndMembers(input, analyzer, true);
+        // see if the input-before-dot is a classname
+        String possibleClassname = input.substring(0, input.lastIndexOf("."));
+        return allClasses.stream()
+                .filter(className -> className.equalsIgnoreCase(possibleClassname)
+                        || getShortClassName(className).equalsIgnoreCase(possibleClassname))
+                .collect(Collectors.toSet());
     }
 
     /**
@@ -808,6 +792,7 @@ public class ContextManager implements IContextManager {
     }
 
     private OperationResult cmdUsage(String identifier) {
+        identifier = identifier.trim();
         if (identifier.isBlank()) {
             return OperationResult.error("Please provide a symbol name to search for");
         }
