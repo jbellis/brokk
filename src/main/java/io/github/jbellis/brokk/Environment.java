@@ -12,7 +12,9 @@ import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.eclipse.jgit.treewalk.TreeWalk;
 
 import java.io.Closeable;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +22,11 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Scanner;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class Environment implements Closeable {
@@ -78,11 +85,10 @@ public class Environment implements Closeable {
      * Runs a shell command using /bin/sh, returning {stdout, stderr}.
      */
     public ProcessResult runShellCommand(String command, IConsoleIO io) throws IOException {
+        Process process = createProcessBuilder("/bin/sh", "-c", command).start();
+
         StringBuilder out = new StringBuilder();
         StringBuilder err = new StringBuilder();
-        Process process = new ProcessBuilder("/bin/sh", "-c", command).start();
-
-        // Read the process output and error streams
         try (Scanner scOut = new Scanner(process.getInputStream());
              Scanner scErr = new Scanner(process.getErrorStream())) {
             while (scOut.hasNextLine()) {
@@ -97,15 +103,22 @@ public class Environment implements Closeable {
             }
         }
 
-        // Wait for the process to complete and capture the exit code.
         int exitCode;
         try {
             exitCode = process.waitFor();
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
-
         return new ProcessResult(exitCode, out.toString(), err.toString());
+    }
+
+    private static ProcessBuilder createProcessBuilder(String... command) {
+        // Redirect input to /dev/null so interactive prompts fail fast
+        var pb = new ProcessBuilder(command).redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")));
+        // Remove environment variables that might interfere with non-interactive operation
+        pb.environment().remove("EDITOR");
+        pb.environment().remove("VISUAL");
+        return pb;
     }
 
     /**
