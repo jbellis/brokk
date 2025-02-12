@@ -10,6 +10,8 @@ import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.treewalk.AbstractTreeIterator;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import sun.misc.Signal;
+import sun.misc.SignalHandler;
 
 import java.io.Closeable;
 import java.io.File;
@@ -85,31 +87,37 @@ public class Environment implements Closeable {
      * Runs a shell command using /bin/sh, returning {stdout, stderr}.
      */
     public ProcessResult runShellCommand(String command, IConsoleIO io) throws IOException {
-        Process process = createProcessBuilder("/bin/sh", "-c", command).start();
+        var process = createProcessBuilder("/bin/sh", "-c", command).start();
+        var sig = new Signal("INT");
+        var oldHandler = Signal.handle(sig, signal -> process.destroy());
 
-        StringBuilder out = new StringBuilder();
-        StringBuilder err = new StringBuilder();
-        try (Scanner scOut = new Scanner(process.getInputStream());
-             Scanner scErr = new Scanner(process.getErrorStream())) {
-            while (scOut.hasNextLine()) {
-                var line = scOut.nextLine();
-                io.toolOutput(line);
-                out.append(line).append("\n");
-            }
-            while (scErr.hasNextLine()) {
-                var line = scErr.nextLine();
-                io.toolError(line);
-                err.append(line).append("\n");
-            }
-        }
-
-        int exitCode;
         try {
-            exitCode = process.waitFor();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+            var out = new StringBuilder();
+            var err = new StringBuilder();
+            try (var scOut = new Scanner(process.getInputStream());
+                 var scErr = new Scanner(process.getErrorStream())) {
+                while (scOut.hasNextLine()) {
+                    var line = scOut.nextLine();
+                    io.toolOutput(line);
+                    out.append(line).append("\n");
+                }
+                while (scErr.hasNextLine()) {
+                    var line = scErr.nextLine();
+                    io.toolError(line);
+                    err.append(line).append("\n");
+                }
+            }
+
+            int exitCode;
+            try {
+                exitCode = process.waitFor();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            return new ProcessResult(exitCode, out.toString(), err.toString());
+        } finally {
+            Signal.handle(sig, oldHandler);
         }
-        return new ProcessResult(exitCode, out.toString(), err.toString());
     }
 
     private static ProcessBuilder createProcessBuilder(String... command) {
@@ -118,6 +126,7 @@ public class Environment implements Closeable {
         // Remove environment variables that might interfere with non-interactive operation
         pb.environment().remove("EDITOR");
         pb.environment().remove("VISUAL");
+        pb.environment().put("TERM", "dumb");
         return pb;
     }
 
