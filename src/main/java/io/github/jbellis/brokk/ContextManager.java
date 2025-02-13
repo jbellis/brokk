@@ -844,7 +844,7 @@ public class ContextManager implements IContextManager {
                 var source = analyzer.getMethodSource(method);
                 if (source.isDefined()) {
                     classnames.add(classname);
-                    code.append(source).append("\n\n");
+                    code.append(source.get()).append("\n\n");
                 }
             }
         }

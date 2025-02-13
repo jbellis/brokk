@@ -171,19 +171,28 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     cpg.method.fullName(resolvedMethodName + ":.*").l
   }
 
-  def getMethodSource(methodName: String): Option[String] = {
+  def resolveMethodName(methodName: String): String = {
     // Joern's lambdas do not know their parent method, they just look like this
     //   Foo.<lambda>0:java.lang.Comparable(java.lang.Object)
+    // Similarly,
     // Our workaround is to transform Java lambdas like
     //   Foo.lambda$myMethod$0
+    // or anonymous class methods like
+    //   Foo.bar.Runnable$0.run
     // into their parent method,
     //   Foo.myMethod
+    //   Foo.bar
     val javaLambdaPattern = """(.*)\.lambda\$(.*)\$.*""".r
-    val resolvedMethodName = methodName match {
+    val anonymousClassPattern = """(.*)\..*\$\d+\..*""".r
+    methodName match {
       case javaLambdaPattern(parent, method) => s"$parent.$method"
+      case anonymousClassPattern(parent) => parent
       case _ => methodName
     }
+  }
 
+  def getMethodSource(methodName: String): Option[String] = {
+    val resolvedMethodName = resolveMethodName(methodName)
     val methods = methodsFromName(resolvedMethodName)
 
     val sources = methods.flatMap { method =>
@@ -681,7 +690,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     calls
       .method
       .fullName
-      .map(_.split(":").head)
+      .map((name: String) => resolveMethodName(name.split(":").head))
       .distinct
       .l
   }
