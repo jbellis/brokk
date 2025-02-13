@@ -175,6 +175,7 @@ public class Coder {
             @Override
             public void onComplete(Response<AiMessage> response) {
                 ifNotCancelled.accept(() -> {
+                    io.llmOutput("\n");
                     var now = LocalDateTime.now().format(dtf);
                     if (response.tokenUsage() != null) {
                         writeToHistory("\n# Response %d tokens at %s\n\n%s\n".formatted(
