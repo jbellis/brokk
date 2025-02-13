@@ -23,6 +23,7 @@ public class CompleteUsageTest {
                 "a.b.Do$Re",
                 "a.b.Do$Re$Sub",  // nested inside Re
                 "x.y.Zz",
+                "w.u.Zz",
                 "test.CamelClass"
         );
 
@@ -31,6 +32,7 @@ public class CompleteUsageTest {
                 "a.b.Do$Re", List.of("a.b.Do$Re.baz"),
                 "a.b.Do$Re$Sub", List.of("a.b.Do$Re$Sub.qux"),
                 "x.y.Zz", List.of(),
+                "w.u.Zz", List.of(),
                 "test.CamelClass", List.of("test.CamelClass.someMethod")
         );
 
@@ -126,9 +128,21 @@ public class CompleteUsageTest {
         var values = toValues(completions);
         
         assertEquals(
-            Set.of("a.b.Do", "a.b.Do$Re", "a.b.Do$Re$Sub", "x.y.Zz", "test.CamelClass"),
+            Set.of("a.b.Do", "a.b.Do$Re", "a.b.Do$Re$Sub", "x.y.Zz", "w.u.Zz", "test.CamelClass"),
             values
         );
+    }
+
+    @Test
+    public void testSameShortname() {
+        var mock = new MockAnalyzer();
+        // Input "Zz" -> should match both "x.y.Zz" and "w.u.Zz"
+        var matches = ContextManager.getClassnameMatches("Zz", mock.getAllClasses());
+        assertEquals(Set.of("x.y.Zz", "w.u.Zz"), matches);
+
+        var completions = ContextManager.completeUsage("Zz", mock);
+        var values = toValues(completions);
+        assertEquals(Set.of("x.y.Zz", "w.u.Zz"), values);
     }
     
     @Test
@@ -141,15 +155,15 @@ public class CompleteUsageTest {
         );
         
         // Test simple name match
-        var matches = new HashSet<>(ContextManager.getClassnameMatches("Test", classes));
+        var matches = ContextManager.getClassnameMatches("Test", classes);
         assertEquals(Set.of("org.different.very.deep.structure.TestClass"), matches);
         
         // Test camel case match in deep hierarchy
-        matches = new HashSet<>(ContextManager.getClassnameMatches("NC", classes));
+        matches = ContextManager.getClassnameMatches("NC", classes);
         assertEquals(Set.of("org.different.very.deep.structure.nested.NestedClass"), matches);
         
         // Test exact class name match regardless of package depth
-        matches = new HashSet<>(ContextManager.getClassnameMatches("MyClass", classes));
+        matches = ContextManager.getClassnameMatches("MyClass", classes);
         assertEquals(Set.of("com.example.deep.package.hierarchy.MyClass"), matches);
     }
 

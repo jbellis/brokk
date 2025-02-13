@@ -56,47 +56,35 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
             throw new RuntimeException("Failed to initialize console: " + e.getMessage(), e);
         }
     }
-    
+
     private static void autocomplete(Collection<Command> commands,
                                      ParsedLine parsedLine,
-                                     List<Candidate> candidates) 
+                                     List<Candidate> candidates)
     {
-        String buffer = parsedLine.line();
-        
-        // Normal chat: try to complete class+member
-        if (!buffer.startsWith("/")) {
-            // find the word at cursor position
-            int cursor = parsedLine.cursor();
-            String[] words = buffer.substring(0, cursor).split("\\s+");
-            if (words.length == 0) return;
-            
-            // Get the partial word at cursor
-            String currentWord = words[words.length - 1];
-            
-            var chatCmd = commands.stream().filter(cmd -> cmd.name().equals("chat")).findFirst().get();
-            
-            // Only complete if we're at a word
-            if (!buffer.substring(0, cursor).endsWith(" ")) {
-                List<Candidate> suggestions = chatCmd.argumentCompleter().complete(currentWord);
-                candidates.addAll(suggestions);
+        String line = parsedLine.line();
+        // Non-command input: delegate to chat command completer.
+        if (!line.startsWith("/")) {
+            var chatCmd = commands.stream().filter(cmd -> "chat".equals(cmd.name())).findFirst().orElseThrow();
+            // Only complete if we're in the middle of a word.
+            if (!line.endsWith(" ")) {
+                candidates.addAll(chatCmd.argumentCompleter().complete(parsedLine.word()));
             }
             return;
         }
 
-        // parse /command into command + argument 
-        String withoutSlash = buffer.substring(1);
-        String[] parts = withoutSlash.split("\\s+", 2);
-        String cmdTyped = parts[0];
-        String partialArg = (parts.length > 1) ? parts[1] : "";
+        // Command input
+        List<String> words = parsedLine.words();
+        String cmdInput = words.get(0).startsWith("/") ? words.get(0).substring(1) : words.get(0);
 
-        var matchingCommands = commands.stream()
-                                       .filter(c -> c.name().startsWith(cmdTyped))
-                                       .toList();
-
-        // complete commands themselves
+        // Find commands matching the input.
+        List<Command> matchingCommands = commands.stream()
+                .filter(cmd -> cmd.name().startsWith(cmdInput))
+                .toList();
         if (matchingCommands.isEmpty()) {
             return;
         }
+
+        // If multiple commands match, show them as candidates.
         if (matchingCommands.size() > 1) {
             matchingCommands.forEach(mc ->
                 candidates.add(new Candidate("/" + mc.name(),
@@ -110,12 +98,11 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
             return;
         }
 
-        // Exactly one matched command => delegate to its ArgumentCompleter
+        // Exactly one command matched: delegate to its argument completer.
         var foundCmd = matchingCommands.getFirst();
-        if (parts.length == 1) {
-            partialArg = "";
-        }
-        candidates.addAll(foundCmd.argumentCompleter().complete(partialArg));
+        // If there is a second token already, use it; otherwise, use an empty string.
+        String argInput = words.size() > 1 ? parsedLine.word() : "";
+        candidates.addAll(foundCmd.argumentCompleter().complete(argInput));
     }
 
     public String getInput() {
