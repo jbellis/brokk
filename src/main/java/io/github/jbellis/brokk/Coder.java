@@ -6,7 +6,6 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.output.Response;
-import io.github.jbellis.brokk.ReflectionManager.FailedBlock;
 import io.github.jbellis.brokk.prompts.BuildPrompts;
 import io.github.jbellis.brokk.prompts.CommitPrompts;
 import io.github.jbellis.brokk.prompts.DefaultPrompts;
@@ -20,8 +19,6 @@ import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -100,7 +97,7 @@ public class Coder {
                     .toList();
 
             // Attempt to apply any code edits from the LLM
-            var failedBlocks = applyEditBlocks(blocks);
+            var failedBlocks = EditBlock.applyEditBlocks(contextManager, io, blocks);
             
             // Decide if we need a reflection pass
             var reflectionMsg = reflectionManager.getReflectionMessage(parseResult, failedBlocks, blocks, contextManager);
@@ -217,117 +214,6 @@ public class Coder {
             totalInputTokens += response.tokenUsage().inputTokenCount();
         }
         return response.content().text().trim();
-    }
-
-    /**
-     * Parse the LLM response for SEARCH/REPLACE blocks (or shell blocks, etc.) and apply them.
-     */
-    public List<FailedBlock> applyEditBlocks(Collection<EditBlock.SearchReplaceBlock> blocks) {
-        if (blocks.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        // Track which blocks succeed or fail during application
-        List<FailedBlock> failed = new ArrayList<>();
-        List<EditBlock.SearchReplaceBlock> succeeded = new ArrayList<>();
-
-        for (EditBlock.SearchReplaceBlock block : blocks) {
-            // Shell commands remain unchanged
-            if (block.shellCommand() != null) {
-                io.toolOutput("Shell command from LLM:\n" + block.shellCommand());
-                continue;
-            }
-
-            // Attempt to apply to the specified file
-            RepoFile file = block.filename() == null ? null : contextManager.toFile(block.filename());
-            boolean isCreateNew = block.beforeText().trim().isEmpty();
-
-            String finalUpdated = null;
-            if (file != null) {
-                // if the user gave a valid file name, try to apply it there first
-                try {
-                    finalUpdated = EditBlock.doReplace(file, block.beforeText(), block.afterText());
-                } catch (IOException e) {
-                    io.toolError("Failed reading/writing " + file + ": " + e.getMessage());
-                }
-            }
-
-            // Fallback: if finalUpdated is still null and 'before' is not empty, try each known file
-            if (finalUpdated == null && !isCreateNew) {
-                for (RepoFile altFile : contextManager.getEditableFiles()) {
-                    try {
-                        String updatedContent = EditBlock.doReplace(altFile.read(), block.beforeText(), block.afterText());
-                        if (updatedContent != null) {
-                            file = altFile; // Found a match
-                            finalUpdated = updatedContent;
-                            break;
-                        }
-                    } catch (IOException ignored) {
-                        // keep trying
-                    }
-                }
-            }
-            
-            // if we still haven't found a matching file, we have to give up
-            if (file == null) {
-                failed.add(new FailedBlock(block, ReflectionManager.EditBlockFailureReason.NO_MATCH));
-                continue;
-            }
-
-            if (finalUpdated == null) {
-                // "Did you mean" + "already present?" suggestions
-                String fileContent;
-                try {
-                    fileContent = file.read();
-                } catch (IOException e) {
-                    io.toolError("Could not read files: " + e.getMessage());
-                    failed.add(new FailedBlock(block, ReflectionManager.EditBlockFailureReason.IO_ERROR
-                    ));
-                    continue;
-                }
-
-                String snippet = EditBlock.findSimilarLines(block.beforeText(), fileContent, 0.6);
-                StringBuilder suggestion = new StringBuilder();
-                if (!snippet.isEmpty()) {
-                    suggestion.append("Did you mean:\n").append(snippet).append("\n");
-                }
-                if (fileContent.contains(block.afterText().trim())) {
-                    suggestion.append("Note: The replacement text is already present in the file.\n");
-                }
-
-                failed.add(new FailedBlock(
-                        block,
-                        ReflectionManager.EditBlockFailureReason.NO_MATCH,
-                        suggestion.toString()
-                ));
-            } else {
-                // Actually write the file if it changed
-                var error = false;
-                try {
-                    file.write(finalUpdated);
-                } catch (IOException e) {
-                    io.toolError("Failed writing " + file + ": " + e.getMessage());
-                    failed.add(new FailedBlock(block, ReflectionManager.EditBlockFailureReason.IO_ERROR));
-                    error = true;
-                }
-                if (!error) {
-                    succeeded.add(block);
-                    if (isCreateNew) {
-                        try {
-                            Environment.instance.gitAdd(file.toString());
-                            io.toolOutput("Added to git " + file);
-                        } catch (IOException e) {
-                            io.toolError("Failed to git add " + file + ": " + e.getMessage());
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!succeeded.isEmpty()) {
-            io.toolOutput(succeeded.size() + " SEARCH/REPLACE blocks applied.");
-        }
-        return failed;
     }
 
     /**

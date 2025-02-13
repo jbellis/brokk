@@ -14,6 +14,117 @@ import java.util.regex.Pattern;
  */
 public class EditBlock {
     /**
+     * Parse the LLM response for SEARCH/REPLACE blocks (or shell blocks, etc.) and apply them.
+     */
+    public static List<ReflectionManager.FailedBlock> applyEditBlocks(IContextManager contextManager, IConsoleIO io, Collection<SearchReplaceBlock> blocks) {
+        if (blocks.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // Track which blocks succeed or fail during application
+        List<ReflectionManager.FailedBlock> failed = new ArrayList<>();
+        List<SearchReplaceBlock> succeeded = new ArrayList<>();
+
+        for (SearchReplaceBlock block : blocks) {
+            // Shell commands remain unchanged
+            if (block.shellCommand() != null) {
+                io.toolOutput("Shell command from LLM:\n" + block.shellCommand());
+                continue;
+            }
+
+            // Attempt to apply to the specified file
+            RepoFile file = block.filename() == null ? null : contextManager.toFile(block.filename());
+            boolean isCreateNew = block.beforeText().trim().isEmpty();
+
+            String finalUpdated = null;
+            if (file != null) {
+                // if the user gave a valid file name, try to apply it there first
+                try {
+                    finalUpdated = doReplace(file, block.beforeText(), block.afterText());
+                } catch (IOException e) {
+                    io.toolError("Failed reading/writing " + file + ": " + e.getMessage());
+                }
+            }
+
+            // Fallback: if finalUpdated is still null and 'before' is not empty, try each known file
+            if (finalUpdated == null && !isCreateNew) {
+                for (RepoFile altFile : contextManager.getEditableFiles()) {
+                    try {
+                        String updatedContent = doReplace(altFile.read(), block.beforeText(), block.afterText());
+                        if (updatedContent != null) {
+                            file = altFile; // Found a match
+                            finalUpdated = updatedContent;
+                            break;
+                        }
+                    } catch (IOException ignored) {
+                        // keep trying
+                    }
+                }
+            }
+
+            // if we still haven't found a matching file, we have to give up
+            if (file == null) {
+                failed.add(new ReflectionManager.FailedBlock(block, ReflectionManager.EditBlockFailureReason.NO_MATCH));
+                continue;
+            }
+
+            if (finalUpdated == null) {
+                // "Did you mean" + "already present?" suggestions
+                String fileContent;
+                try {
+                    fileContent = file.read();
+                } catch (IOException e) {
+                    io.toolError("Could not read files: " + e.getMessage());
+                    failed.add(new ReflectionManager.FailedBlock(block, ReflectionManager.EditBlockFailureReason.IO_ERROR
+                    ));
+                    continue;
+                }
+
+                String snippet = findSimilarLines(block.beforeText(), fileContent, 0.6);
+                StringBuilder suggestion = new StringBuilder();
+                if (!snippet.isEmpty()) {
+                    suggestion.append("Did you mean:\n").append(snippet).append("\n");
+                }
+                if (fileContent.contains(block.afterText().trim())) {
+                    suggestion.append("Note: The replacement text is already present in the file.\n");
+                }
+
+                failed.add(new ReflectionManager.FailedBlock(
+                        block,
+                        ReflectionManager.EditBlockFailureReason.NO_MATCH,
+                        suggestion.toString()
+                ));
+            } else {
+                // Actually write the file if it changed
+                var error = false;
+                try {
+                    file.write(finalUpdated);
+                } catch (IOException e) {
+                    io.toolError("Failed writing " + file + ": " + e.getMessage());
+                    failed.add(new ReflectionManager.FailedBlock(block, ReflectionManager.EditBlockFailureReason.IO_ERROR));
+                    error = true;
+                }
+                if (!error) {
+                    succeeded.add(block);
+                    if (isCreateNew) {
+                        try {
+                            Environment.instance.gitAdd(file.toString());
+                            io.toolOutput("Added to git " + file);
+                        } catch (IOException e) {
+                            io.toolError("Failed to git add " + file + ": " + e.getMessage());
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!succeeded.isEmpty()) {
+            io.toolOutput(succeeded.size() + " SEARCH/REPLACE blocks applied.");
+        }
+        return failed;
+    }
+
+    /**
      * Simple record storing the parts of a search-replace block.
      * If {@code filename} is non-null, then this block corresponds to a filename’s
      * search/replace. If {@code shellCommand} is non-null, then this block

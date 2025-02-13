@@ -319,9 +319,8 @@ class EditBlockTest {
                 """;
 
         TestContextManager ctx = new TestContextManager(tempDir, Set.of("fileA.txt"));
-        Coder coder = new Coder(null, io, tempDir, ctx);
         var blocks = EditBlock.findOriginalUpdateBlocks(response, ctx.getEditableFiles()).blocks();
-        coder.applyEditBlocks(blocks);
+        EditBlock.applyEditBlocks(ctx, io, blocks);
 
         // existing filename
         String actualA = Files.readString(existingFile);
@@ -353,9 +352,8 @@ class EditBlockTest {
                 """;
 
         TestContextManager ctx = new TestContextManager(tempDir, Set.of("fileA.txt"));
-        Coder coder = new Coder(null, io, tempDir, ctx);
         var blocks = EditBlock.findOriginalUpdateBlocks(response, ctx.getEditableFiles()).blocks();
-        var failed = coder.applyEditBlocks(blocks);
+        var failed = EditBlock.applyEditBlocks(ctx, io, blocks);
 
         assertNotEquals(List.of(), failed);
     }
@@ -474,9 +472,8 @@ class EditBlockTest {
         // Expect an exception about missing filename
         TestConsoleIO io = new TestConsoleIO();
         TestContextManager ctx = new TestContextManager(tempDir, Set.of());
-        Coder coder = new Coder(null, io, tempDir, ctx);
         var blocks = EditBlock.findOriginalUpdateBlocks(edit, ctx.getEditableFiles()).blocks();
-        var failed = coder.applyEditBlocks(blocks);
+        var failed = EditBlock.applyEditBlocks(ctx, io, blocks);;
         assertNotEquals(List.of(), failed);
     }
 
@@ -570,9 +567,8 @@ class EditBlockTest {
             """;
 
         TestContextManager ctx = new TestContextManager(tempDir, Set.of("fileA.txt"));
-        Coder coder = new Coder(null, io, tempDir, ctx);
         var blocks = EditBlock.findOriginalUpdateBlocks(response, ctx.getEditableFiles()).blocks();
-        var failed = coder.applyEditBlocks(blocks);
+        var failed = EditBlock.applyEditBlocks(ctx, io, blocks);;
         assertNotEquals(List.of(), failed);
     }
 
