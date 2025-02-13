@@ -208,11 +208,17 @@ public class Coder {
         return currentResponse.toString();
     }
 
+    /** currently hardcoded to quick model */
     public String sendMessage(List<ChatMessage> messages) {
         var response = models.quickModel().generate(messages);
         if (response.tokenUsage() != null) {
+            totalLinesOfCode += messages.stream()
+                    .mapToInt(m -> ContextManager.getText(m).split("\n", -1).length).sum();
             totalInputTokens += response.tokenUsage().inputTokenCount();
         }
+        contextManager.moveToHistory(messages);
+        contextManager.moveToHistory(List.of(response.content()));
+
         return response.content().text().trim();
     }
 
@@ -220,18 +226,12 @@ public class Coder {
      * Summarize changes in a single line for ContextManager
      */
     public String summarizeOneline(String request) {
-        int lineCount = request.split("\n", -1).length;
         var messages = List.of(
                 new UserMessage("Please summarize these changes in a single line:"),
                 new AiMessage("Ok, let's see them."),
                 new UserMessage(request)
         );
-        var response = models.quickModel().generate(messages);
-        if (response.tokenUsage() != null) {
-            totalInputTokens += response.tokenUsage().inputTokenCount();
-            totalLinesOfCode += lineCount;
-        }
-        return response.content().text().trim();
+        return sendMessage(messages);
     }
 
     /**
@@ -239,8 +239,7 @@ public class Coder {
      */
     public String getCommitMessage() {
         var messages = CommitPrompts.instance.collectMessages((ContextManager) contextManager);
-        var response = models.quickModel().generate(messages);
-        return response.content().text().trim();
+        return sendMessage(messages);
     }
 
     /**
@@ -248,14 +247,14 @@ public class Coder {
      */
     public boolean isBuildProgressing(List<String> buildResults) {
         var messages = BuildPrompts.instance.collectMessages(buildResults);
-        String response = models.quickModel().generate(messages).content().text().trim();
+        var response = sendMessage(messages);
         
         // Keep trying until we get one of our expected tokens
         while (!response.contains("BROKK_PROGRESSING") && !response.contains("BROKK_FLOUNDERING")) {
             messages = new ArrayList<>(messages);
             messages.add(new AiMessage(response));
             messages.add(new UserMessage("Please indicate either BROKK_PROGRESSING or BROKK_FLOUNDERING."));
-            response = models.quickModel().generate(messages).content().text().trim();
+            response = sendMessage(messages);
         }
         
         return response.contains("BROKK_PROGRESSING");
