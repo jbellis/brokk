@@ -9,11 +9,11 @@ import io.github.jbellis.brokk.ContextFragment.PathFragment;
 import io.github.jbellis.brokk.ContextFragment.VirtualFragment;
 import io.github.jbellis.brokk.prompts.ArchitectPrompts;
 import io.github.jbellis.brokk.prompts.AskPrompts;
+import io.github.jbellis.brokk.prompts.CommitPrompts;
 import io.github.jbellis.brokk.prompts.PreparePrompts;
 import org.jetbrains.annotations.NotNull;
 import org.jline.reader.Candidate;
 import org.msgpack.core.annotations.VisibleForTesting;
-import scala.Option;
 
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
@@ -767,26 +767,27 @@ public class ContextManager implements IContextManager {
     }
 
     private OperationResult cmdCommit() {
-        String message = coder.getCommitMessage();
+        var messages = CommitPrompts.instance.collectMessages((ContextManager) coder.contextManager);
+        String commitMsg = coder.sendMessage(messages);
 
-        if (message.isEmpty()) {
+        if (commitMsg.isEmpty()) {
             return OperationResult.error("nothing to commit");
         }
 
         // Show the message and ask for confirmation
-        io.toolOutput("Commit message:\n" + message);
+        io.toolOutput("Commit message:\n" + commitMsg);
         if (!io.confirmAsk("Use this commit message?")) {
             return OperationResult.success("Commit cancelled");
         }
 
         // Commit with the message 
         try {
-            Environment.instance.gitCommit(message);
+            Environment.instance.gitCommit(commitMsg);
         } catch (IOException e) {
             return OperationResult.error("Unable to commit: " + e.getMessage());
         }
 
-        return OperationResult.success("Changes committed with message: " + message);
+        return OperationResult.success("Changes committed with message: " + commitMsg);
     }
 
     private OperationResult cmdRefresh(Analyzer analyzer) {
@@ -929,7 +930,14 @@ public class ContextManager implements IContextManager {
         }
 
         // Submit summarization task
-        var summaryFuture = backgroundTasks.submit(() -> coder.summarizeOneline(pastedContent));
+        var summaryFuture = backgroundTasks.submit(() -> {
+            var messages = List.of(
+                    new UserMessage("Please summarize these changes in a single line:"),
+                    new AiMessage("Ok, let's see them."),
+                    new UserMessage(pastedContent)
+            );
+            return coder.sendMessage(messages);
+        });
 
         pushContext();
         currentContext = currentContext.addPasteFragment(pastedContent, summaryFuture);

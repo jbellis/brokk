@@ -6,8 +6,6 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.output.Response;
-import io.github.jbellis.brokk.prompts.BuildPrompts;
-import io.github.jbellis.brokk.prompts.CommitPrompts;
 import io.github.jbellis.brokk.prompts.DefaultPrompts;
 import sun.misc.Signal;
 import sun.misc.SignalHandler;
@@ -133,12 +131,7 @@ public class Coder {
                 .mapToInt(m -> ContextManager.getText(m).split("\n", -1).length).sum();
 
         io.toolOutput("LLM request sent");
-        // Write request
-        String requestText = messages.stream()
-                .map(m -> "%s: %s\n".formatted(m.type(), ContextManager.getText(m)))
-                .reduce((a, b) -> a + "\n" + b)
-                .orElse("");
-        writeToHistory("# Request " + LocalDateTime.now().format(dtf) + "\n\n" + requestText + "\n");
+        writeRequestToHistory(messages);
 
         StringBuilder currentResponse = new StringBuilder();
         var latch = new CountDownLatch(1);
@@ -172,10 +165,8 @@ public class Coder {
             public void onComplete(Response<AiMessage> response) {
                 ifNotCancelled.accept(() -> {
                     io.llmOutput("\n");
-                    var now = LocalDateTime.now().format(dtf);
+                    writeToHistory("Response", currentResponse.toString());
                     if (response.tokenUsage() != null) {
-                        writeToHistory("\n# Response %d tokens at %s\n\n%s\n".formatted(
-                                response.tokenUsage().outputTokenCount(), now, currentResponse));
                         totalInputTokens += response.tokenUsage().inputTokenCount();
                         totalLinesOfCode += userLineCount;
                     }
@@ -186,8 +177,7 @@ public class Coder {
             @Override
             public void onError(Throwable error) {
                 ifNotCancelled.accept(() -> {
-                    writeToHistory("\n# Response " + LocalDateTime.now().format(dtf)
-                                           + "\n\n" + "Error: " + error.getMessage() + "\n");
+                    writeToHistory("Error", error.getMessage());
                     io.toolErrorRaw("LLM error: " + error.getMessage());
                     streamThread.interrupt();
                 });
@@ -210,7 +200,17 @@ public class Coder {
 
     /** currently hardcoded to quick model */
     public String sendMessage(List<ChatMessage> messages) {
-        var response = models.quickModel().generate(messages);
+        io.toolOutput("LLM request sent");
+        writeRequestToHistory(messages);
+        Response<AiMessage> response;
+        try {
+            response = models.quickModel().generate(messages);
+        } catch (Throwable th) {
+            writeToHistory("Error", th.getMessage());
+            return "";
+        }
+
+        writeToHistory("Response", response.toString());
         if (response.tokenUsage() != null) {
             totalLinesOfCode += messages.stream()
                     .mapToInt(m -> ContextManager.getText(m).split("\n", -1).length).sum();
@@ -223,44 +223,6 @@ public class Coder {
     }
 
     /**
-     * Summarize changes in a single line for ContextManager
-     */
-    public String summarizeOneline(String request) {
-        var messages = List.of(
-                new UserMessage("Please summarize these changes in a single line:"),
-                new AiMessage("Ok, let's see them."),
-                new UserMessage(request)
-        );
-        return sendMessage(messages);
-    }
-
-    /**
-     * A helper for generating a commit message from a chunk of context (the changes).
-     */
-    public String getCommitMessage() {
-        var messages = CommitPrompts.instance.collectMessages((ContextManager) contextManager);
-        return sendMessage(messages);
-    }
-
-    /**
-     * Helper to get a quick response from the LLM without streaming
-     */
-    public boolean isBuildProgressing(List<String> buildResults) {
-        var messages = BuildPrompts.instance.collectMessages(buildResults);
-        var response = sendMessage(messages);
-        
-        // Keep trying until we get one of our expected tokens
-        while (!response.contains("BROKK_PROGRESSING") && !response.contains("BROKK_FLOUNDERING")) {
-            messages = new ArrayList<>(messages);
-            messages.add(new AiMessage(response));
-            messages.add(new UserMessage("Please indicate either BROKK_PROGRESSING or BROKK_FLOUNDERING."));
-            response = sendMessage(messages);
-        }
-        
-        return response.contains("BROKK_PROGRESSING");
-    }
-
-    /**
      * Approximate tokens for N lines of code, based on observed ratio so far.
      * If we haven't measured enough yet, returns null.
      */
@@ -270,10 +232,20 @@ public class Coder {
         return (int)Math.round(ratio * linesOfCode);
     }
 
-    private void writeToHistory(String text) {
+    private void writeRequestToHistory(List<ChatMessage> messages) {
+        String requestText = messages.stream()
+                .map(m -> "%s: %s\n".formatted(m.type(), ContextManager.getText(m)))
+                .reduce((a, b) -> a + "\n" + b)
+                .orElse("");
+        writeToHistory("Request", requestText);
+    }
+
+    private void writeToHistory(String header, String text) {
+        var formatted = "\n# %s at %s\n\n%s\n".formatted(header, LocalDateTime.now().format(dtf), text);
+
         try {
             Files.createDirectories(historyFile.getParent());
-            Files.writeString(historyFile, text, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            Files.writeString(historyFile, formatted, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
             io.toolErrorRaw("Failed to write to history: " + e.getMessage());
         }

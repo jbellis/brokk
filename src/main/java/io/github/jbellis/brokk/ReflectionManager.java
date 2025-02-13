@@ -1,5 +1,9 @@
 package io.github.jbellis.brokk;
 
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.UserMessage;
+import io.github.jbellis.brokk.prompts.BuildPrompts;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -98,7 +102,7 @@ class ReflectionManager {
         
         // For build errors, check if we're making progress
         if (buildErrors.size() > 1) {
-            if (coder.isBuildProgressing(buildErrors)) {
+            if (isBuildProgressing(buildErrors)) {
                 return true;
             }
             io.toolOutput("Build errors are not improving, stopping.");
@@ -107,6 +111,25 @@ class ReflectionManager {
         
         return true;
     }
+
+    /**
+     * Helper to get a quick response from the LLM without streaming
+     */
+    public boolean isBuildProgressing(List<String> buildResults) {
+        var messages = BuildPrompts.instance.collectMessages(buildResults);
+        var response = coder.sendMessage(messages);
+
+        // Keep trying until we get one of our expected tokens
+        while (!response.contains("BROKK_PROGRESSING") && !response.contains("BROKK_FLOUNDERING")) {
+            messages = new ArrayList<>(messages);
+            messages.add(new AiMessage(response));
+            messages.add(new UserMessage("Please indicate either BROKK_PROGRESSING or BROKK_FLOUNDERING."));
+            response = coder.sendMessage(messages);
+        }
+
+        return response.contains("BROKK_PROGRESSING");
+    }
+
 
     private void incrementParseErrors() {
         parseErrorAttempts++;
