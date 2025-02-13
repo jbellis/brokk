@@ -70,18 +70,17 @@ class AnalyzerTest {
   }
 
   @Test
-  def getSkeletonTest(): Unit = {
-    val analyzer = getAnalyzer
-    val skeleton = analyzer.getSkeleton("A").get
+  def getSkeletonTestA(): Unit = {
+    val skeleton = getAnalyzer.getSkeleton("A").get
     // https://github.com/joernio/joern/issues/5297
 //    val expected =
-//      """public class A {
+//      """class A {
 //        |  public void method1() {...}
 //        |  public String method2(String input) {...}
 //        |  public Function<Integer, Integer> method3() {...}
 //        |}""".stripMargin
     val expected =
-      """public class A {
+      """class A {
         |  public void method1() {...}
         |  public String method2(String input) {...}
         |  public String method2(String input, int otherInput) {...}
@@ -92,11 +91,23 @@ class AnalyzerTest {
   }
 
   @Test
-  def getSkeletonHeaderTest(): Unit = {
-    val analyzer = getAnalyzer
-    val skeleton = analyzer.skeletonHeader("D").get
+  def getSkeletonTestD(): Unit = {
+    val skeleton = getAnalyzer.getSkeleton("D").get
     val expected =
-      """public class D {
+      """class D {
+        |  private int field1;
+        |  private String field2;
+        |  public void methodD1() {...}
+        |  public void methodD2() {...}
+        |}""".stripMargin
+    assertEquals(expected, skeleton)
+  }
+
+  @Test
+  def getGetSkeletonHeaderTest(): Unit = {
+    val skeleton = getAnalyzer.getSkeletonHeader("D").get
+    val expected =
+      """class D {
         |  private int field1;
         |  private String field2;
         |  [... methods not shown ...]

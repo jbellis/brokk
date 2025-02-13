@@ -13,6 +13,7 @@ import io.github.jbellis.brokk.prompts.PreparePrompts;
 import org.jetbrains.annotations.NotNull;
 import org.jline.reader.Candidate;
 import org.msgpack.core.annotations.VisibleForTesting;
+import scala.Option;
 
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
@@ -851,14 +852,14 @@ public class ContextManager implements IContextManager {
         if (!uses.getTypeUses().isEmpty()) {
             code.append("Type uses:\n\n");
             for (String className : uses.getTypeUses()) {
-                try {
-                    code.append(analyzer.skeletonHeader(className)).append("\n");
-                    classnames.add(className);
-                } catch (IllegalArgumentException e) {
+                var skeletonHeader = analyzer.getSkeletonHeader(className);
+                if (skeletonHeader.isEmpty()) {
                     // TODO can we do better than just skipping anonymous classes that Analyzer doesn't know how to skeletonize?
                     // io.github.jbellis.brokk.Coder.sendMessage.StreamingResponseHandler$0.<init>' not found
                     continue;
                 }
+                code.append(skeletonHeader.get()).append("\n");
+                classnames.add(className);
             }
         }
 

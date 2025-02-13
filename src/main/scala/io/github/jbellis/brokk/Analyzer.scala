@@ -257,18 +257,15 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     "synchronized" -> "synchronized"
   )
 
-  private[brokk] def outlineTypeDecl(td: TypeDecl, lines: IndexedSeq[String], indent: Int = 0): String = {
+  private def outlineTypeDecl(td: TypeDecl, indent: Int = 0): String = {
     val sb = new StringBuilder
-
-    def indentStr(level: Int) = "  " * level
 
     val className = sanitizeType(td.name)
 
-    sb.append(indentStr(indent))
-      .append("public class ")
-      .append(className)
-      .append(" {\n")
+    // class signature + fields
+    sb.append(headerString(td, indent))
 
+    // methods
     td.method.foreach { m =>
       val name = m.name
       if (!name.startsWith("<")) {
@@ -282,6 +279,8 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     sb.toString
   }
 
+  def indentStr(level: Int) = "  " * level
+
   /**
    * Builds a structural skeleton for a given class by name (simple or FQCN),
    * or None if the class is not found (bug in Joern).
@@ -292,17 +291,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
       return None // TODO log?
     }
     val td = decls.head
-    val rootDir = cpg.metaData.root.head
-    val file = new File(rootDir, td.filename).getAbsoluteFile
-
-    if (!file.exists()) {
-      None // TODO log?
-    } else {
-      Using(Source.fromFile(file)) { source =>
-        val lines = source.getLines().toIndexedSeq
-        outlineTypeDecl(td, lines)
-      }.toOption
-    }
+    Some(outlineTypeDecl(td))
   }
 
   /**
@@ -566,40 +555,36 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
   /**
    * Returns just the class signature and field declarations, without method details.
    */
-  def skeletonHeader(className: String): Option[String] = {
+  def getSkeletonHeader(className: String): Option[String] = {
     val decls = cpg.typeDecl.fullNameExact(className).l
     if (decls.isEmpty) {
-      throw new IllegalArgumentException(s"'$className' not found")
+      return None
     }
     val td = decls.head
-    val rootDir = cpg.metaData.root.head
-    val file = new File(rootDir, td.filename).getAbsoluteFile
+    Some(headerString(td, 0)  + "  [... methods not shown ...]\n}")
+  }
 
-    if (!file.exists()) {
-      None
-    } else {
-      Some {
-        val sb = new StringBuilder
-        val className = sanitizeType(td.name)
+  // does not include closing brace
+  private def headerString(td: TypeDecl, indent: Int): String = {
+    val sb = new StringBuilder
+    val className = sanitizeType(td.name)
 
-        sb.append("public class ")
-          .append(className)
-          .append(" {\n")
+    // I think it's okay to leave visibility out at the class level
+    sb.append(indentStr(indent))
+      .append("class ")
+      .append(className)
+      .append(" {\n")
 
-        // Add fields
-        td.member.foreach { m =>
-          val modifiers = m.modifier.map(_.modifierType.toLowerCase).filter(_.nonEmpty).mkString(" ")
-          val modString = if (modifiers.nonEmpty) modifiers + " " else ""
-          val typeName = sanitizeType(m.typeFullName)
-          sb.append("  ")
-            .append(s"$modString$typeName ${m.name};\n")
-        }
-
-        sb.append("  [... methods not shown ...]\n")
-        sb.append("}")
-        sb.toString
-      }
+    // Add fields
+    td.member.foreach { m =>
+      val modifiers = m.modifier.map(_.modifierType.toLowerCase).filter(_.nonEmpty).mkString(" ")
+      val modString = if (modifiers.nonEmpty) modifiers + " " else ""
+      val typeName = sanitizeType(m.typeFullName)
+      sb.append(indentStr(indent + 1))
+        .append(s"$modString$typeName ${m.name};\n")
     }
+
+    sb.toString
   }
 
   def getMembersInClass(className: String): java.util.List[String] = {
