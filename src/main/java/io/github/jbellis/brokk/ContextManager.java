@@ -146,7 +146,7 @@ public class ContextManager implements IContextManager {
                         "drop",
                         "Drop files from chat (all if no args)",
                         this::cmdDrop,
-                        "<files>",
+                        "<files>|<fragment>",
                         this::completeDrop
                 ),
                 new Command(
