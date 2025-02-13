@@ -2,33 +2,26 @@ package io.github.jbellis.brokk;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
-import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
-import org.eclipse.jgit.treewalk.AbstractTreeIterator;
-import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.treewalk.filter.PathFilter;
+import org.eclipse.jgit.treewalk.filter.PathFilterGroup;
 import sun.misc.Signal;
-import sun.misc.SignalHandler;
 
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Scanner;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class Environment implements Closeable {
@@ -260,92 +253,57 @@ public class Environment implements Closeable {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Returns a string containing both staged and working directory changes (git diff HEAD)
-     */
     public String gitDiff() {
-        try {
-            StringBuilder result = new StringBuilder();
-            
-            // Get staged changes (HEAD vs index)
-            String stagedDiff = git.diff()
-                    .setShowNameAndStatusOnly(false)
-                    .setCached(true)
-                    .call()
-                    .stream()
-                    .map(Object::toString)
-                    .collect(Collectors.joining("\n"));
-            result.append(stagedDiff);
-            
-            // Get unstaged changes (index vs working tree)
-            String unstagedDiff = git.diff()
-                    .setShowNameAndStatusOnly(false)
-                    .setCached(false)
-                    .call()
-                    .stream()
-                    .map(Object::toString)
-                    .collect(Collectors.joining("\n"));
-            
-            if (!stagedDiff.isEmpty() && !unstagedDiff.isEmpty()) {
-                result.append("\n");
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+
+            // Gather tracked files only
+            var status = git.status().call();
+            var trackedPaths = new HashSet<String>();
+            trackedPaths.addAll(status.getModified());
+            trackedPaths.addAll(status.getChanged());
+            trackedPaths.addAll(status.getAdded());
+            trackedPaths.addAll(status.getRemoved());
+            trackedPaths.addAll(status.getMissing());
+
+            // Convert the tracked path strings into a TreeFilter
+            var filters = new ArrayList<PathFilter>();
+            for (String path : trackedPaths) {
+                filters.add(PathFilter.create(path));
             }
-            result.append(unstagedDiff);
-            
-            return result.toString();
-        } catch (GitAPIException e) {
+            var filterGroup = PathFilterGroup.create(filters);
+
+            // 1) Staged changes (HEAD vs index)
+            git.diff()
+                    .setCached(true)
+                    .setShowNameAndStatusOnly(false)
+                    .setPathFilter(filterGroup)
+                    .setOutputStream(out)
+                    .call();
+
+            String staged = out.toString(StandardCharsets.UTF_8);
+            out.reset();
+
+            // 2) Unstaged changes (index vs working tree)
+            git.diff()
+                    .setCached(false)
+                    .setShowNameAndStatusOnly(false)
+                    .setPathFilter(filterGroup)
+                    .setOutputStream(out)
+                    .call();
+
+            String unstaged = out.toString(StandardCharsets.UTF_8);
+
+            // Combine with a blank line in between if both are non-empty
+            if (!staged.isEmpty() && !unstaged.isEmpty()) {
+                return staged + "\n" + unstaged;
+            }
+            return staged + unstaged;
+
+        } catch (IOException | GitAPIException e) {
             throw new UncheckedIOException(new IOException(e));
         }
     }
 
-    /**
-     * Returns a list of filenames changed in the given commit
-     */
-    public List<String> getCommitFiles(String commitRef) {
-        try {
-            var commitId = repository.resolve(commitRef);
-            if (commitId == null) {
-                throw new IllegalArgumentException("Invalid commit reference: " + commitRef);
-            }
-
-            try (var revWalk = new RevWalk(repository)) {
-                var commit = revWalk.parseCommit(commitId);
-                if (commit.getParentCount() > 0) {
-                    var parent = commit.getParent(0);
-                    revWalk.parseCommit(parent);
-
-                    var diffCommand = git.diff()
-                            .setOldTree(prepareTreeParser(parent))
-                            .setNewTree(prepareTreeParser(commit));
-                    return diffCommand.call().stream()
-                                .map(DiffEntry::getNewPath)
-                                .collect(Collectors.toList());
-                } else {
-                    // First commit - get all files
-                    try (var treeWalk = new TreeWalk(repository)) {
-                        treeWalk.addTree(commit.getTree());
-                        treeWalk.setRecursive(true);
-                        var files = new ArrayList<String>();
-                        while (treeWalk.next()) {
-                            files.add(treeWalk.getPathString());
-                        }
-                        return files;
-                    }
-                }
-            }
-        } catch (IOException | GitAPIException e) {
-            throw new UncheckedIOException(new IOException("Failed to get files for commit " + commitRef, e));
-        }
-    }
-
-    private AbstractTreeIterator prepareTreeParser(RevCommit commit) throws IOException {
-        try (var treeWalk = new TreeWalk(repository)) {
-            treeWalk.addTree(commit.getTree());
-            treeWalk.setRecursive(true);
-            var canonicalTreeParser = new CanonicalTreeParser();
-            canonicalTreeParser.reset(repository.newObjectReader(), commit.getTree());
-            return canonicalTreeParser;
-        }
-    }
 
     public Path getRoot() {
         return root;
