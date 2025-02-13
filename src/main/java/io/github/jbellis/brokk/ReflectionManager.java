@@ -85,15 +85,24 @@ class ReflectionManager {
         return runBuild(cm);
     }
 
+    // responsible for outputting the reason we stopped
     public boolean shouldContinue() {
         // If we have parse errors, limit to 3 attempts
         if (parseErrorAttempts > 0) {
-            return parseErrorAttempts < MAX_PARSE_ATTEMPTS;
+            if (parseErrorAttempts < MAX_PARSE_ATTEMPTS) {
+                return true;
+            }
+            io.toolOutput("Parse retry limit reached, stopping.");
+            return false;
         }
         
         // For build errors, check if we're making progress
         if (buildErrors.size() > 1) {
-            return coder.isBuildProgressing(buildErrors);
+            if (coder.isBuildProgressing(buildErrors)) {
+                return true;
+            }
+            io.toolOutput("Build errors are not improving, stopping.");
+            return false;
         }
         
         return true;

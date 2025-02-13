@@ -113,7 +113,6 @@ public class Coder {
             // If the reflection manager has also signaled "stop" (maybe user said no),
             // or we've reached reflectionManager's maximum tries:
             if (!reflectionManager.shouldContinue()) {
-                io.toolOutput("Reflection limit reached; stopping.\n");
                 break;
             }
 
