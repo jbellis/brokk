@@ -3,6 +3,10 @@ package io.github.jbellis.brokk;
 import io.github.jbellis.brokk.ContextManager.OperationResult;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Properties;
@@ -78,10 +82,32 @@ public class Brokk {
         io.toolOutput("Quick model: " + models.quickModelName());
         io.toolOutput("Git repo found at %s with %d files".formatted(sourceRoot, ContextManager.getTrackedFiles().size()));
         io.toolOutput("Brokk %s initialized".formatted(version));
+        maybeShowMotd();
 
         // kick off repl
         contextManager.show();
         runLoop();
+    }
+
+    private static void maybeShowMotd() {
+        Path configDir = Path.of(System.getProperty("user.home"), ".config", "brokk");
+        if (configDir.toFile().exists()) {
+            return;
+        }
+
+        try {
+            Files.createDirectories(configDir);
+            // Show welcome message
+            try (var welcomeStream = Brokk.class.getResourceAsStream("/WELCOME.md")) {
+                if (welcomeStream != null) {
+                    String welcome = new String(welcomeStream.readAllBytes(), StandardCharsets.UTF_8);
+                    io.toolOutput("\n" + welcome);
+                    io.toolOutput("-".repeat(io.getTerminalWidth()));
+                }
+            }
+        } catch (IOException e) {
+            io.toolError("Failed to create config directory: " + e.getMessage());
+        }
     }
 
     /**
