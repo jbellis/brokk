@@ -13,8 +13,6 @@ import java.util.regex.Pattern;
  * Utility for extracting and applying before/after search-replace blocks in content
  */
 public class EditBlock {
-    private static final double FUZZY_THRESHOLD = 0.6;
-
     /**
      * Simple record storing the parts of a search-replace block.
      * If {@code filename} is non-null, then this block corresponds to a filename’s
@@ -188,6 +186,7 @@ public class EditBlock {
 
     /**
      * Attempts perfect/whitespace replacements, then tries "...", then fuzzy.
+     * Returns null if no match found.
      */
     static String replaceMostSimilarChunk(String whole, String part, String replace) {
         // 1) prep for line-based matching
@@ -240,15 +239,12 @@ public class EditBlock {
             if (attempt != null) {
                 return attempt;
             }
+
             // try triple-dot expansions on the spliced block if needed.
-            attempt = tryDotdotdots(whole, String.join("", splicedPart), String.join("", splicedReplace));
-            if (attempt != null) {
-                return attempt;
-            }
+            return tryDotdotdots(whole, String.join("", splicedPart), String.join("", splicedReplace));
         }
 
-        // 5) fuzzy approach
-        return replaceClosestEditDistance(wholeCL.lines, partCL.lines, replaceCL.lines);
+        return null;
     }
 
     /** Counts how many leading lines in 'lines' are completely blank (trim().isEmpty()). */
@@ -462,106 +458,6 @@ public class EditBlock {
 
         String stripped = line.stripLeading();
         return " ".repeat(newCount) + stripped;
-    }
-
-    /**
-     * Fallback fuzzy approach with optimized checks to skip unnecessary LCS calls.
-     */
-    static String replaceClosestEditDistance(String[] wholeLines,
-                                             String[] partLines,
-                                             String[] replaceLines) {
-        // Quick re-try perfect/whitespace
-        String attempt = perfectOrWhitespace(wholeLines, partLines, replaceLines);
-        if (attempt != null) {
-            return attempt;
-        }
-
-        // Trim leading blank lines from part & replace, so we
-        // don't insert that extra blank line in the fuzzy approach.
-        int pIndex = 0;
-        while (pIndex < partLines.length && partLines[pIndex].trim().isEmpty()) {
-            pIndex++;
-        }
-        int rIndex = 0;
-        while (rIndex < replaceLines.length && replaceLines[rIndex].trim().isEmpty()) {
-            rIndex++;
-        }
-        String[] truncatedPart = Arrays.copyOfRange(partLines, pIndex, partLines.length);
-        String[] truncatedReplace = Arrays.copyOfRange(replaceLines, rIndex, replaceLines.length);
-        if (truncatedPart.length == 0) {
-            // no real lines to match, just return null
-            return null;
-        }
-
-        // We'll do a prefix array for the content lines so we can build chunk strings quickly
-        String[] prefixWhole = new String[wholeLines.length + 1];
-        prefixWhole[0] = "";
-        for (int i = 0; i < wholeLines.length; i++) {
-            prefixWhole[i + 1] = prefixWhole[i] + wholeLines[i];
-        }
-
-        // Pre-join the truncatedPart once
-        String joinedPart = String.join("", truncatedPart);
-
-        // Find the best fuzzy match in wholeLines vs truncatedPart
-        double bestSim = 0.0;
-        int bestStart = -1;
-        int bestLen = -1;
-
-        // near ~size of truncatedPart
-        int baseLen = truncatedPart.length;
-        int minLen = Math.max(1, (int) Math.floor(baseLen * 0.9));
-        int maxLen = Math.min(wholeLines.length, (int) Math.ceil(baseLen * 1.1));
-
-        for (int length = minLen; length <= maxLen; length++) {
-            for (int start = 0; start + length <= wholeLines.length; start++) {
-                // Get the chunk from prefix
-                String chunk = prefixWhole[start + length].substring(prefixWhole[start].length());
-
-                // Early skip if max possible ratio can’t exceed bestSim
-                // Max possible LCS == min(chunk.length(), joinedPart.length())
-                int aLen = chunk.length();
-                int bLen = joinedPart.length();
-                int minLenAB = Math.min(aLen, bLen);
-                double maxPossibleRatio = (2.0 * minLenAB) / (aLen + bLen);
-                if (maxPossibleRatio <= bestSim) {
-                    continue;
-                }
-
-                double sim = sequenceMatcherRatio(chunk, joinedPart);
-                if (sim > bestSim) {
-                    bestSim = sim;
-                    bestStart = start;
-                    bestLen = length;
-                }
-            }
-        }
-
-        // If best match is below threshold, no replacement
-        if (bestSim < FUZZY_THRESHOLD || bestStart < 0) {
-            return null;
-        }
-
-        // Build new file with reindentation
-        List<String> newFile = new ArrayList<>(Arrays.asList(wholeLines).subList(0, bestStart));
-        // Indent replacement lines to match the region we are overwriting
-        int linesToIndent = Math.min(bestLen, truncatedPart.length);
-        for (int i = 0; i < truncatedReplace.length; i++) {
-            if (i < linesToIndent) {
-                int chunkLeading = countLeadingSpaces(wholeLines[bestStart + i]);
-                int partLeading  = countLeadingSpaces(truncatedPart[i]);
-                int delta = partLeading - chunkLeading;
-                newFile.add(adjustIndentation(truncatedReplace[i], delta));
-            } else {
-                // If the replacement is longer, we can keep the same indent as the last matched line
-                int lastIndent = (linesToIndent > 0)
-                        ? countLeadingSpaces(wholeLines[bestStart + linesToIndent - 1])
-                        : 0;
-                newFile.add(adjustIndentation(truncatedReplace[i], -lastIndent));
-            }
-        }
-        newFile.addAll(Arrays.asList(wholeLines).subList(bestStart + bestLen, wholeLines.length));
-        return String.join("", newFile);
     }
 
     /**

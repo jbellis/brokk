@@ -265,35 +265,6 @@ class EditBlockTest {
     }
 
     @Test
-    void testReplaceByDiffClosestChunk() {
-        String original = """
-                AAA
-                BBB
-                CCC
-                DDD
-                """;
-        // We'll intentionally mismatch so there's no direct line-for-line match
-        String search = """
-                AAx
-                BBx
-                """;
-        String replace = """
-                AAx-repl
-                BBx-repl
-                """;
-
-        String expected = """
-                AAx-repl
-                BBx-repl
-                CCC
-                DDD
-                """;
-
-        String updated = fuzzyReplace(original, search, replace);
-        assertEquals(expected, updated);
-    }
-
-    @Test
     void testReplaceFirstOccurrenceOnly() {
         String original = """
                 line1
@@ -335,7 +306,7 @@ class EditBlockTest {
         String response = """
                 fileA.txt
                 <<<<<<< SEARCH
-                Original
+                Original text
                 =======
                 Updated
                 >>>>>>> REPLACE
@@ -580,41 +551,6 @@ class EditBlockTest {
         String updated = fuzzyReplace(original, search, replace);
         // We expect no change
         assertEquals(original, updated);
-    }
-
-    /**
-     * Test that if the "beforeText" lines do not appear at all, but there's no fuzzy fallback
-     * => it tries the chunk approach, or ends up returning original with the chunk replaced at best match.
-     * We'll check the best-chunk logic.
-     */
-    @Test
-    void testFuzzyNoExactMatchButStillReplacesClosestChunk() {
-        String original = """
-                AAA
-                BBB
-                CCC
-                DDD
-                """;
-        // Let's pick a beforeText that somewhat resembles "BBB\nCCC\n" but not exactly:
-        String search = """
-                BBX
-                CCX
-                """;
-        // We'll afterText it with "BB-CHANGED\nCC-CHANGED"
-        String replace = """
-                BB-CHANGED
-                CC-CHANGED
-                """;
-
-        // The code should latch onto lines 2+3 (BBB,CCC) as the "closest chunk"
-        String updated = EditBlock.doReplace(original, search, replace);
-        String expected = """
-                AAA
-                BB-CHANGED
-                CC-CHANGED
-                DDD
-                """;
-        assertEquals(expected, updated);
     }
 
     @Test
