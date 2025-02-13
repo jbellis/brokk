@@ -2,6 +2,7 @@ package io.github.jbellis.brokk;
 
 import com.google.common.collect.Streams;
 import io.github.jbellis.brokk.ContextFragment.StacktraceFragment;
+import scala.Tuple2;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -222,30 +223,29 @@ public class Context {
 
         // build skeleton lines
         var skeletons = new ArrayList<String>();
-        Set<String> fullNames = new HashSet<>();
+        Set<String> fqNames = new HashSet<>();
         List<String> shortNames = new ArrayList<>();
-        pagerankResults.forEach(pair -> {
+        for (var pair : pagerankResults) {
             String fullName = pair._1;
-            fullNames.add(fullName);
-            String shortName = fullName.substring(fullName.lastIndexOf('.') + 1);
             if (analyzer.classInProject(fullName)) {
+                fqNames.add(fullName);
                 var opt = analyzer.getSkeleton(fullName);
                 if (opt.isDefined()) {
+                    String shortName = fullName.substring(fullName.lastIndexOf('.') + 1);
                     skeletons.add(opt.get());
                     shortNames.add(shortName);
                 }
             }
-        });
-        if (shortNames.isEmpty()) {
+            if (skeletons.size() >= autoContextFileCount) {
+                break;
+            }
+        }
+        if (skeletons.isEmpty()) {
             return ContextFragment.AutoContext.EMPTY;
         }
 
-        int limit = min(autoContextFileCount, skeletons.size());
-        String joinedSkeletons = skeletons.stream()
-                .limit(limit)
-                .collect(Collectors.joining("\n"));
-
-        return new ContextFragment.AutoContext(shortNames.subList(0, limit), fullNames, joinedSkeletons);
+        String joinedSkeletons = String.join("\n", skeletons);
+        return new ContextFragment.AutoContext(shortNames, fqNames, joinedSkeletons);
     }
 
     private static void debug(String msg) {
