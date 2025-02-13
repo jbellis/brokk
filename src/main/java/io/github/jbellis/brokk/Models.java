@@ -1,17 +1,24 @@
 package io.github.jbellis.brokk;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.model.ModelDisabledException;
+import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
 import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import dev.langchain4j.model.output.Response;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -120,6 +127,15 @@ public record Models(
             System.out.println("Error parsing " + configPath + ": " + e.getMessage());
             return createDefaultModels();
         }
+    }
+
+    public static Models disabled() {
+        return new Models(new UnavailableModel(),
+                          new UnavailableStreamingModel(),
+                          new UnavailableModel(),
+                          new UnavailableStreamingModel(),
+                          "disabled",
+                          "disabled");
     }
 
     /**
@@ -307,4 +323,49 @@ public record Models(
         String configName = (String) map.get("name");
         return (configName != null && !configName.isBlank()) ? configName : defaultName;
     }
-}
+
+    public static class UnavailableModel implements ChatLanguageModel {
+        public UnavailableModel() {
+        }
+
+        public String generate(String userMessage) {
+            return "AI is unavailable";
+        }
+
+        public Response<AiMessage> generate(ChatMessage... messages) {
+            return new Response<>(new AiMessage("AI is unavailable"));
+        }
+
+        public Response<AiMessage> generate(List<ChatMessage> messages) {
+            return new Response<>(new AiMessage("AI is unavailable"));
+        }
+
+        public Response<AiMessage> generate(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications) {
+            return new Response<>(new AiMessage("AI is unavailable"));
+        }
+
+        public Response<AiMessage> generate(List<ChatMessage> messages, ToolSpecification toolSpecification) {
+            return new Response<>(new AiMessage("AI is unavailable"));
+        }
+    }
+
+    public static class UnavailableStreamingModel implements StreamingChatLanguageModel {
+        public UnavailableStreamingModel() {
+        }
+
+        public void generate(String userMessage, StreamingResponseHandler<AiMessage> handler) {
+            handler.onComplete(new Response<>(new AiMessage("AI is unavailable")));
+        }
+
+        public void generate(List<ChatMessage> messages, StreamingResponseHandler<AiMessage> handler) {
+            handler.onComplete(new Response<>(new AiMessage("AI is unavailable")));
+        }
+
+        public void generate(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications, StreamingResponseHandler<AiMessage> handler) {
+            handler.onComplete(new Response<>(new AiMessage("AI is unavailable")));
+        }
+
+        public void generate(List<ChatMessage> messages, ToolSpecification toolSpecification, StreamingResponseHandler<AiMessage> handler) {
+            handler.onComplete(new Response<>(new AiMessage("AI is unavailable")));
+        }
+    }}

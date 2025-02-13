@@ -175,11 +175,12 @@ public class Coder {
             @Override
             public void onComplete(Response<AiMessage> response) {
                 ifNotCancelled.accept(() -> {
-                    io.llmOutput("\n");
+                    currentResponse.append(response.content().text());
+                    io.llmOutput(response.content().text() + "\n");
                     var now = LocalDateTime.now().format(dtf);
-                    writeToHistory("\n# Response %d tokens at %s\n\n%s\n".formatted(
-                            response.tokenUsage().outputTokenCount(), now, currentResponse));
                     if (response.tokenUsage() != null) {
+                        writeToHistory("\n# Response %d tokens at %s\n\n%s\n".formatted(
+                                response.tokenUsage().outputTokenCount(), now, currentResponse));
                         totalInputTokens += response.tokenUsage().inputTokenCount();
                         totalLinesOfCode += userLineCount;
                     }

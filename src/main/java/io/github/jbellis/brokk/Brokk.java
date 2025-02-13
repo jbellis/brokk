@@ -53,7 +53,14 @@ public class Brokk {
         io = new ConsoleIO(sourceRoot, commands);
 
         // Create a Coder that deals with LLM calls/streaming
-        var models = Models.load();
+        Models models;
+        try {
+            models = Models.load();
+        } catch (Throwable th) {
+            io.toolError("Error loading models: " + th.getMessage());
+            io.toolError("AI will not be available this session");
+            models = Models.disabled();
+        }
         coder = new Coder(models, io, sourceRoot, contextManager);
         
         contextManager.resolveCircularReferences(io, coder);

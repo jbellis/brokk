@@ -29,13 +29,15 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -61,7 +63,8 @@ public class ContextManager implements IContextManager {
     private ConsoleIO io;
     private Coder coder;
     private final ExecutorService backgroundTasks = Executors.newCachedThreadPool();
-    private String buildCommand;
+    private Future<BuildCommand> buildCommand;
+    
     private final Project project;
     private Context currentContext;
     private final List<Context> previousContexts = new ArrayList<>();
@@ -990,9 +993,10 @@ public class ContextManager implements IContextManager {
         this.coder = coder;
 
         // infer build command from properties
-        buildCommand = project.loadBuildCommand();
-        if (buildCommand != null) {
-            io.toolOutput("Using saved build command: " + buildCommand);
+        String loadedCommand = project.loadBuildCommand();
+        if (loadedCommand != null) {
+            buildCommand = CompletableFuture.completedFuture(BuildCommand.success(loadedCommand));
+            io.toolOutput("Using saved build command: " + loadedCommand);
             return;
         }
 
@@ -1015,15 +1019,20 @@ public class ContextManager implements IContextManager {
                 )
         );
 
-        // send prompt to LLM
-        String response = coder.sendMessage(messages);
+        // Submit the inference task to our background executor
+        buildCommand = backgroundTasks.submit(() -> {
+            String response;
+            try {
+                response = coder.sendMessage(messages);
+            } catch (Throwable th) {
+                return BuildCommand.failure(th.getMessage());
+            }
+            String inferredCommand = response.trim();
+            project.saveBuildCommand(inferredCommand);
 
-        // store the response in our new field
-        this.buildCommand = response.trim();
-
-        // optionally show what we got
-        io.toolOutput("Inferred build command: " + this.buildCommand);
-        project.saveBuildCommand(this.buildCommand);
+            io.toolOutput("Inferred build command: " + response.trim());
+            return BuildCommand.success(inferredCommand);
+        });
     }
 
 
@@ -1090,13 +1099,18 @@ public class ContextManager implements IContextManager {
 
     @Override
     public OperationResult runBuild() {
-        if (buildCommand == null || buildCommand.isBlank()) {
-            io.toolOutput("No build command configured");
-            return OperationResult.success();
-        }
+        try {
+            if (buildCommand.get().command == null) {
+                io.toolOutput("No build command configured");
+                return OperationResult.success();
+            }
 
-        io.toolOutput("Running " + buildCommand);
-        return Environment.instance.captureShellCommand(buildCommand);
+            BuildCommand cmd = buildCommand.get();
+            io.toolOutput("Running " + cmd.command);
+            return Environment.instance.captureShellCommand(cmd.command);
+        } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -1651,5 +1665,15 @@ public class ContextManager implements IContextManager {
             gitTrackedFilesCache = null;
         }
         currentContext = currentContext.refresh();
+    }
+
+    private record BuildCommand(String command, String message) {
+        public static BuildCommand success(String cmd) {
+            return new BuildCommand(cmd, cmd);
+        }
+
+        public static BuildCommand failure(String message) {
+            return new BuildCommand(null, message);
+        }
     }
 }
