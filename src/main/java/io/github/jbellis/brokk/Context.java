@@ -1,6 +1,8 @@
 package io.github.jbellis.brokk;
 
 import com.google.common.collect.Streams;
+import io.github.jbellis.brokk.ContextFragment.AutoContext;
+import io.github.jbellis.brokk.ContextFragment.SkeletonFragment;
 import io.github.jbellis.brokk.ContextFragment.StacktraceFragment;
 import scala.Tuple2;
 
@@ -26,14 +28,14 @@ public class Context {
     private final List<ContextFragment.PathFragment> readonlyFiles;
     private final List<ContextFragment.VirtualFragment> virtualFragments;
 
-    private final ContextFragment.AutoContext autoContext;
+    private final AutoContext autoContext;
     private final int autoContextFileCount;
 
     /**
      * Default constructor, with empty files/fragments and autoContext on, and a default of 5 files.
      */
     public Context(Analyzer analyzer) {
-        this(analyzer, List.of(), List.of(), List.of(), ContextFragment.AutoContext.EMPTY, 5);
+        this(analyzer, List.of(), List.of(), List.of(), AutoContext.EMPTY, 5);
     }
 
     /**
@@ -51,7 +53,7 @@ public class Context {
             List<ContextFragment.PathFragment> editableFiles,
             List<ContextFragment.PathFragment> readonlyFiles,
             List<ContextFragment.VirtualFragment> virtualFragments,
-            ContextFragment.AutoContext autoContext,
+            AutoContext autoContext,
             int autoContextFileCount
     ) {
         assert analyzer != null;
@@ -147,28 +149,6 @@ public class Context {
         return withVirtualFragments(newFragments).refresh();
     }
 
-    public Context removeVirtualFragment(int humanPosition) {
-        int index = humanPosition - 1;
-        if (index < 0 || index >= virtualFragments.size()) {
-            throw new IllegalArgumentException("String fragment out of range: " + humanPosition);
-        }
-
-        List<ContextFragment.VirtualFragment> newFragments = new ArrayList<>();
-        for (int i = 0; i < virtualFragments.size(); i++) {
-            if (i == index) {
-                continue;
-            }
-            var current = virtualFragments.get(i);
-            // reindex everything that comes after it
-            if (i > index) {
-                current = new ContextFragment.StringFragment(i - 1, current.text(), current.description());
-            }
-            newFragments.add(current);
-        }
-        var updated = new Context(analyzer, editableFiles, readonlyFiles, newFragments, autoContext, autoContextFileCount);
-        return updated.refresh();
-    }
-
     public Context convertAllToReadOnly() {
         List<ContextFragment.PathFragment> newReadOnly = new ArrayList<>(readonlyFiles);
         newReadOnly.addAll(editableFiles);
@@ -183,8 +163,8 @@ public class Context {
                 tmp = removeReadonlyFile(pf);
             }
             return tmp.refresh();
-        } else if (f instanceof ContextFragment.StringFragment sf) {
-            return removeVirtualFragment(sf.position() + 1);
+        } else if (f instanceof ContextFragment.VirtualFragment vf) {
+            return removeVirtualFragments(List.of(vf));
         } else {
             throw new IllegalArgumentException("Unknown fragment type: " + f);
         }
@@ -204,10 +184,10 @@ public class Context {
      * 3) Build a multiline skeleton text for the top autoContextFileCount results
      * 4) Return the new AutoContext instance
      */
-    private ContextFragment.AutoContext buildAutoContext() {
+    private AutoContext buildAutoContext() {
         if (!isAutoContextEnabled()) {
             debug("pagerank disabled");
-            return ContextFragment.AutoContext.DISABLED;
+            return AutoContext.DISABLED;
         }
         var seeds = Streams.concat(editableFiles.stream(), readonlyFiles.stream(), virtualFragments.stream())
                 .flatMap(f -> f.classnames(analyzer).stream())
@@ -215,25 +195,21 @@ public class Context {
 
         if (seeds.isEmpty()) {
             debug("Empty pagerank seeds");
-            return ContextFragment.AutoContext.EMPTY;
+            return AutoContext.EMPTY;
         }
 
         // request 3*autoContextFileCount from pagerank to account for out-of-project filtering
         var pagerankResults = analyzer.getPagerank(seeds, 3 * MAX_AUTO_CONTEXT_FILES);
 
         // build skeleton lines
-        var skeletons = new ArrayList<String>();
-        Set<String> fqNames = new HashSet<>();
-        List<String> shortNames = new ArrayList<>();
+        var skeletons = new ArrayList<SkeletonFragment>();
         for (var pair : pagerankResults) {
-            String fullName = pair._1;
-            if (analyzer.classInProject(fullName)) {
-                fqNames.add(fullName);
-                var opt = analyzer.getSkeleton(fullName);
+            String fqName = pair._1;
+            if (analyzer.classInProject(fqName)) {
+                var opt = analyzer.getSkeleton(fqName);
                 if (opt.isDefined()) {
-                    String shortName = fullName.substring(fullName.lastIndexOf('.') + 1);
-                    skeletons.add(opt.get());
-                    shortNames.add(shortName);
+                    var shortName = fqName.substring(fqName.lastIndexOf('.') + 1);
+                    skeletons.add(new SkeletonFragment(-1, List.of(shortName), Set.of(fqName), opt.get()));
                 }
             }
             if (skeletons.size() >= autoContextFileCount) {
@@ -241,11 +217,10 @@ public class Context {
             }
         }
         if (skeletons.isEmpty()) {
-            return ContextFragment.AutoContext.EMPTY;
+            return AutoContext.EMPTY;
         }
 
-        String joinedSkeletons = String.join("\n", skeletons);
-        return new ContextFragment.AutoContext(shortNames, fqNames, joinedSkeletons);
+        return new AutoContext(skeletons);
     }
 
     private static void debug(String msg) {
@@ -282,7 +257,7 @@ public class Context {
         return autoContextFileCount > 0;
     }
 
-    public ContextFragment.AutoContext getAutoContext() {
+    public AutoContext getAutoContext() {
         return autoContext;
     }
 
@@ -318,7 +293,7 @@ public class Context {
      */
     public Context refresh() {
         debug("refreshing autocontext: " + isAutoContextEnabled());
-        ContextFragment.AutoContext newAutoContext = isAutoContextEnabled() ? buildAutoContext() : ContextFragment.AutoContext.DISABLED;
+        AutoContext newAutoContext = isAutoContextEnabled() ? buildAutoContext() : AutoContext.DISABLED;
         return new Context(analyzer, editableFiles, readonlyFiles, virtualFragments, newAutoContext, autoContextFileCount);
     }
 
@@ -362,7 +337,7 @@ public class Context {
     }
 
     public Context addSkeletonFragment(List<String> shortClassnames, Set<String> classnames, String skeleton) {
-        var fragment = new ContextFragment.SkeletonFragment(virtualFragments.size(), shortClassnames, classnames, skeleton);
+        var fragment = new SkeletonFragment(virtualFragments.size(), shortClassnames, classnames, skeleton);
         return addVirtualFragment(fragment);
     }
 }

@@ -1,14 +1,16 @@
 package io.github.jbellis.brokk;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Future;
 
 public interface ContextFragment {
-    String source();
-    String text() throws IOException;
-    String description();
+    String source(); // display name for interaction with commands
+    String description(); // longer description displayed to user
+    String text() throws IOException; // content
+    String format() throws IOException; // format for LLM
     Set<String> classnames(Analyzer analyzer);
 
 
@@ -26,6 +28,15 @@ public interface ContextFragment {
         @Override
         public String description() {
             return file.getParent();
+        }
+
+        @Override
+        public String format() throws IOException {
+            return """
+            <file path="%s">
+            %s
+            </file>
+            """.formatted(file.toString(), text()).stripIndent();
         }
 
         @Override
@@ -58,6 +69,15 @@ public interface ContextFragment {
 
         public final void renumber(int newPosition) {
             this.position = newPosition;
+        }
+
+        @Override
+        public String format() throws IOException {
+            return """
+            <fragment id="%d" description="%s">
+            %s
+            </fragment>
+            """.formatted(position, description(), text()).stripIndent();
         }
 
         @Override
@@ -183,7 +203,7 @@ public interface ContextFragment {
 
         @Override
         public String text() {
-            return "Uses of %s:\n\n%s".formatted(targetIdentifier, code);
+            return code;
         }
 
         @Override
@@ -225,6 +245,15 @@ public interface ContextFragment {
         }
 
         @Override
+        public String format() throws IOException {
+            return """
+            <summary classes="%s">
+            %s
+            </summary>
+            """.formatted(String.join(", ", classnames.stream().sorted().toList()), text()).stripIndent();
+        }
+
+        @Override
         public String toString() {
             return "SkeletonFragment('%s')".formatted(description());
         }
@@ -235,18 +264,13 @@ public interface ContextFragment {
      * representation (e.g. skeletons) of those classes.
      */
     class AutoContext implements ContextFragment {
-        public static final AutoContext EMPTY     = new AutoContext(List.of("Enabled, but no references found"), Set.of(), "");
-        public static final AutoContext DISABLED  = new AutoContext(List.of(), Set.of(), "");
-        public static final AutoContext COMPUTING = new AutoContext(List.of("Computing asynchronously"), Set.of(), "");
+        public static final AutoContext EMPTY = new AutoContext(List.of(new SkeletonFragment(-1, List.of("Enabled, but no references found"), Set.of(), "")));
+        public static final AutoContext DISABLED  = new AutoContext(List.of());
 
-        private final List<String> shortClassnames;
-        private final Set<String> classnames;
-        private final String skeletonText;
+        private final List<SkeletonFragment> skeletons;
 
-        public AutoContext(List<String> shortClassnames, Set<String> classnames, String skeletonText) {
-            this.shortClassnames = shortClassnames;
-            this.classnames = classnames;
-            this.skeletonText = skeletonText;
+        public AutoContext(List<SkeletonFragment> skeletons) {
+            this.skeletons = skeletons;
         }
 
         @Override
@@ -256,12 +280,12 @@ public interface ContextFragment {
 
         @Override
         public String text() {
-            return skeletonText;
+            return String.join("\n\n", skeletons.stream().map(SkeletonFragment::text).toList());
         }
 
         @Override
         public Set<String> classnames(Analyzer analyzer) {
-            return classnames;
+            return skeletons.stream().flatMap(s -> s.classnames.stream()).collect(java.util.stream.Collectors.toSet());
         }
 
         /**
@@ -269,7 +293,19 @@ public interface ContextFragment {
          */
         @Override
         public String description() {
-            return String.join(", ", shortClassnames);
+            return String.join(", ", skeletons.stream().flatMap(s -> s.shortClassnames.stream()).toList());
+        }
+
+        @Override
+        public String format() throws IOException {
+            String st = "";
+            for (SkeletonFragment s : skeletons) {
+                if (!st.isEmpty()) {
+                    st += "\n\n";
+                }
+                st += s.format();
+            }
+            return st;
         }
 
         @Override

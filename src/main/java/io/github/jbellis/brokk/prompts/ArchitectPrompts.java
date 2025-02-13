@@ -17,7 +17,6 @@ public abstract class ArchitectPrompts extends DefaultPrompts {
 
         messages.add(new SystemMessage(formatIntro(cm)));
         messages.addAll(cm.getReadOnlyMessages());
-        messages.addAll(cm.getAutoContextMessages());
         messages.addAll(cm.getHistoryMessages());
         messages.addAll(cm.getEditableMessages());
 

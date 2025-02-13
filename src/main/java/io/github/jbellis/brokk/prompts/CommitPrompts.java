@@ -14,14 +14,40 @@ public abstract class CommitPrompts extends DefaultPrompts {
 
     @Override
     public List<ChatMessage> collectMessages(ContextManager cm) {
+        var diffTxt = Environment.instance.gitDiff();
+        if (diffTxt.isEmpty()) {
+            return List.of(new SystemMessage("No changes to commit."));
+        }
+
+        boolean hasMessages = false;
         String context = cm.getHistoryMessages().stream()
                 .filter(m -> m instanceof UserMessage)
                 .map(ContextManager::getText)
                 .collect(Collectors.joining("\n\n"));
-        context += "\n\n" + Environment.instance.gitDiff();
-        var instructions = context + "\n\nHere are my changes, please give me a concise commit message.";
+        if (!context.isEmpty()) {
+            hasMessages = true;
+            context += "\n\n";
+        }
+
+        context += """
+        <diff>
+        %s
+        </diff>
+        """.formatted(diffTxt);
+
+        String instructionsRaw;
+        if (hasMessages) {
+            instructionsRaw = "Here are my changes, please give me a concise commit message.";
+        } else {
+            instructionsRaw = "Here is my diff, please give me a concise commit message.";
+        }
+        var instructions = """
+        <instructions>
+        %s
+        </instructions>
+        """.formatted(instructionsRaw);
         return List.of(new SystemMessage(systemIntro()),
-                       new UserMessage(instructions));
+                       new UserMessage(context + "\n\n" + instructions));
     }
 
     @Override

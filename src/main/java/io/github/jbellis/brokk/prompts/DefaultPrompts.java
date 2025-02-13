@@ -18,7 +18,6 @@ public abstract class DefaultPrompts {
         messages.add(new SystemMessage(formatIntro(cm)));
         messages.addAll(exampleMessages());
         messages.addAll(cm.getReadOnlyMessages());
-        messages.addAll(cm.getAutoContextMessages());
         messages.addAll(cm.getHistoryMessages());
         messages.add(new UserMessage(searchReplaceReminder()));
         messages.add(new AiMessage("I will format my edits accordingly."));
@@ -31,11 +30,14 @@ public abstract class DefaultPrompts {
         var editableContents = cm.getEditableSummary();
         var readOnlyContents = cm.getReadOnlySummary();
         return """
+                <introduction>
                 %s
-                Current workspace:
+                </introduction>
+                <workspace>
                 - Root: %s
                 - Editable files: %s
                 - Read-only snippets: %s
+                </workspace>
                 """.stripIndent().formatted(systemIntro(),
                                             cm.getRoot().getFileName(),
                                             editableContents,
@@ -151,6 +153,7 @@ public abstract class DefaultPrompts {
 
     public String searchReplaceReminder() {
         return """
+               <rules>
                # *SEARCH/REPLACE block* Rules:
 
                Every *SEARCH/REPLACE block* must use this format:
@@ -196,6 +199,7 @@ public abstract class DefaultPrompts {
                You always COMPLETELY IMPLEMENT the needed code!
 
                ONLY EVER RETURN CODE IN A *SEARCH/REPLACE BLOCK*!
+               </rules>
                """.stripIndent();
     }
 }

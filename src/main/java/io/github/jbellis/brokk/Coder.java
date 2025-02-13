@@ -54,7 +54,7 @@ public class Coder {
     public void runSession(String userInput) {
         // Add user input to context
         var sessionMessages = new ArrayList<ChatMessage>();
-        sessionMessages.add(new UserMessage(userInput.trim()));
+        sessionMessages.add(new UserMessage("<instructions>\n%s\n</instructions>".formatted(userInput.trim())));
 
         // Reflection loop: up to reflectionManager.maxReflections passes
         var reflectionManager = new ReflectionManager(io, this);

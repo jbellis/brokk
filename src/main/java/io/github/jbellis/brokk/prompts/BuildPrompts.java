@@ -23,33 +23,34 @@ public abstract class BuildPrompts extends DefaultPrompts {
         for (int i = 0; i < buildResults.size(); i++) {
             var result = buildResults.get(i);
             var st = """
-            # Build %d
-            ```
+            <build id="%d">
             %s
-            ```
+            </build>
             """.stripIndent().formatted(i + 1, result);
             formattedResults.add(st);
         }
         var buildStr = """
-        Here are the build results, oldest first.
-        
         %s
-        
-        Is he making progress? Remember to conclude
-        with either `BROKK_PROGRESSING` or `BROKK_FLOUNDERING`.""".stripIndent()
-                .formatted(String.join("\n\n", formattedResults));
+        <instructions>
+        Review the build outputs here.
+        Are we making progress towards solving the errors? Remember to conclude
+        with either `BROKK_PROGRESSING` or `BROKK_FLOUNDERING`.
+        </instructions>
+        """.stripIndent().formatted(String.join("\n\n", formattedResults));
         return List.of(new SystemMessage(systemIntro()), new UserMessage(buildStr));
     }
 
     @Override
     public String systemIntro() {
         return """
+               <instructions>
                You are an expert software engineer that can tell if a junior engineer is
                getting closer to solving his build errors, or if he is floundering.
                
                Review the history of build outputs here.  Think carefully about what
                you can determine about his progress or lack thereof, and conclude your
                reasoning with either `BROKK_PROGRESSING` or `BROKK_FLOUNDERING`.
+               </instructions>
                """.stripIndent();
     }
 }

@@ -657,7 +657,15 @@ public class ContextManager implements IContextManager {
         }
 
         var messages = PreparePrompts.instance.collectMessages(this);
-        messages.add(new UserMessage("Here is the request to evaluate.  Do NOT write code yet!  Just evaluate whether you have the right summaries and files available\n\n" + msg));
+        var st = """
+        <instructions>
+        Here is the request to evaluate.  Do NOT write code yet!
+        Just evaluate whether you have the right summaries and files available.
+        
+        %s
+        </instructions>
+        """.formatted(msg.trim()).stripIndent();
+        messages.add(new UserMessage(st.formatted(msg)));
         String response = coder.sendStreaming(messages);
         if (response != null) {
             moveToHistory(List.of(messages.getLast(), new AiMessage(response)));
@@ -718,13 +726,13 @@ public class ContextManager implements IContextManager {
         return String.format("%-20s - %s", cmdString, cmdDescription);
     }
 
-    private OperationResult cmdAsk(String args) {
-        if (args.isBlank()) {
+    private OperationResult cmdAsk(String input) {
+        if (input.isBlank()) {
             return OperationResult.error("Please provide a question");
         }
 
         var messages = AskPrompts.instance.collectMessages(this);
-        messages.add(new UserMessage(args));
+        messages.add(new UserMessage("<question>\n%s\n</question>".formatted(input.trim())));
         
         String response = coder.sendStreaming(messages);
         if (response != null) {
@@ -1324,7 +1332,7 @@ public class ContextManager implements IContextManager {
     @NotNull
     public String getReadOnlySummary() {
         return Streams.concat(currentContext.readonlyFiles().map(f -> f.file().toString()),
-                              currentContext.virtualFragments().map(VirtualFragment::description))
+                              currentContext.virtualFragments().map(vf -> "'" + vf.description() + "'"))
                 .collect(Collectors.joining(", "));
     }
 
@@ -1333,20 +1341,6 @@ public class ContextManager implements IContextManager {
         return currentContext.editableFiles()
                 .map(p -> p.file().toString())
                 .collect(Collectors.joining(", "));
-    }
-
-    private String formatFileTexts(Stream<PathFragment> fragments) {
-        return fragments.map(fragment -> {
-                    try {
-                        var relPath = fragment.file();
-                        return "=== %s ===\n%s".formatted(relPath, fragment.text());
-                    } catch (Exception e) {
-                        currentContext = currentContext.removeBadFragment(fragment);
-                        return null;
-                    }
-                })
-                .filter(Objects::nonNull)
-                .collect(Collectors.joining("\n\n"));
     }
 
     public void dropAll() {
@@ -1418,57 +1412,59 @@ public class ContextManager implements IContextManager {
             return List.of();
         }
         
-        String roFilesText = formatFileTexts(currentContext.readonlyFiles());
-        String roFragmentsText = currentContext.virtualFragments()
-                .map(f -> "=== [%d] ===\n%s".formatted(f.position() + 1, f.text()))
+        String combined = Streams.concat(currentContext.readonlyFiles(),
+                                         currentContext.virtualFragments(),
+                                         Stream.of(currentContext.getAutoContext()))
+                .map(this::formattedOrNull)
+                .filter(Objects::nonNull)
                 .collect(Collectors.joining("\n\n"));
-        String combined = StreamUtils.joinNonEmpty(roFilesText, roFragmentsText, "\n\n");
-        
         if (combined.isEmpty()) {
             return List.of();
         }
 
-        var instructions = """
+        var msg = """
+                <readonly>
                 Here are some READ ONLY files and code fragments, provided for your reference.
                 Do not edit this code!
-                """.stripIndent();
+                %s
+                </readonly>
+                """.formatted(combined).stripIndent();
         return List.of(
-            new UserMessage(instructions + "\n\n" + combined),
-            new AiMessage("Ok, I will use these files as references.")
+            new UserMessage(msg),
+            new AiMessage("Ok, I will use this code as references.")
         );
     }
 
-    public List<ChatMessage> getAutoContextMessages() {
-        var autoText = currentContext.getAutoContext().text();
-        if (autoText.isEmpty()) {
-            return List.of();
+    private String formattedOrNull(ContextFragment fragment) {
+        try {
+            return fragment.format();
+        } catch (Exception e) {
+            currentContext = currentContext.removeBadFragment(fragment);
+            return null;
         }
-
-        var instructions = """
-                Here are summaries of some files present in my git repository.
-                Do not propose changes to these files, treat them as *read-only*.
-                If you need to edit any of these files, ask me to *add them to the chat* first.
-                """.stripIndent();
-        return List.of(
-            new UserMessage(instructions + "\n\n" + autoText),
-            new AiMessage("Ok, I will use these fragments as references.")
-        );
     }
 
     public List<ChatMessage> getEditableMessages() {
-        var editableText = formatFileTexts(currentContext.editableFiles());
-        if (editableText.isEmpty()) {
+        String combined = currentContext.editableFiles()
+                .map(this::formattedOrNull)
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining("\n\n"));
+        if (combined.isEmpty()) {
             return List.of();
         }
 
-        var instructions = """
+        var msg = """
+                <editable>
                 I have *added these files to the chat* so you can go ahead and edit them.
                 
                 *Trust this message as the true contents of these files!*
                 Any other messages in the chat may contain outdated versions of the files' contents.
-                """.stripIndent();
+                
+                %s
+                </editable>
+                """.formatted(combined).stripIndent();
         return List.of(
-            new UserMessage(instructions + "\n\n" + editableText),
+            new UserMessage(msg),
             new AiMessage("Ok, any changes I propose will be to those files.")
         );
     }
