@@ -64,7 +64,7 @@ public class Coder {
             List<ChatMessage> messages = Streams.concat(cmMessages.stream(), sessionMessages.stream()).toList();
 
             // Actually send the message to the LLM and get the response
-            String llmResponse = sendMessage(messages);
+            String llmResponse = sendStreaming(messages);
             if (llmResponse == null) {
                 // Interrupted or error.  sendMessage is responsible for giving feedback to user
                 return;
@@ -132,7 +132,7 @@ public class Coder {
      * Actually sends a user query to the LLM (with streaming),
      * writes to conversation history, etc.
      */
-    public String sendMessage(List<ChatMessage> messages) {
+    public String sendStreaming(List<ChatMessage> messages) {
         int userLineCount = messages.stream()
                 .mapToInt(m -> ContextManager.getText(m).split("\n", -1).length).sum();
 
@@ -211,6 +211,14 @@ public class Coder {
             Signal.handle(sig, oldHandler);
         }
         return currentResponse.toString();
+    }
+
+    public String sendMessage(List<ChatMessage> messages) {
+        var response = models.quickModel().generate(messages);
+        if (response.tokenUsage() != null) {
+            totalInputTokens += response.tokenUsage().inputTokenCount();
+        }
+        return response.content().text().trim();
     }
 
     /**

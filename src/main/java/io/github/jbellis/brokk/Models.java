@@ -324,28 +324,30 @@ public record Models(
         return (configName != null && !configName.isBlank()) ? configName : defaultName;
     }
 
+    static final String UNAVAILABLE = "AI is unavailable";
+
     public static class UnavailableModel implements ChatLanguageModel {
         public UnavailableModel() {
         }
 
         public String generate(String userMessage) {
-            return "AI is unavailable";
+            return UNAVAILABLE;
         }
 
         public Response<AiMessage> generate(ChatMessage... messages) {
-            return new Response<>(new AiMessage("AI is unavailable"));
+            return new Response<>(new AiMessage(UNAVAILABLE));
         }
 
         public Response<AiMessage> generate(List<ChatMessage> messages) {
-            return new Response<>(new AiMessage("AI is unavailable"));
+            return new Response<>(new AiMessage(UNAVAILABLE));
         }
 
         public Response<AiMessage> generate(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications) {
-            return new Response<>(new AiMessage("AI is unavailable"));
+            return new Response<>(new AiMessage(UNAVAILABLE));
         }
 
         public Response<AiMessage> generate(List<ChatMessage> messages, ToolSpecification toolSpecification) {
-            return new Response<>(new AiMessage("AI is unavailable"));
+            return new Response<>(new AiMessage(UNAVAILABLE));
         }
     }
 
@@ -354,18 +356,18 @@ public record Models(
         }
 
         public void generate(String userMessage, StreamingResponseHandler<AiMessage> handler) {
-            handler.onComplete(new Response<>(new AiMessage("AI is unavailable")));
+            handler.onComplete(new Response<>(new AiMessage(UNAVAILABLE)));
         }
 
         public void generate(List<ChatMessage> messages, StreamingResponseHandler<AiMessage> handler) {
-            handler.onComplete(new Response<>(new AiMessage("AI is unavailable")));
+            handler.onComplete(new Response<>(new AiMessage(UNAVAILABLE)));
         }
 
         public void generate(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications, StreamingResponseHandler<AiMessage> handler) {
-            handler.onComplete(new Response<>(new AiMessage("AI is unavailable")));
+            handler.onComplete(new Response<>(new AiMessage(UNAVAILABLE)));
         }
 
         public void generate(List<ChatMessage> messages, ToolSpecification toolSpecification, StreamingResponseHandler<AiMessage> handler) {
-            handler.onComplete(new Response<>(new AiMessage("AI is unavailable")));
+            handler.onComplete(new Response<>(new AiMessage(UNAVAILABLE)));
         }
     }}

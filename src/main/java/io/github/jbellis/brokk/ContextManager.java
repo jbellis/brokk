@@ -658,7 +658,7 @@ public class ContextManager implements IContextManager {
 
         var messages = PreparePrompts.instance.collectMessages(this);
         messages.add(new UserMessage("Here is the request to evaluate.  Do NOT write code yet!  Just evaluate whether you have the right summaries and files available\n\n" + msg));
-        String response = coder.sendMessage(messages);
+        String response = coder.sendStreaming(messages);
         if (response != null) {
             moveToHistory(List.of(messages.getLast(), new AiMessage(response)));
         }
@@ -726,7 +726,7 @@ public class ContextManager implements IContextManager {
         var messages = AskPrompts.instance.collectMessages(this);
         messages.add(new UserMessage(args));
         
-        String response = coder.sendMessage(messages);
+        String response = coder.sendStreaming(messages);
         if (response != null) {
             moveToHistory(List.of(messages.getLast(), new AiMessage(response)));
         }
@@ -1027,6 +1027,10 @@ public class ContextManager implements IContextManager {
             } catch (Throwable th) {
                 return BuildCommand.failure(th.getMessage());
             }
+            if (response.equals(Models.UNAVAILABLE)) {
+                return BuildCommand.failure(Models.UNAVAILABLE);
+            }
+
             String inferredCommand = response.trim();
             project.saveBuildCommand(inferredCommand);
 
