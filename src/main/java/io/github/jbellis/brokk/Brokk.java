@@ -20,27 +20,24 @@ public class Brokk {
     private static Coder coder;
 
     public static void main(String[] args) {
-        // 1) Find the repository root
+        // Find the repository root
         Path sourceRoot = Environment.instance.getRoot();
 
-        // 1.5) Make sure we can create .brokk/
+        // Make sure we can create .brokk/
         var brokkDir = sourceRoot.resolve(".brokk");
         try {
             Environment.createDirIfNotExists(brokkDir);
+            // Set up debug logging to .brokk/debug.log
+            String logPath = brokkDir.resolve("debug.log").toAbsolutePath().toString();
+            System.setProperty("logfile.path", logPath);
         } catch (IOException e) {
             System.out.println("Unable to create " + brokkDir);
             System.exit(1);
         }
 
-        // 2) Create an Analyzer
+        // Create an Analyzer
         Analyzer analyzer = new Analyzer(sourceRoot);
         analyzer.writeGraphAsync();
-
-        // 3) Check if git is available
-        if (!true) { // pass null for quick check
-            System.out.println("Error: git executable not found");
-            System.exit(1);
-        }
 
         // Create the ContextManager (holds chat context, code references, etc.)
         contextManager = new ContextManager(

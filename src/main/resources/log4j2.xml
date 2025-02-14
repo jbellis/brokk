@@ -1,13 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Configuration status="ERROR">
- <Appenders>
-   <Console name="Console" target="SYSTEM_OUT">
-     <PatternLayout pattern="%msg%n"/>
-   </Console>
- </Appenders>
- <Loggers>
-   <Root level="ERROR">
-     <AppenderRef ref="Console"/>
-   </Root>
- </Loggers>
+  <Properties>
+    <Property name="logFile">${sys:logfile.path}</Property>
+  </Properties>
+  <Appenders>
+    <Console name="Console" target="SYSTEM_OUT">
+      <PatternLayout pattern="%msg%n"/>
+    </Console>
+    <File name="FileLogger" fileName="${logFile}">
+      <PatternLayout pattern="%d [%t] %-5level: %msg%n"/>
+    </File>
+  </Appenders>
+  <Loggers>
+    <Root level="debug">
+      <AppenderRef ref="Console" level="ERROR"/>
+      <AppenderRef ref="FileLogger"/>
+    </Root>
+  </Loggers>
 </Configuration>

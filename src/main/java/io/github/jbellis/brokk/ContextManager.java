@@ -11,6 +11,8 @@ import io.github.jbellis.brokk.prompts.ArchitectPrompts;
 import io.github.jbellis.brokk.prompts.AskPrompts;
 import io.github.jbellis.brokk.prompts.CommitPrompts;
 import io.github.jbellis.brokk.prompts.PreparePrompts;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jline.reader.Candidate;
 import org.msgpack.core.annotations.VisibleForTesting;
@@ -49,6 +51,7 @@ import java.util.stream.Stream;
  */
 // TODO standardize handling of paths -- should they be relative or absolute and does Context manage that or do we
 public class ContextManager implements IContextManager {
+    private final Logger logger = LogManager.getLogger(ContextManager.class);
     private static List<RepoFile> gitTrackedFilesCache = null;
 
     public static synchronized List<RepoFile> getTrackedFiles() {
@@ -1580,6 +1583,7 @@ public class ContextManager implements IContextManager {
                     }
                 }
             } catch (IOException e) {
+                logger.warn("Removing unreadable fragment %s".formatted(f.source()), e);
                 io.toolErrorRaw("Removing unreadable fragment %s".formatted(f.source()));
                 currentContext = currentContext.removeBadFragment(f);
             }
