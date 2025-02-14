@@ -198,9 +198,15 @@ public class Coder {
         return currentResponse.toString();
     }
 
-    /** currently hardcoded to quick model */
     public String sendMessage(List<ChatMessage> messages) {
-        io.toolOutput("LLM request sent");
+        return sendMessage(null, messages);
+    }
+
+    /** currently hardcoded to quick model */
+    public String sendMessage(String description, List<ChatMessage> messages) {
+        if (description != null) {
+            io.toolOutput(description);
+        }
         writeRequestToHistory(messages);
         Response<AiMessage> response;
         try {

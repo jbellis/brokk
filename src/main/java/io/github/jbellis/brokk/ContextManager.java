@@ -766,7 +766,7 @@ public class ContextManager implements IContextManager {
 
     private OperationResult cmdCommit() {
         var messages = CommitPrompts.instance.collectMessages((ContextManager) coder.contextManager);
-        String commitMsg = coder.sendMessage(messages);
+        String commitMsg = coder.sendMessage("Inferring commit suggestion", messages);
 
         if (commitMsg.isEmpty()) {
             return OperationResult.error("nothing to commit");
@@ -1025,7 +1025,7 @@ public class ContextManager implements IContextManager {
         buildCommand = backgroundTasks.submit(() -> {
             String response;
             try {
-                response = coder.sendMessage(messages);
+                response = coder.sendMessage("Inferring build progress", messages);
             } catch (Throwable th) {
                 return BuildCommand.failure(th.getMessage());
             }
