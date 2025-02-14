@@ -1,6 +1,5 @@
 package io.github.jbellis.brokk;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -10,6 +9,7 @@ import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.output.Response;
 import org.yaml.snakeyaml.Yaml;
@@ -24,14 +24,13 @@ import java.util.function.Consumer;
 /**
  * Holds references to the models we use in Brokk.
  */
-public record Models(
-        ChatLanguageModel editModel,
-        StreamingChatLanguageModel editModelStreaming,
-        ChatLanguageModel quickModel,
-        StreamingChatLanguageModel quickModelStreaming,
-        String editModelName,
-        String quickModelName
-) {
+public record Models(ChatLanguageModel editModel,
+                     StreamingChatLanguageModel editModelStreaming,
+                     ChatLanguageModel quickModel,
+                     StreamingChatLanguageModel quickModelStreaming,
+                     String editModelName,
+                     String quickModelName)
+{
     // correct for these models
     private static final int DEFAULT_MAX_TOKENS = 8192;
 
@@ -40,7 +39,7 @@ public record Models(
       provider: openai
       key: OPENAI_API_KEY
       name: o3-mini
-      # reasoning_effort: high # TODO when langchain4j supports it
+      reasoning_effort: high
       maxTokens: 100000
 
     quick_model:
@@ -233,7 +232,7 @@ public record Models(
                         .baseUrl(url)
                         .modelName(modelName)
                         .maxCompletionTokens(maxTokens);
-                maybeSetTemperature(temperature, builder::temperature);
+                maybeSetDouble(temperature, builder::temperature);
                 return builder.build();
             } else {
                 var builder = OpenAiChatModel.builder()
@@ -241,7 +240,7 @@ public record Models(
                         .baseUrl(url)
                         .modelName(modelName)
                         .maxCompletionTokens(maxTokens);
-                maybeSetTemperature(temperature, builder::temperature);
+                maybeSetDouble(temperature, builder::temperature);
                 return builder.build();
             }
         }
@@ -254,16 +253,26 @@ public record Models(
                             .apiKey(resolvedKey)
                             .modelName(modelName)
                             .maxCompletionTokens(maxTokens);
-                    maybeSetTemperature(temperature, builder::temperature);
-                    // maybeSetReasoningEffort((String) modelMap.get("reasoning_effort"), builder::reasoningEffort);
+                    maybeSetDouble(temperature, builder::temperature);
+                    if (modelMap.get("reasoning_effort") != null) {
+                        var reasoningEffort = OpenAiChatRequestParameters.builder()
+                                .reasoningEffort(modelMap.get("reasoning_effort").toString())
+                                .build();
+                        builder = builder.defaultRequestParameters(reasoningEffort);
+                    }
                     yield builder.build();
                 } else {
                     var builder = OpenAiChatModel.builder()
                             .apiKey(resolvedKey)
                             .modelName(modelName)
                             .maxCompletionTokens(maxTokens);
-                    maybeSetTemperature(temperature, builder::temperature);
-                    // maybeSetReasoningEffort((String) modelMap.get("reasoning_effort"), builder::reasoningEffort);
+                    maybeSetDouble(temperature, builder::temperature);
+                    if (modelMap.get("reasoning_effort") != null) {
+                        var reasoningEffort = OpenAiChatRequestParameters.builder()
+                                .reasoningEffort(modelMap.get("reasoning_effort").toString())
+                                .build();
+                        builder = builder.defaultRequestParameters(reasoningEffort);
+                    }
                     yield builder.build();
                 }
             }
@@ -273,14 +282,14 @@ public record Models(
                             .apiKey(resolvedKey)
                             .modelName(modelName)
                             .maxTokens(maxTokens);
-                    maybeSetTemperature(temperature, builder::temperature);
+                    maybeSetDouble(temperature, builder::temperature);
                     yield builder.build();
                 } else {
                     var builder = AnthropicChatModel.builder()
                             .apiKey(resolvedKey)
                             .modelName(modelName)
                             .maxTokens(maxTokens);
-                    maybeSetTemperature(temperature, builder::temperature);
+                    maybeSetDouble(temperature, builder::temperature);
                     yield builder.build();
                 }
             }
@@ -288,17 +297,7 @@ public record Models(
         };
     }
 
-    /**
-     * Conditionally set temperature on an OpenAI/Anthropic builder if the
-     * user actually specified a "temperature" in the map.
-     */
-    private static void maybeSetReasoningEffort(String effort, Consumer<String> setter) {
-        if (effort != null && !effort.isBlank()) {
-            setter.accept(effort);
-        }
-    }
-
-    private static void maybeSetTemperature(Double temperature, Consumer<Double> setter) {
+    private static void maybeSetDouble(Double temperature, Consumer<Double> setter) {
         if (temperature != null) {
             setter.accept(temperature);
         }
