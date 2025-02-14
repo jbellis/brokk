@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.model.ModelDisabledException;
 import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
 import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
@@ -37,6 +36,23 @@ public record Models(
     private static final int DEFAULT_MAX_TOKENS = 8192;
     private static final ObjectMapper mapper = new ObjectMapper();
     public static final Map<String, Object> MODEL_METADATA;
+    
+    /**
+     * If the user does not have a config file, or if there's a parse error, fallback to some default.
+     */
+    private static final String DEFAULT_CONFIG = """
+    edit_model:
+      provider: anthropic
+      key: ANTHROPIC_API_KEY
+      name: claude-3-5-sonnet-20241022
+      maxTokens: 8192
+
+    quick_model:
+      provider: anthropic
+      key: ANTHROPIC_API_KEY
+      name: claude-3-5-haiku-20241022
+      maxTokens: 8192
+    """;
 
     static {
         try {
@@ -70,7 +86,7 @@ public record Models(
      *
      * quick_model:
      *   provider: anthropic
-     *   key: ANTHROPIC_KEY
+     *   key: ANTHROPIC_API_KEY
      *   name: claude-v1.3
      *   temperature: 0.5
      *   maxTokens: 6000
@@ -100,12 +116,23 @@ public record Models(
      */
     public static Models load() {
         Path configPath = Path.of(System.getProperty("user.home"), ".config", "brokk", "brokk.yml");
+        String yamlStr;
         if (!Files.exists(configPath)) {
-            return createDefaultModels();
+            yamlStr = DEFAULT_CONFIG;
+        } else {
+            try {
+                yamlStr = Files.readString(configPath);
+            } catch (IOException e) {
+                System.out.println("Error reading " + configPath + ": " + e.getMessage());
+                yamlStr = DEFAULT_CONFIG;
+            }
         }
 
+        return buildModelsFromYaml(yamlStr);
+    }
+
+    private static Models buildModelsFromYaml(String yamlStr) {
         try {
-            String yamlStr = Files.readString(configPath);
             Yaml yaml = new Yaml();
             Map<String, Object> top = yaml.load(yamlStr);
 
@@ -120,12 +147,9 @@ public record Models(
             String quickModelName = readModelName(top, "quick_model", "claude-3-5-haiku-20241022");
 
             return new Models(editModel, editModelStreaming, quickModel, quickModelStreaming, editModelName, quickModelName);
-        } catch (IOException e) {
-            System.out.println("Error reading " + configPath + ": " + e.getMessage());
-            return createDefaultModels();
         } catch (Exception e) {
-            System.out.println("Error parsing " + configPath + ": " + e.getMessage());
-            return createDefaultModels();
+            System.out.println("Error parsing yaml: " + e.getMessage());
+            System.exit(1);
         }
     }
 
@@ -136,39 +160,6 @@ public record Models(
                           new UnavailableStreamingModel(),
                           "disabled",
                           "disabled");
-    }
-
-    /**
-     * If the user does not have a config filename, or if there's a parse error, fallback to some default.
-     */
-    private static Models createDefaultModels() {
-        var editModel = AnthropicChatModel.builder()
-                .modelName("claude-3-5-sonnet-20241022")
-                .apiKey(System.getenv("ANTHROPIC_API_KEY"))
-                .maxTokens(DEFAULT_MAX_TOKENS)
-                .build();
-        var editStreaming = AnthropicStreamingChatModel.builder()
-                .modelName("claude-3-5-sonnet-20241022")
-                .apiKey(System.getenv("ANTHROPIC_API_KEY"))
-                .maxTokens(DEFAULT_MAX_TOKENS)
-                .build();
-        var quickModel = AnthropicChatModel.builder()
-                .modelName("claude-3-5-haiku-20241022")
-                .apiKey(System.getenv("ANTHROPIC_API_KEY"))
-                .maxTokens(DEFAULT_MAX_TOKENS)
-                .build();
-        var quickStreaming = AnthropicStreamingChatModel.builder()
-                .modelName("claude-3-5-haiku-20241022")
-                .apiKey(System.getenv("ANTHROPIC_API_KEY"))
-                .maxTokens(DEFAULT_MAX_TOKENS)
-                .build();
-
-        return new Models(
-                editModel, editStreaming,
-                quickModel, quickStreaming,
-                "claude-3-5-sonnet-20241022",
-                "claude-3-5-haiku-20241022"
-        );
     }
 
     /**

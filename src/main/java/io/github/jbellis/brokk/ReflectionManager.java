@@ -180,7 +180,7 @@ class ReflectionManager {
             }
         }
 
-        sb.append("The SEARCH text must match exactly (with allowance for fuzzy matching) the lines in the file.\n");
+        sb.append("The SEARCH text must match exactly the lines in the file.\n");
         if (succeededCount > 0) {
             sb.append("\n# The other ").append(succeededCount).append(" SEARCH/REPLACE block")
               .append(succeededCount == 1 ? " was" : "s were").append(" applied successfully.\n");
