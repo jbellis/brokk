@@ -59,7 +59,10 @@ public class Coder {
     public void runSession(String userInput) {
         // Add user input to context
         var sessionMessages = new ArrayList<ChatMessage>();
-        sessionMessages.add(new UserMessage("<goal>\n%s\n</goal>".formatted(userInput.trim())));
+        var goal = mode == Mode.EDIT
+                ? "<goal>\n%s\n</goal>".formatted(userInput.trim())
+                : "<goal>\\nTurn these instructions into *SEARCH/REPLACE* blocks:\n\n%s\\n</goal>".formatted(userInput.trim());
+        sessionMessages.add(new UserMessage(goal));
 
         // Reflection loop: up to reflectionManager.maxReflections passes
         var reflectionManager = new ReflectionManager(io, this);
@@ -81,6 +84,7 @@ public class Coder {
                 io.toolError("Empty response from LLM, will retry");
                 continue;
             }
+            logger.debug("response: {}", llmResponse);
 
             // Add the assistant reply to context
             sessionMessages.add(new AiMessage(llmResponse));
