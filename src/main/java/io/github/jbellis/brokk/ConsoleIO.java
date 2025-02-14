@@ -83,13 +83,13 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
         }
 
         // For arguments, find the exact command and delegate to its completer
-        var foundCmd = commands.stream()
-                .filter(cmd -> cmd.name().equals(cmdInput))
-                .findFirst()
-                .orElse(null);
-        if (foundCmd == null) {
+        var matchingCommands = commands.stream()
+                .filter(cmd -> cmd.name().startsWith(cmdInput))
+                .toList();
+        if (matchingCommands.size() != 1) {
             return;
         }
+        var foundCmd = matchingCommands.getFirst();
         // If there is a second token already, use it; otherwise, use an empty string.
         String argInput = words.size() > 1 ? parsedLine.word() : "";
         candidates.addAll(foundCmd.argumentCompleter().complete(argInput));
