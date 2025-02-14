@@ -17,6 +17,7 @@ import org.yaml.snakeyaml.Yaml;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -263,7 +264,11 @@ public record Models(StreamingChatLanguageModel editModel,
                         var reasoningEffort = OpenAiChatRequestParameters.builder()
                                 .reasoningEffort(modelMap.get("reasoning_effort").toString())
                                 .build();
-                        builder = builder.defaultRequestParameters(reasoningEffort);
+                        if (modelMap.get("reasoning_effort").toString().equals("high")) {
+                            // tolerate longer delays
+                            builder = builder.defaultRequestParameters(reasoningEffort)
+                                    .timeout(Duration.of(2, java.time.temporal.ChronoUnit.MINUTES));
+                        }
                     }
                     yield builder.build();
                 } else {
