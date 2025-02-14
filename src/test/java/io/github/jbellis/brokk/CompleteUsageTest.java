@@ -78,7 +78,7 @@ public class CompleteUsageTest {
         var completions = ContextManager.completeUsage("d", mock);
 
         var values = toValues(completions);
-        assertEquals(Set.of("a.b.Do"), values);
+        assertEquals(Set.of("a.b.Do", "a.b.D$Re", "a.b.Do$Re$Sub"), values);
     }
 
     @Test
