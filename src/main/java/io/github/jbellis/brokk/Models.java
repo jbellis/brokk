@@ -155,9 +155,9 @@ public record Models(StreamingChatLanguageModel editModel,
             var applyModel = buildStreamingModel(top, "apply_model", false);
             var quickModel = buildChatModel(top, "quick_model", false);
     
-        String editModelName = readModelName(top, "edit_model", "claude-3-5-sonnet-20241022");
-            String applyModelName = readModelName(top, "apply_model", "o3-mini");
-            String quickModelName = readModelName(top, "quick_model", "claude-3-5-haiku-20241022");
+        String editModelName = readModelName(top, "edit_model");
+            String applyModelName = readModelName(top, "apply_model");
+            String quickModelName = readModelName(top, "quick_model");
     
         return new Models(editModel, applyModel, quickModel, editModelName, applyModelName, quickModelName);
         } catch (Exception e) {
@@ -328,15 +328,11 @@ public record Models(StreamingChatLanguageModel editModel,
      * Helper method to pull a "name" field from a sub-map, falling back to a default if missing.
      */
     @SuppressWarnings("unchecked")
-    private static String readModelName(Map<String, Object> top, String modelKey, String defaultName) {
-        if (!top.containsKey(modelKey)) {
-            return defaultName;
-        }
+    private static String readModelName(Map<String, Object> top, String modelKey) {
+        assert top.containsKey(modelKey); // already built model itself
+
         Map<String, Object> map = (Map<String, Object>) top.get(modelKey);
         String configName = (String) map.get("name");
-        if (configName == null || configName.isBlank()) {
-            configName = defaultName;
-        }
         if (map.containsKey("reasoning_effort")) {
             String reasoningEffort = (String) map.get("reasoning_effort");
             if (reasoningEffort != null && !reasoningEffort.isBlank()) {
