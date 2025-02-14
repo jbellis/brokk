@@ -1,6 +1,8 @@
 package io.github.jbellis.brokk;
 
 import io.github.jbellis.brokk.ContextManager.Command;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jline.keymap.KeyMap;
 import org.jline.reader.Candidate;
 import org.jline.reader.EndOfFileException;
@@ -17,6 +19,8 @@ import java.util.Collection;
 import java.util.List;
 
 public class ConsoleIO implements AutoCloseable, IConsoleIO {
+    private final Logger logger = LogManager.getLogger(ConsoleIO.class);
+
     private final Terminal terminal;
     private final LineReader reader;
 
@@ -135,6 +139,7 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
 
     @Override
     public void toolErrorRaw(String msg) {
+        logger.debug(msg);
         var writer = terminal.writer();
         // ANSI escape code \u001B[31m sets text to red, \u001B[0m resets the color
         writer.println("\u001B[31m" + msg + "\u001B[0m");

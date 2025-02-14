@@ -7,6 +7,8 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.output.Response;
 import io.github.jbellis.brokk.prompts.DefaultPrompts;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import sun.misc.Signal;
 import sun.misc.SignalHandler;
 
@@ -25,6 +27,8 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 public class Coder {
+    private final Logger logger = LogManager.getLogger(Coder.class);
+
     public enum Mode {
         EDIT,
         APPLY
@@ -65,8 +69,10 @@ public class Coder {
             List<ChatMessage> messages = Streams.concat(cmMessages.stream(), sessionMessages.stream()).toList();
 
             // Actually send the message to the LLM and get the response
+            logger.debug("Sending to LLM [only last message shown]: {}", messages.getLast());
             String llmResponse = sendStreaming(messages);
             if (llmResponse == null) {
+                logger.debug("null response");
                 // Interrupted or error.  sendMessage is responsible for giving feedback to user
                 return;
             }
@@ -82,6 +88,7 @@ public class Coder {
             // Gather all edit blocks in the reply
             var parseResult = EditBlock.findOriginalUpdateBlocks(llmResponse, contextManager.getEditableFiles());
             var blocks = parseResult.blocks();
+            logger.debug("Parsed {} blocks", blocks.size());
 
             // ask user if he wants to add any files referenced in search/replace blocks that are not editable
             var blocksNotEditable = blocks.stream()
@@ -94,6 +101,7 @@ public class Coder {
             var filesToAdd = blocksToAdd.stream()
                     .map(block -> contextManager.toFile(block.filename()))
                     .toList();
+            logger.debug("files to add: {}", filesToAdd);
             contextManager.addFiles(filesToAdd);
             // Filter out blocks that the user declined adding
             blocks = blocks.stream()
@@ -102,9 +110,11 @@ public class Coder {
 
             // Attempt to apply any code edits from the LLM
             var failedBlocks = EditBlock.applyEditBlocks(contextManager, io, blocks);
+            logger.debug("Failed blocks: {}", failedBlocks);
             
             // Decide if we need a reflection pass
             var reflectionMsg = reflectionManager.getReflectionMessage(parseResult, failedBlocks, blocks, contextManager);
+            logger.debug("Reflection message: {}", reflectionMsg);
 
             // If no reflection or we've exhausted attempts, break out
             if (reflectionMsg.isEmpty()) {
