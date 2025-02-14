@@ -7,7 +7,7 @@ on large codebases that cannot be jammed entirely into working context.
 
 # What Brokk can do
 
-1. Automatically determine the most related classes to your working context and summarizes them.
+1. Automatically determine the most-related classes to your working context and summarize them
 1. Parse a stacktrace and add source for all the methods to your context
 1. Add source for all the usages of a class, field, or method to your context
 1. Pull in "anonymous" context pieces from external commands with `$$` or with `/paste`
@@ -15,7 +15,7 @@ on large codebases that cannot be jammed entirely into working context.
 
 These allow some simple but powerful patterns:
 - "Here is the diff for commit X, which introduced a regression.  Here is the stacktrace
-  and the full source of the methods involved.  Find the bug."
+  of the error and the full source of the methods involved.  Find the bug."
 - "Here are the usages of Foo.bar.  Is parameter zep always loaded from cache?"
 
 # Brokk with o1pro
