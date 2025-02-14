@@ -48,15 +48,16 @@ and running a JDK then you should wait a bit longer.
 
 # Getting started
 
-1. git clone
-2. ./mvnw package
-3. cd /path/to/my/project
-3. export ANTHROPIC_API_KEY=xxy
-   or, export OPENAI_API_KEY=xxy
-   - other models are technically supported, making them easier to use is high priority.
+1. `git clone`
+2. `./mvnw package`
+3. `cd /path/to/my/project`
+3. `export ANTHROPIC_API_KEY=xxy`
+   - or, `export OPENAI_API_KEY=xxy`
+   - other providers and models are technically supported, making them easier to use is high priority.
      In the meantime, look at Models.java for how to set up a ~/.config/brokk/brokk.yml file with
-     your preferred option.
-4. java -ea -Dlog4j.configurationFile=/path/to/brokk/src/main/resources/log4j2.xml -jar /path/to/brokk/target/brokk-0.1-SNAPSHOT-jar-with-dependencies.jar
+     your preferred option if the defaults don't work for you.
+4. `java -ea -Dlog4j.configurationFile=/path/to/brokk/src/main/resources/log4j2.xml -jar /path/to/brokk/target/brokk-0.1-SNAPSHOT-jar-with-dependencies.jar`
+
 
 # Finer points on some commands
 
@@ -84,7 +85,7 @@ the full text of all files referenced by the diff.
 
 1. What code intelligence library does Brokk use?
 
-Brokk uses [Joern](https://github.com/joernio/joern), an industrial-strength code analysis engine from (Qwiet)[qwiet.ai] (formerly Shiftleft).  I spent multiple days evaluating all the relevant options and Joern is the only one powerful enough (and fast enough) to do what I want, so huge thanks to the team at Qwiet for that!
+Brokk uses [Joern](https://github.com/joernio/joern), an industrial-strength code analysis engine from [Qwiet](qwiet.ai) (formerly Shiftleft).  I spent multiple days evaluating all the relevant options and Joern is the only one powerful enough (and fast enough) to do what I want, so huge thanks to the team at Qwiet for that!
 
 # Requests for help
 
