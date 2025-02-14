@@ -1521,7 +1521,7 @@ public class ContextManager implements IContextManager {
             showHeader("No context! Use /add to add files or /help to list all commands");
             return;
         }
-        showHeader("Context");
+        showHeader("%s mode".formatted(coder.mode.name()));
 
         int termWidth = io.getTerminalWidth();
 
