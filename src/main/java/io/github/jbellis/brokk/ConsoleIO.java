@@ -20,9 +20,6 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
     private final Terminal terminal;
     private final LineReader reader;
 
-    // Track whether the last readLine() call ended with a UserInterruptException (Ctrl-C).
-    private boolean lastInterruptWasCtrlC = false;
-
     public ConsoleIO(Path sourceRoot, Collection<Command> commands) {
         try {
             var historyFile = sourceRoot.resolve(".brokk/linereader.txt");
@@ -116,20 +113,10 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
     private String readLineInternal(String prompt) {
         try {
             // Prompt
-            String line = reader.readLine(prompt);
-            // If we got here successfully, user pressed Enter (not Ctrl-C or Ctrl-D)
-            lastInterruptWasCtrlC = false;
-            return line;
+            return reader.readLine(prompt);
         } catch (UserInterruptException e) {
             // User pressed Ctrl-C
-            if (lastInterruptWasCtrlC) {
-                // This is the second consecutive Ctrl-C => exit
-                System.exit(0);
-            } else {
-                // First Ctrl-C => cancel line, print message
-                toolOutput("^C, repeat to exit");
-                lastInterruptWasCtrlC = true;
-            }
+            toolOutput("Canceled with ^C (use ^D to exit)");
             return "";
         } catch (EndOfFileException e) {
             // Ctrl-D => exit

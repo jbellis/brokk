@@ -182,7 +182,7 @@ public class ContextManager implements IContextManager {
                         "Capture the source code of usages of the target method or field",
                         this::cmdUsage,
                         "<method/field>",
-                        this::completeUsage
+                        input -> completeUsage(input, this.analyzer)
                 ),
                 new Command(
                         "stacktrace",
@@ -211,10 +211,6 @@ public class ContextManager implements IContextManager {
      */
     public Path getRoot() {
         return root;
-    }
-
-    private List<Candidate> completeUsage(String input) {
-        return completeUsage(input, analyzer);
     }
 
     @VisibleForTesting
@@ -348,7 +344,9 @@ public class ContextManager implements IContextManager {
         } else {
             var st = returnFqn ? allClasses.stream() : allClasses.stream().map(ContextManager::getShortClassName);
             st.forEach(name -> {
-                if (name.toLowerCase().startsWith(partialLower)) {
+                if (name.toLowerCase().startsWith(partialLower)
+                    || getShortClassName(name).toLowerCase().startsWith(partialLower))
+                {
                     matchedClasses.add(name);
                 }
             });
