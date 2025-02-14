@@ -25,6 +25,12 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 public class Coder {
+    public enum Mode {
+        EDIT,
+        APPLY
+    }
+
+    Mode mode = Mode.EDIT;
     private final IConsoleIO io;
     private final Path historyFile;
     private final DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -152,7 +158,8 @@ public class Coder {
             }
         });
 
-        models.editModelStreaming().generate(messages, new StreamingResponseHandler<>() {
+        var model = mode == Mode.EDIT ? models.editModel() : models.applyModel();
+        model.generate(messages, new StreamingResponseHandler<>() {
             @Override
             public void onNext(String token) {
                 ifNotCancelled.accept(() -> {

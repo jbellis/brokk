@@ -140,6 +140,13 @@ public class ContextManager implements IContextManager {
                         args -> cmdCommit()
                 ),
                 new Command(
+                        "mode",
+                        "Set mode: EDIT or APPLY",
+                        this::cmdMode,
+                        "<EDIT|APPLY>",
+                        args -> List.of()
+                ),
+                new Command(
                         "copy",
                         "Copy current context to clipboard (or specific fragment if given)",
                         this::cmdCopy,
@@ -695,18 +702,24 @@ public class ContextManager implements IContextManager {
                 if (fragment == null) {
                     return OperationResult.error("No matching fragment found for: " + args);
                 }
-                    content = fragment.text();
-                }
-            
-                var sel = new StringSelection(content);
-                var cb = Toolkit.getDefaultToolkit().getSystemClipboard();
-                cb.setContents(sel, sel);
-                io.toolOutput("Content copied to clipboard");
-            } catch (Exception e) {
-                return OperationResult.error("Failed to copy to clipboard: " + e.getMessage());
+                content = fragment.text();
             }
-            return OperationResult.skipShow();
+
+            var sel = new StringSelection(content);
+            var cb = Toolkit.getDefaultToolkit().getSystemClipboard();
+            cb.setContents(sel, sel);
+            io.toolOutput("Content copied to clipboard");
+        } catch (Exception e) {
+            return OperationResult.error("Failed to copy to clipboard: " + e.getMessage());
         }
+
+        if (coder.mode != Coder.Mode.APPLY) {
+            coder.mode = Coder.Mode.APPLY;
+            io.toolOutput("/mode automatically set to APPLY by /copy");
+        }
+        return OperationResult.skipShow();
+    }
+
 
     private OperationResult cmdHelp() {
         String cmdText = commands.stream()
@@ -780,6 +793,19 @@ public class ContextManager implements IContextManager {
         }
 
         return OperationResult.prefill("$git commit -a -m \"%s\"".formatted(commitMsg));
+    }
+    
+    private OperationResult cmdMode(String args) {
+        String modeArg = args.trim().toUpperCase();
+        if ("EDIT".equals(modeArg)) {
+            coder.mode = Coder.Mode.EDIT;
+            return OperationResult.success("Mode set to EDIT");
+        } else if ("APPLY".equals(modeArg)) {
+            coder.mode = Coder.Mode.APPLY;
+            return OperationResult.success("Mode set to APPLY");
+        } else {
+            return OperationResult.error("Invalid mode. Valid modes are EDIT and APPLY.");
+        }
     }
 
     private OperationResult cmdRefresh(Analyzer analyzer) {

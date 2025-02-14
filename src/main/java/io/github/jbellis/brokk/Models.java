@@ -24,11 +24,11 @@ import java.util.function.Consumer;
 /**
  * Holds references to the models we use in Brokk.
  */
-public record Models(ChatLanguageModel editModel,
-                     StreamingChatLanguageModel editModelStreaming,
+public record Models(StreamingChatLanguageModel editModel,
+                     StreamingChatLanguageModel applyModel,
                      ChatLanguageModel quickModel,
-                     StreamingChatLanguageModel quickModelStreaming,
                      String editModelName,
+                     String applyModelName,
                      String quickModelName)
 {
     // correct for these models
@@ -40,6 +40,13 @@ public record Models(ChatLanguageModel editModel,
       key: OPENAI_API_KEY
       name: o3-mini
       reasoning_effort: high
+      maxTokens: 100000
+    
+    apply_model:
+      provider: openai
+      key: OPENAI_API_KEY
+      name: o3-mini
+      reasoning_effort: low
       maxTokens: 100000
 
     quick_model:
@@ -56,6 +63,12 @@ public record Models(ChatLanguageModel editModel,
       name: claude-3-5-sonnet-latest
       maxTokens: 8192
 
+    apply_model:
+      provider: anthropic
+      key: ANTHROPIC_API_KEY
+      name: claude-3-5-haiku-latest
+      maxTokens: 8192
+
     quick_model:
       provider: anthropic
       key: ANTHROPIC_API_KEY
@@ -66,8 +79,8 @@ public record Models(ChatLanguageModel editModel,
     /**
      * Attempts to load model configurations from <code>~/.config/brokk/brokk.yaml</code>.
      * <p>
-     * The YAML filename can define two sets of models: <strong>edit_model</strong> and <strong>quick_model</strong>.
-     * Each set is used to build a non-streaming and a streaming model. If any model definition is missing or
+     * The YAML filename define three models: edit_model, apply_model, and quick_model.
+     * If any model definition is missing or
      * the filename cannot be read or parsed, default settings are used.
      * <p>
      * <strong>Example YAML structure:</strong>
@@ -79,13 +92,6 @@ public record Models(ChatLanguageModel editModel,
      *   name: deepseek-chat
      *   temperature: 0.4
      *   maxTokens: 8000
-     *
-     * quick_model:
-     *   provider: anthropic
-     *   key: ANTHROPIC_API_KEY
-     *   name: claude-v1.3
-     *   temperature: 0.5
-     *   maxTokens: 6000
      * </pre>
      * <ul>
      *   <li><strong>provider:</strong> Required if you want to use a known provider
@@ -101,8 +107,8 @@ public record Models(ChatLanguageModel editModel,
      *       to use the default OpenAI endpoint.</li>
      *   <li><strong>name:</strong> The model identifier (e.g., <code>gpt-3.5-turbo</code>, <code>deepseek-chat</code>,
      *       <code>claude-v1.3</code>, etc.).</li>
-     *   <li><strong>temperature:</strong> A double value controlling the "creativity" of responses (default 0.4).</li>
-     *   <li><strong>maxTokens:</strong> The maximum number of tokens to allow in the response (default 8000).</li>
+     *   <li><strong>temperature:</strong> A double value controlling the "creativity" of responses (default: omitted).</li>
+     *   <li><strong>maxTokens:</strong> The maximum number of tokens to allow in the response (default 8k).</li>
      * </ul>
      * If the filename is missing or cannot be parsed, the method returns a {@link Models} instance with
      * hardcoded default model settings (currently using Anthropic-based defaults).
@@ -145,16 +151,15 @@ public record Models(ChatLanguageModel editModel,
             Map<String, Object> top = yaml.load(yamlStr);
 
             // Build each model
-            ChatLanguageModel editModel = buildChatModel(top, "edit_model", false);
-            StreamingChatLanguageModel editModelStreaming = buildStreamingModel(top, "edit_model", true);
-            ChatLanguageModel quickModel = buildChatModel(top, "quick_model", false);
-            StreamingChatLanguageModel quickModelStreaming = buildStreamingModel(top, "quick_model", true);
-
-            // Extract each model name (or use defaults if none specified)
-            String editModelName = readModelName(top, "edit_model", "claude-3-5-sonnet-20241022");
+            var editModel = buildStreamingModel(top, "edit_model", true);
+            var applyModel = buildStreamingModel(top, "apply_model", false);
+            var quickModel = buildChatModel(top, "quick_model", false);
+    
+        String editModelName = readModelName(top, "edit_model", "claude-3-5-sonnet-20241022");
+            String applyModelName = readModelName(top, "apply_model", "o3-mini");
             String quickModelName = readModelName(top, "quick_model", "claude-3-5-haiku-20241022");
-
-            return new Models(editModel, editModelStreaming, quickModel, quickModelStreaming, editModelName, quickModelName);
+    
+        return new Models(editModel, applyModel, quickModel, editModelName, applyModelName, quickModelName);
         } catch (Exception e) {
             System.out.println("Error parsing yaml: " + e.getMessage());
             System.exit(1);
@@ -163,10 +168,10 @@ public record Models(ChatLanguageModel editModel,
     }
 
     public static Models disabled() {
-        return new Models(new UnavailableModel(),
+        return new Models(new UnavailableStreamingModel(),
                           new UnavailableStreamingModel(),
                           new UnavailableModel(),
-                          new UnavailableStreamingModel(),
+                          "disabled",
                           "disabled",
                           "disabled");
     }
@@ -329,7 +334,16 @@ public record Models(ChatLanguageModel editModel,
         }
         Map<String, Object> map = (Map<String, Object>) top.get(modelKey);
         String configName = (String) map.get("name");
-        return (configName != null && !configName.isBlank()) ? configName : defaultName;
+        if (configName == null || configName.isBlank()) {
+            configName = defaultName;
+        }
+        if (map.containsKey("reasoning_effort")) {
+            String reasoningEffort = (String) map.get("reasoning_effort");
+            if (reasoningEffort != null && !reasoningEffort.isBlank()) {
+                configName = configName + "-" + reasoningEffort;
+            }
+        }
+        return configName;
     }
 
     static final String UNAVAILABLE = "AI is unavailable";

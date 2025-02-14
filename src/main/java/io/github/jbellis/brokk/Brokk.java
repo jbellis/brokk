@@ -76,6 +76,7 @@ public class Brokk {
             version = "[unknown]";
         }
         io.toolOutput("Editor model: " + models.editModelName());
+        io.toolOutput("Apply model: " + models.applyModelName());
         io.toolOutput("Quick model: " + models.quickModelName());
         io.toolOutput("Git repo found at %s with %d files".formatted(sourceRoot, ContextManager.getTrackedFiles().size()));
         io.toolOutput("Brokk %s initialized".formatted(version));
