@@ -267,7 +267,7 @@ public record Models(StreamingChatLanguageModel editModel,
                         if (modelMap.get("reasoning_effort").toString().equals("high")) {
                             // tolerate longer delays
                             builder = builder.defaultRequestParameters(reasoningEffort)
-                                    .timeout(Duration.of(2, java.time.temporal.ChronoUnit.MINUTES));
+                                    .timeout(Duration.of(3, java.time.temporal.ChronoUnit.MINUTES));
                         }
                     }
                     yield builder.build();
