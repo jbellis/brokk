@@ -102,18 +102,18 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
         candidates.addAll(foundCmd.argumentCompleter().complete(argInput));
     }
 
-    public String getInput() {
-        return readLineInternal("\n> ");
+    public String getInput(String prefill) {
+        return readLineInternal("\n> ", prefill);
     }
 
     public String getRawInput() {
-        return readLineInternal("");
+        return readLineInternal("", "");
     }
 
-    private String readLineInternal(String prompt) {
+    private String readLineInternal(String prompt, String prefill) {
         try {
             // Prompt
-            return reader.readLine(prompt);
+            return reader.readLine(prompt, null, prefill);
         } catch (UserInterruptException e) {
             // User pressed Ctrl-C
             toolOutput("Canceled with ^C (use ^D to exit)");

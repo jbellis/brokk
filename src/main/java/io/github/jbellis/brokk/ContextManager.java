@@ -772,20 +772,7 @@ public class ContextManager implements IContextManager {
             return OperationResult.error("nothing to commit");
         }
 
-        // Show the message and ask for confirmation
-        io.toolOutput("Commit message:\n" + commitMsg);
-        if (!io.confirmAsk("Use this commit message?")) {
-            return OperationResult.success("Commit cancelled");
-        }
-
-        // Commit with the message 
-        try {
-            Environment.instance.gitCommit(commitMsg);
-        } catch (IOException e) {
-            return OperationResult.error("Unable to commit: " + e.getMessage());
-        }
-
-        return OperationResult.success("Changes committed with message: " + commitMsg);
+        return OperationResult.prefill("$git commit -a -m \"%s\"".formatted(commitMsg));
     }
 
     private OperationResult cmdRefresh(Analyzer analyzer) {
@@ -1078,10 +1065,15 @@ public class ContextManager implements IContextManager {
     public enum OperationStatus {
         SUCCESS,
         SKIP_SHOW,
+        PREFILL,
         ERROR
     }
 
     public record OperationResult(OperationStatus status, String message) {
+        public static OperationResult prefill(String msg) {
+            return new OperationResult(OperationStatus.PREFILL, msg);
+        }
+
         public static OperationResult success() {
             return new OperationResult(OperationStatus.SUCCESS, null);
         }

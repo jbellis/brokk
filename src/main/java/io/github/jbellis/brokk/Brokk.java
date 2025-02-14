@@ -114,8 +114,10 @@ public class Brokk {
      * Main REPL
      */
     private static void runLoop() {
+        String prefill = "";
         while (true) {
-            String input = io.getInput();
+            String input = io.getInput(prefill);
+            prefill = "";
             if (input == null || input.isEmpty()) {
                 continue;
             }
@@ -140,6 +142,9 @@ public class Brokk {
                         io.toolOutput(result.message());
                     }
                     contextManager.show();
+                }
+                case PREFILL -> {
+                    prefill = result.message();
                 }
                 case SKIP_SHOW -> {
                     // do nothing

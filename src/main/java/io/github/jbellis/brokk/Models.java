@@ -150,6 +150,7 @@ public record Models(
         } catch (Exception e) {
             System.out.println("Error parsing yaml: " + e.getMessage());
             System.exit(1);
+            throw new RuntimeException(e); // make compiler happy
         }
     }
 
