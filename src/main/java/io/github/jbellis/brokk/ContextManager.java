@@ -769,10 +769,13 @@ public class ContextManager implements IContextManager {
 
     private OperationResult cmdCommit() {
         var messages = CommitPrompts.instance.collectMessages((ContextManager) coder.contextManager);
-        String commitMsg = coder.sendMessage("Inferring commit suggestion", messages);
-
-        if (commitMsg.isEmpty()) {
+        if (messages.isEmpty()) {
             return OperationResult.error("nothing to commit");
+        }
+
+        String commitMsg = coder.sendMessage("Inferring commit suggestion", messages);
+        if (commitMsg.isEmpty()) {
+            return OperationResult.error("LLM did not provide a commit message");
         }
 
         return OperationResult.prefill("$git commit -a -m \"%s\"".formatted(commitMsg));
