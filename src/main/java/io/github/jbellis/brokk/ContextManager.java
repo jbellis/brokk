@@ -144,7 +144,7 @@ public class ContextManager implements IContextManager {
                         "Set mode: EDIT or APPLY",
                         this::cmdMode,
                         "<EDIT|APPLY>",
-                        args -> List.of()
+                        this::completeApply
                 ),
                 new Command(
                         "copy",
@@ -795,6 +795,12 @@ public class ContextManager implements IContextManager {
         return OperationResult.prefill("$git commit -a -m \"%s\"".formatted(commitMsg));
     }
     
+    private List<Candidate> completeApply(String partial) {
+        return Stream.of("EDIT", "APPLY")
+                .map(Candidate::new)
+                .toList();
+    }
+
     private OperationResult cmdMode(String args) {
         String modeArg = args.trim().toUpperCase();
         if ("EDIT".equals(modeArg)) {

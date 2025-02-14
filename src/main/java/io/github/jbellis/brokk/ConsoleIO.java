@@ -73,30 +73,23 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
         List<String> words = parsedLine.words();
         String cmdInput = words.get(0).startsWith("/") ? words.get(0).substring(1) : words.get(0);
 
-        // Find commands matching the input.
-        List<Command> matchingCommands = commands.stream()
-                .filter(cmd -> cmd.name().startsWith(cmdInput))
-                .toList();
-        if (matchingCommands.isEmpty()) {
+        // For single-word input (command name), use StringsCompleter
+        if (words.size() == 1) {
+            commands.forEach(cmd -> {
+                String cmdName = "/" + cmd.name();
+                candidates.add(new Candidate(cmdName, cmdName, null, cmd.description(), null, null, true));
+            });
             return;
         }
 
-        // If multiple commands match, show them as candidates.
-        if (matchingCommands.size() > 1) {
-            matchingCommands.forEach(mc ->
-                candidates.add(new Candidate("/" + mc.name(),
-                                             "/" + mc.name(),
-                                             null,
-                                             mc.description(),
-                                             null,
-                                             null,
-                                             true))
-            );
+        // For arguments, find the exact command and delegate to its completer
+        var foundCmd = commands.stream()
+                .filter(cmd -> cmd.name().equals(cmdInput))
+                .findFirst()
+                .orElse(null);
+        if (foundCmd == null) {
             return;
         }
-
-        // Exactly one command matched: delegate to its argument completer.
-        var foundCmd = matchingCommands.getFirst();
         // If there is a second token already, use it; otherwise, use an empty string.
         String argInput = words.size() > 1 ? parsedLine.word() : "";
         candidates.addAll(foundCmd.argumentCompleter().complete(argInput));
