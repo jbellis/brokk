@@ -969,12 +969,9 @@ public class ContextManager implements IContextManager {
     }
 
     private List<Candidate> completeDrop(String partial) {
-        String partialLower = partial.toLowerCase();
-
         return Streams.concat(currentContext.editableFiles(),
-                              currentContext.readonlyFiles(),
-                              currentContext.virtualFragments())
-                .filter(f -> f.source().toLowerCase().startsWith(partialLower))
+                            currentContext.readonlyFiles(), 
+                            currentContext.virtualFragments())
                 .map(f -> new Candidate(f.source()))
                 .collect(Collectors.toList());
     }

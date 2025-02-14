@@ -64,7 +64,7 @@ public interface ContextFragment {
         @Override
         public String source() {
             // 1-based label in brackets
-            return "[%d]".formatted(position + 1);
+            return "%d".formatted(position + 1);
         }
 
         public final void renumber(int newPosition) {
@@ -275,7 +275,7 @@ public interface ContextFragment {
 
         @Override
         public String source() {
-            return "[0] [Auto]";
+            return "0 [Auto]";
         }
 
         @Override
