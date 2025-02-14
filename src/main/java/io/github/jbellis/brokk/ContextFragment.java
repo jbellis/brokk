@@ -7,12 +7,18 @@ import java.util.Set;
 import java.util.concurrent.Future;
 
 public interface ContextFragment {
-    String source(); // display name for interaction with commands
-    String description(); // longer description displayed to user
-    String text() throws IOException; // content
-    String format() throws IOException; // format for LLM
+    /** display name for interaction with commands */
+    String source();
+    /** longer description displayed to user */
+    String description();
+    /** raw content */
+    String text() throws IOException;
+    /** content formatted for LLM */
+    String format() throws IOException;
+    /** fq classes found in this fragment */
     Set<String> classnames(Analyzer analyzer);
-
+    /** should classes found in this fragment be included in AutoContext? */
+    boolean isEligibleForAutoContext();
 
     record PathFragment(RepoFile file) implements ContextFragment {
         @Override
@@ -42,6 +48,11 @@ public interface ContextFragment {
         @Override
         public Set<String> classnames(Analyzer analyzer) {
             return analyzer.classesInFile(file);
+        }
+
+        @Override
+        public boolean isEligibleForAutoContext() {
+            return false;
         }
 
         @Override
@@ -113,6 +124,11 @@ public interface ContextFragment {
         }
 
         @Override
+        public boolean isEligibleForAutoContext() {
+            return true;
+        }
+
+        @Override
         public String toString() {
             return "StringFragment('%s')".formatted(description);
         }
@@ -143,6 +159,11 @@ public interface ContextFragment {
                 }
             }
             return "(Summarizing. This does not block LLM requests)";
+        }
+
+        @Override
+        public boolean isEligibleForAutoContext() {
+            return true;
         }
 
         @Override
@@ -178,6 +199,11 @@ public interface ContextFragment {
         @Override
         public String description() {
             return "stacktrace of " + exception;
+        }
+
+        @Override
+        public boolean isEligibleForAutoContext() {
+            return true;
         }
     }
 
@@ -215,6 +241,11 @@ public interface ContextFragment {
         public String description() {
             return "Uses of %s".formatted(targetIdentifier);
         }
+
+        @Override
+        public boolean isEligibleForAutoContext() {
+            return true;
+        }
     }
 
     class SkeletonFragment extends VirtualFragment {
@@ -242,6 +273,11 @@ public interface ContextFragment {
         @Override
         public String description() {
             return "Summary of " + String.join(", ", shortClassnames.stream().sorted().toList());
+        }
+
+        @Override
+        public boolean isEligibleForAutoContext() {
+            return false;
         }
 
         @Override
@@ -294,6 +330,11 @@ public interface ContextFragment {
         @Override
         public String description() {
             return String.join(", ", skeletons.stream().flatMap(s -> s.shortClassnames.stream()).toList());
+        }
+
+        @Override
+        public boolean isEligibleForAutoContext() {
+            return false;
         }
 
         @Override

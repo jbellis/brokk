@@ -189,6 +189,13 @@ public class Context {
             debug("pagerank disabled");
             return AutoContext.DISABLED;
         }
+        
+        // Collect ineligible classnames from fragments not eligible for auto-context
+        Set<String> ineligibleClassnames = Streams.concat(editableFiles.stream(), readonlyFiles.stream(), virtualFragments.stream())
+                .filter(f -> !f.isEligibleForAutoContext())
+                .flatMap(f -> f.classnames(analyzer).stream())
+                .collect(Collectors.toSet());
+
         var seeds = Streams.concat(editableFiles.stream(), readonlyFiles.stream(), virtualFragments.stream())
                 .flatMap(f -> f.classnames(analyzer).stream())
                 .collect(Collectors.toSet());
@@ -205,7 +212,12 @@ public class Context {
         var skeletons = new ArrayList<SkeletonFragment>();
         for (var pair : pagerankResults) {
             String fqName = pair._1;
-            if (analyzer.classInProject(fqName)) {
+            
+            // Check if the class or its parent is in ineligible classnames
+            boolean eligible = !(ineligibleClassnames.contains(fqName) ||
+                            (fqName.contains("$") && ineligibleClassnames.contains(fqName.substring(0, fqName.indexOf('$')))));
+            
+            if (eligible && analyzer.classInProject(fqName)) {
                 var opt = analyzer.getSkeleton(fqName);
                 if (opt.isDefined()) {
                     var shortName = fqName.substring(fqName.lastIndexOf('.') + 1);

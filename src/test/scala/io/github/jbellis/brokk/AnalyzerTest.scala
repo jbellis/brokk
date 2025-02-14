@@ -153,12 +153,11 @@ class AnalyzerTest {
     import scala.jdk.javaapi._
     
     val seeds = asJava(List("D"))
-    val ranked = analyzer.getPagerank(seeds, 2)
+    val ranked = analyzer.getPagerank(seeds, 3)
     
     // A and B should rank highly as they are both called by D
-    assert(ranked.size() == 2, ranked)
-    val classes = asScala(ranked).map(_._1)
-    // TODO is this a bug?
+    assert(ranked.size() == 3, ranked)
+    val classes = asScala(ranked).map(_._1).toSet - "D"
     assertEquals(Set("B", "AnonymousUsage.foo.Runnable$0"), classes.toSet)
   }
 
