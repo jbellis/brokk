@@ -52,6 +52,7 @@ and running a JDK then you should wait a bit longer.
 2. ./mvnw package
 3. cd /path/to/my/project
 3. export ANTHROPIC_API_KEY=xxy
+   or, export OPENAI_API_KEY=xxy
    - other models are technically supported, making them easier to use is high priority.
      In the meantime, look at Models.java for how to set up a ~/.config/brokk/brokk.yml file with
      your preferred option.

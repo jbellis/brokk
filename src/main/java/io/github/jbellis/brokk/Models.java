@@ -34,38 +34,35 @@ public record Models(
 ) {
     // correct for these models
     private static final int DEFAULT_MAX_TOKENS = 8192;
-    private static final ObjectMapper mapper = new ObjectMapper();
-    public static final Map<String, Object> MODEL_METADATA;
-    
-    /**
-     * If the user does not have a config file, or if there's a parse error, fallback to some default.
-     */
-    private static final String DEFAULT_CONFIG = """
+
+    private static final String OPENAI_DEFAULTS = """
+    edit_model:
+      provider: openai
+      key: OPENAI_API_KEY
+      name: o3-mini
+      # reasoning_effort: high # TODO when langchain4j supports it
+      maxTokens: 100000
+
+    quick_model:
+      provider: openai
+      key: OPENAI_API_KEY
+      name: gpt-4o-mini
+      maxTokens: 16384
+    """;
+
+    private static final String ANTHROPIC_DEFAULTS = """
     edit_model:
       provider: anthropic
       key: ANTHROPIC_API_KEY
-      name: claude-3-5-sonnet-20241022
+      name: claude-3-5-sonnet-latest
       maxTokens: 8192
 
     quick_model:
       provider: anthropic
       key: ANTHROPIC_API_KEY
-      name: claude-3-5-haiku-20241022
-      maxTokens: 8192
+      name: claude-3-haiku-20240307
+      maxTokens: 4096
     """;
-
-    static {
-        try {
-            MODEL_METADATA = mapper.readValue(
-                Models.class.getResourceAsStream("/model-metadata.json"),
-                Map.class
-            );
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to load model metadata", e);
-        }
-    }
-
-    
 
     /**
      * Attempts to load model configurations from <code>~/.config/brokk/brokk.yaml</code>.
@@ -115,20 +112,32 @@ public record Models(
      *         plus each model's name.
      */
     public static Models load() {
+        // First try loading from yaml file
         Path configPath = Path.of(System.getProperty("user.home"), ".config", "brokk", "brokk.yml");
-        String yamlStr;
-        if (!Files.exists(configPath)) {
-            yamlStr = DEFAULT_CONFIG;
-        } else {
+        if (Files.exists(configPath)) {
             try {
-                yamlStr = Files.readString(configPath);
+                String yamlStr = Files.readString(configPath);
+                return buildModelsFromYaml(yamlStr);
             } catch (IOException e) {
                 System.out.println("Error reading " + configPath + ": " + e.getMessage());
-                yamlStr = DEFAULT_CONFIG;
+                // Fall through to try defaults
             }
         }
 
-        return buildModelsFromYaml(yamlStr);
+        // Next try Anthropic if API key exists
+        String anthropicKey = System.getenv("ANTHROPIC_API_KEY");
+        if (anthropicKey != null && !anthropicKey.isBlank()) {
+            return buildModelsFromYaml(ANTHROPIC_DEFAULTS);
+        }
+
+        // Next try OpenAI if API key exists
+        String openaiKey = System.getenv("OPENAI_API_KEY");
+        if (openaiKey != null && !openaiKey.isBlank()) {
+            return buildModelsFromYaml(OPENAI_DEFAULTS);
+        }
+
+        // If no API keys are available, return disabled models
+        return disabled();
     }
 
     private static Models buildModelsFromYaml(String yamlStr) {
@@ -223,7 +232,7 @@ public record Models(
                         .apiKey(resolvedKey)
                         .baseUrl(url)
                         .modelName(modelName)
-                        .maxTokens(maxTokens);
+                        .maxCompletionTokens(maxTokens);
                 maybeSetTemperature(temperature, builder::temperature);
                 return builder.build();
             } else {
@@ -231,7 +240,7 @@ public record Models(
                         .apiKey(resolvedKey)
                         .baseUrl(url)
                         .modelName(modelName)
-                        .maxTokens(maxTokens);
+                        .maxCompletionTokens(maxTokens);
                 maybeSetTemperature(temperature, builder::temperature);
                 return builder.build();
             }
@@ -244,15 +253,17 @@ public record Models(
                     var builder = OpenAiStreamingChatModel.builder()
                             .apiKey(resolvedKey)
                             .modelName(modelName)
-                            .maxTokens(maxTokens);
+                            .maxCompletionTokens(maxTokens);
                     maybeSetTemperature(temperature, builder::temperature);
+                    // maybeSetReasoningEffort((String) modelMap.get("reasoning_effort"), builder::reasoningEffort);
                     yield builder.build();
                 } else {
                     var builder = OpenAiChatModel.builder()
                             .apiKey(resolvedKey)
                             .modelName(modelName)
-                            .maxTokens(maxTokens);
+                            .maxCompletionTokens(maxTokens);
                     maybeSetTemperature(temperature, builder::temperature);
+                    // maybeSetReasoningEffort((String) modelMap.get("reasoning_effort"), builder::reasoningEffort);
                     yield builder.build();
                 }
             }
@@ -281,6 +292,12 @@ public record Models(
      * Conditionally set temperature on an OpenAI/Anthropic builder if the
      * user actually specified a "temperature" in the map.
      */
+    private static void maybeSetReasoningEffort(String effort, Consumer<String> setter) {
+        if (effort != null && !effort.isBlank()) {
+            setter.accept(effort);
+        }
+    }
+
     private static void maybeSetTemperature(Double temperature, Consumer<Double> setter) {
         if (temperature != null) {
             setter.accept(temperature);
