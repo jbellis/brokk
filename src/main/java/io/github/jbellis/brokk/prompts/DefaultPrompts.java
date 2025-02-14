@@ -30,9 +30,9 @@ public abstract class DefaultPrompts {
         var editableContents = cm.getEditableSummary();
         var readOnlyContents = cm.getReadOnlySummary();
         return """
-                <introduction>
+                <instructions>
                 %s
-                </introduction>
+                </instructions>
                 <workspace>
                 - Root: %s
                 - Editable files: %s

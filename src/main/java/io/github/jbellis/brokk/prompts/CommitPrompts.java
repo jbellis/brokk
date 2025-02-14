@@ -42,9 +42,9 @@ public abstract class CommitPrompts extends DefaultPrompts {
             instructionsRaw = "Here is my diff, please give me a concise commit message.";
         }
         var instructions = """
-        <instructions>
+        <goal>
         %s
-        </instructions>
+        </goal>
         """.formatted(instructionsRaw);
         return List.of(new SystemMessage(systemIntro()),
                        new UserMessage(context + "\n\n" + instructions));

@@ -660,12 +660,13 @@ public class ContextManager implements IContextManager {
 
         var messages = PreparePrompts.instance.collectMessages(this);
         var st = """
-        <instructions>
-        Here is the request to evaluate.  Do NOT write code yet!
-        Just evaluate whether you have the right summaries and files available.
-        
+        <task>
         %s
-        </instructions>
+        </task>
+        <goal>
+        Evaluate whether you have the right summaries and files available to complete the task.
+        DO NOT write code yet, just summarize the task and list any additional files you need.
+        </goal>
         """.formatted(msg.trim()).stripIndent();
         messages.add(new UserMessage(st.formatted(msg)));
         String response = coder.sendStreaming(messages);
@@ -684,7 +685,7 @@ public class ContextManager implements IContextManager {
             if (args == null || args.trim().isEmpty()) {
                 // Original behavior - copy everything
                 var msgs = ArchitectPrompts.instance.collectMessages(this);
-                content = msgs.stream()
+                content = Streams.concat(msgs.stream(), Stream.of(new UserMessage("<goal>\n\n</goal>")))
                         .filter(m -> !(m instanceof AiMessage))
                         .map(ContextManager::getText)
                         .collect(Collectors.joining("\n\n"));
