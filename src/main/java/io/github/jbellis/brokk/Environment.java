@@ -194,17 +194,6 @@ public class Environment implements Closeable {
         }
     }
 
-    public void gitCommit(String message) throws IOException {
-        try {
-            git.commit()
-               .setMessage(message)
-               .setAll(true)
-               .call();
-        } catch (GitAPIException e) {
-            throw new IOException("Unable to commit changes: " + e.getMessage());
-        }
-    }
-
     public void gitAdd(String relName) throws IOException {
         try {
             git.add()
