@@ -144,6 +144,9 @@
                     <includes>
                         <include>**/*.scala</include>
                     </includes>
+                    <args>
+                        <arg>-print-lines</arg>
+                    </args>
                 </configuration>
                 <executions>
                     <execution>
