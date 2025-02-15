@@ -477,33 +477,6 @@ class EditBlockTest {
         assertNotEquals(List.of(), failed);
     }
 
-//    /**
-//     * Checking shell-fence detection: the code can skip lines marked as shell commands.
-//     * (Roughly analogous to python's test shell code fence usage.)
-//     */
-//    @Test
-//    void testShellFenceSkipping() {
-//        String edit = """
-//                ```bash
-//                echo "this is a shell command"
-//                ls -la
-//                ```
-//                foo.txt
-//                <<<<<<< SEARCH
-//                one
-//                =======
-//                two
-//                >>>>>>> REPLACE
-//                """;
-//
-//        // We expect 1 block referencing foo.txt.
-//        EditBlock.SearchReplaceBlock[] blocks = parseBlocks(edit, Set.of(Paths.get("foo.txt")));
-//        assertEquals(1, blocks.length);
-//        assertEquals("foo.txt", blocks[0].filename().toString());
-//        assertEquals("one\n", blocks[0].beforeText());
-//        assertEquals("two\n", blocks[0].afterText());
-//    }
-
     /**
      * Test detection of a possible "mangled" or fuzzy filename match.
      */
@@ -585,31 +558,4 @@ class EditBlockTest {
         String updated = fuzzyReplace(original, search, replace);
         assertEquals("initial content\n", updated);
     }
-
-//    /**
-//     * Test that multiple consecutive shell fences do not break our block detection.
-//     */
-//    @Test
-//    void testMultipleShellFencesInARow() {
-//        String edit = """
-//                ```sh
-//                echo "1"
-//                ```
-//                ```bash
-//                echo "2"
-//                ```
-//                foo.txt
-//                <<<<<<< SEARCH
-//                x
-//                =======
-//                y
-//                >>>>>>> REPLACE
-//                """;
-//
-//        EditBlock.SearchReplaceBlock[] blocks = parseBlocks(edit, Set.of(Paths.get("foo.txt")));
-//        assertEquals(1, blocks.length);
-//        assertEquals("foo.txt", blocks[0].filename().toString());
-//        assertEquals("x\n", blocks[0].beforeText());
-//        assertEquals("y\n", blocks[0].afterText());
-//    }
 }

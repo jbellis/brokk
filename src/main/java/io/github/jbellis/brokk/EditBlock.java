@@ -141,12 +141,6 @@ public class EditBlock {
     // Default fence to match triple-backtick usage, e.g. ``` ... ```
     static final String[] DEFAULT_FENCE = {"```", "```"};
 
-    // For detecting shell fences
-    private static final List<String> SHELL_STARTS = List.of(
-            "```bash", "```sh", "```shell", "```cmd", "```batch", "```powershell",
-            "```ps1", "```zsh", "```fish", "```ksh", "```csh", "```tcsh"
-    );
-
     private EditBlock() {
         // utility class
     }
@@ -170,23 +164,7 @@ public class EditBlock {
         while (i < lines.length) {
             String trimmed = lines[i].trim();
 
-            // 1) Check if it's a shell fence block
-            if (isShellFence(lines[i]) && !isNextLineHead(lines, i + 1)) {
-                i++;
-                StringBuilder shellContent = new StringBuilder();
-                while (i < lines.length && !lines[i].trim().startsWith("```")) {
-                    shellContent.append(lines[i]).append("\n");
-                    i++;
-                }
-                // skip the closing ```
-                if (i < lines.length && lines[i].trim().startsWith("```")) {
-                    i++;
-                }
-                blocks.add(new SearchReplaceBlock(null, null, null, shellContent.toString()));
-                continue;
-            }
-
-            // 2) Check if it's a <<<<<<< SEARCH block
+            // Check if it's a <<<<<<< SEARCH block
             if (HEAD.matcher(trimmed).matches()) {
                 try {
                     // Attempt to find a filename in the preceding ~3 lines
@@ -772,30 +750,6 @@ public class EditBlock {
      */
     public static String findSimilarLines(String search, String content) {
         return findSimilarLines(search, content, 0.6);
-    }
-
-    private static boolean isShellFence(String line) {
-        if (!line.trim().startsWith("```")) {
-            return false;
-        }
-        String rest = line.trim().substring(3).toLowerCase(Locale.ROOT);
-        // If it matches known shell starts or line is just triple backticks
-        if (SHELL_STARTS.stream().anyMatch(line.trim()::startsWith)) {
-            return true;
-        }
-        // fallback check
-        return rest.startsWith("bash")
-                || rest.startsWith("sh")
-                || rest.startsWith("shell")
-                || rest.startsWith("cmd")
-                || rest.startsWith("batch")
-                || rest.startsWith("powershell")
-                || rest.startsWith("ps1")
-                || rest.startsWith("zsh")
-                || rest.startsWith("fish")
-                || rest.startsWith("ksh")
-                || rest.startsWith("csh")
-                || rest.startsWith("tcsh");
     }
 
     /**
