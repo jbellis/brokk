@@ -99,9 +99,9 @@ public class ContextManager implements IContextManager {
         return List.of(
                 new Command(
                         "add",
-                        "Add files by name or by fragment references",
+                        "Add editable files by name or by fragment references",
                         this::cmdAdd,
-                        "<files>|<fragment>",
+                        "<files|fragment>",
                         this::completeAdd
                 ),
                 new Command(
@@ -130,7 +130,7 @@ public class ContextManager implements IContextManager {
                 ),
                 new Command(
                         "mode",
-                        "Set mode: EDIT or APPLY",
+                        "Set LLM request mode",
                         this::cmdMode,
                         "<EDIT|APPLY>",
                         this::completeApply
@@ -146,7 +146,7 @@ public class ContextManager implements IContextManager {
                         "drop",
                         "Drop files from chat (all if no args)",
                         this::cmdDrop,
-                        "<files>|<fragment>",
+                        "[files|fragment]",
                         this::completeDrop
                 ),
                 new Command(
@@ -156,9 +156,9 @@ public class ContextManager implements IContextManager {
                 ),
                 new Command(
                         "read",
-                        "Add files by name or by fragment references",
+                        "Add read-only files by name or by fragment references",
                         this::cmdReadOnly,
-                        "<files>|<fragment>",
+                        "<files|fragment>",
                         this::completeRead
                 ),
                 new Command(
@@ -173,14 +173,14 @@ public class ContextManager implements IContextManager {
                 ),
                 new Command(
                         "paste",
-                        "Paste content to add as read-only snippet",
+                        "Paste content as read-only snippet",
                         args -> cmdPaste()
                 ),
                 new Command(
                         "usage",
-                        "Capture the source code of usages of the target method or field",
+                        "Capture the source code of usages of the target class, method, or field",
                         this::cmdUsage,
-                        "<method/field>",
+                        "<class|member>",
                         input -> completeUsage(input, this.analyzer)
                 ),
                 new Command(
@@ -192,7 +192,7 @@ public class ContextManager implements IContextManager {
                         "summarize",
                         "Generate a skeleton summary of the named class or fragment",
                         this::cmdSummarize,
-                        "<classname>",
+                        "<class|fragment>",
                         this::completeSummarize
                 ),
                 new Command(
@@ -721,21 +721,26 @@ public class ContextManager implements IContextManager {
         String cmdText = commands.stream()
                 .sorted(Comparator.comparing(Command::name))
                 .map(cmd -> {
-                    var commandArgs = cmd.args().isEmpty() ? "" : " " + cmd.args();
-                    var cmdString = "/" + cmd.name() + commandArgs;
-                    return formatCmdHelp(cmdString, cmd.description);
+                    var cmdName = "/" + cmd.name();
+                    return formatCmdHelpTwoLines(cmdName, cmd.args(), cmd.description);
                 })
                 .collect(Collectors.joining("\n"));
-        io.toolOutput("Available commands:\n");
-        io.toolOutput(formatCmdHelp("$[cmd]", "Execute cmd in a shell and show its output"));
-        io.toolOutput(formatCmdHelp("$$[cmd]", "Execute cmd in a shell and capture its stdout as context"));
+        io.toolOutput("Available commands:");
+        io.toolOutput("<> denotes a required parameter, [] denotes optional");
+        io.toolOutput(formatCmdHelpTwoLines("$", "<cmd>", "Execute cmd in a shell and show its output"));
+        io.toolOutput(formatCmdHelpTwoLines("$$", "<cmd>", "Execute cmd in a shell and capture its output as context"));
         io.toolOutput(cmdText);
-        io.toolOutput("TAB or Ctrl-space autocompletes in /add, /read, /drop, /edit commands");
+        io.toolOutput("TAB or Ctrl-space autocompletes");
         return OperationResult.skipShow();
     }
 
-    private static String formatCmdHelp(String cmdString, String cmdDescription) {
-        return String.format("%-20s - %s", cmdString, cmdDescription);
+    private static String formatCmdHelpTwoLines(String cmdName, String cmdArgs, String cmdDescription) {
+        if (cmdArgs.isEmpty()) {
+            cmdArgs = "[no parameters]";
+        }
+        String firstLine = String.format("%-16s %s", cmdName, cmdArgs);
+        String secondLine = String.format("%16s - %s", "", cmdDescription);
+        return firstLine + "\n" + secondLine;
     }
 
     private OperationResult cmdAsk(String input) {
