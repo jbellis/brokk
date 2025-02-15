@@ -501,9 +501,9 @@ public class ContextManager implements IContextManager {
         String response = coder.sendStreaming(messages);
         if (response != null) {
             addToHistory(List.of(messages.getLast(), new AiMessage(response)));
+            var mentioned = findMissingFileMentions(response);
+            confirmAddRequestedFiles(mentioned);
         }
-        var mentioned = findMissingFileMentions(response);
-        confirmAddRequestedFiles(mentioned);
 
         return OperationResult.success();
     }
