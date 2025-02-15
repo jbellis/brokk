@@ -535,7 +535,7 @@ public class ContextManager implements IContextManager {
             return OperationResult.error("Failed to copy to clipboard: " + e.getMessage());
         }
 
-        if (coder.mode != Coder.Mode.APPLY) {
+        if (args.isBlank() && coder.mode != Coder.Mode.APPLY) {
             coder.mode = Coder.Mode.APPLY;
             io.toolOutput("/mode set to APPLY by /copy");
         }
