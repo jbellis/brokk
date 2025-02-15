@@ -71,8 +71,8 @@ public class Coder {
             // Actually send the message to the LLM and get the response
             logger.debug("Sending to LLM [only last message shown]: {}", messages.getLast());
             String llmResponse = sendStreaming(messages);
+            logger.debug("response:\n{}", llmResponse);
             if (llmResponse == null) {
-                logger.debug("null response");
                 // Interrupted or error.  sendMessage is responsible for giving feedback to user
                 return;
             }
