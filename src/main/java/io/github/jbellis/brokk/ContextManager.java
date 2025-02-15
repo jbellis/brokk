@@ -54,7 +54,7 @@ public class ContextManager implements IContextManager {
         if (gitTrackedFilesCache != null) {
             return gitTrackedFilesCache;
         }
-        gitTrackedFilesCache = Environment.instance.getGitTrackedFiles();
+        gitTrackedFilesCache = GitRepo.instance.getTrackedFiles();
         return gitTrackedFilesCache;
     }
 
@@ -357,7 +357,7 @@ public class ContextManager implements IContextManager {
                     try {
                         var newFile = createFile(token);
                         addFiles(List.of(newFile));
-                        Environment.instance.gitAdd(newFile.toString());
+                        GitRepo.instance.add(newFile.toString());
                     } catch (Exception e) {
                         return OperationResult.error(
                                 "Error creating filename %s: %s".formatted(token, e.getMessage()));
@@ -447,7 +447,7 @@ public class ContextManager implements IContextManager {
      * Re-usable method for short-hash commit autocompletion.
      */
     private List<Candidate> completeCommits(String partial) {
-        List<String> lines = Environment.instance.gitLogShort(); // e.g. short commits
+        List<String> lines = GitRepo.instance.logShort(); // e.g. short commits
         return lines.stream()
                 .filter(line -> line.startsWith(partial))
                 .map(Candidate::new)
@@ -642,7 +642,7 @@ public class ContextManager implements IContextManager {
     }
 
     private OperationResult cmdRefresh(Analyzer analyzer) {
-        Environment.instance.gitRefresh();
+        GitRepo.instance.refresh();
         analyzer.rebuild();
         analyzer.writeGraphAsync();
         onRefresh();

@@ -4,7 +4,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import io.github.jbellis.brokk.ContextManager;
-import io.github.jbellis.brokk.Environment;
+import io.github.jbellis.brokk.GitRepo;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -14,7 +14,7 @@ public abstract class CommitPrompts extends DefaultPrompts {
 
     @Override
     public List<ChatMessage> collectMessages(ContextManager cm) {
-        var diffTxt = Environment.instance.gitDiff();
+        var diffTxt = GitRepo.instance.diff();
         if (diffTxt.isEmpty()) {
             return List.of(new SystemMessage("No changes to commit."));
         }

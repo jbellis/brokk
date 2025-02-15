@@ -1,63 +1,19 @@
 package io.github.jbellis.brokk;
 
-import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.errors.GitAPIException;
-import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.revwalk.RevWalk;
-import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
-import org.eclipse.jgit.treewalk.TreeWalk;
-import org.eclipse.jgit.treewalk.filter.PathFilter;
-import org.eclipse.jgit.treewalk.filter.PathFilterGroup;
 import sun.misc.Signal;
 
-import java.io.ByteArrayOutputStream;
-import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Scanner;
-import java.util.stream.Collectors;
 
-public class Environment implements Closeable {
+public class Environment {
     public static final Environment instance = new Environment();
 
-    private final Repository repository;
-    private final Git git;
-    private final Path root;
-
     private Environment() {
-        try {
-            root = findGitRoot();
-            if (root == null) {
-                System.out.println("No git repository found");
-                System.exit(1);
-            }
-
-            repository = new FileRepositoryBuilder()
-                    .setGitDir(root.resolve(Path.of(".git")).toFile())
-                    .build();
-            git = new Git(repository);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to initialize git repository", e);
-        }
     }
     
-    public void gitRefresh() {
-        repository.getRefDatabase().refresh();
-    }
-
-    @Override
-    public void close() {
-        git.close();
-        repository.close();
-    }
-
     /**
      * Runs a shell command using /bin/sh, returning {stdout, stderr}.
      */
@@ -136,34 +92,6 @@ public class Environment implements Closeable {
         return ContextManager.OperationResult.success(output.isEmpty() ? "[command completed successfully with no output]" : output);
     }
 
-    public List<String> gitLogShort() {
-        try {
-            List<String> logs = new ArrayList<>();
-            git.log()
-               .setMaxCount(50)
-               .call()
-               .forEach(commit -> 
-                   logs.add(commit.getName().substring(0, 7) + ":" + commit.getShortMessage()));
-            return logs;
-        } catch (GitAPIException e) {
-            throw new UncheckedIOException(new IOException(e));
-        }
-    }
-
-    /**
-     * @return the aboslute filename of the git root that cwd is part of, or null if none
-     */
-    public static Path findGitRoot() {
-        Path current = Path.of("").toAbsolutePath();
-        while (current != null) {
-            if (Files.exists(current.resolve(".git"))) {
-                return current;
-            }
-            current = current.getParent();
-        }
-        return null;
-    }
-
     public static void createDirIfNotExists(Path path) throws IOException {
         if (Files.exists(path)) {
             return;
@@ -171,110 +99,6 @@ public class Environment implements Closeable {
         if (!path.toFile().mkdir()) {
             throw new IOException("mkdir failed");
         }
-    }
-
-    public void gitAdd(String relName) throws IOException {
-        try {
-            git.add()
-                    .addFilepattern(relName)
-                    .call();
-        } catch (GitAPIException e) {
-            throw new IOException("Unable to add file %s to git %s".formatted(relName, e.getMessage()));
-        }
-    }
-
-    /**
-     * Returns a list of RepoFile objects representing all tracked files in the repository,
-     * including unchanged files from HEAD and any files with staged or unstaged modifications
-     * (changed, modified, added, removed) from the working directory.
-     */
-    public List<RepoFile> getGitTrackedFiles() {
-        Path gitRoot = findGitRoot();
-        assert gitRoot != null;
-        var trackedPaths = new HashSet<String>();
-        try {
-            // Walk the HEAD tree to capture all files in the last commit (unchanged tracked files)
-            var headTreeId = repository.resolve("HEAD^{tree}");
-            if (headTreeId != null) {
-                try (var revWalk = new RevWalk(repository);
-                     var treeWalk = new TreeWalk(repository))
-                {
-                    var headTree = revWalk.parseTree(headTreeId);
-                    treeWalk.addTree(headTree);
-                    treeWalk.setRecursive(true);
-                    while (treeWalk.next()) {
-                        trackedPaths.add(treeWalk.getPathString());
-                    }
-                }
-            }
-            // Add files that are in the working directory (or staged) with changes
-            var status = git.status().call();
-            trackedPaths.addAll(status.getChanged());
-            trackedPaths.addAll(status.getModified());
-            trackedPaths.addAll(status.getAdded());
-            trackedPaths.addAll(status.getRemoved());
-        } catch (IOException | GitAPIException e) {
-            throw new UncheckedIOException(new IOException(e));
-        }
-        return trackedPaths.stream()
-                .map(path -> new RepoFile(gitRoot, path))
-                .collect(Collectors.toList());
-    }
-
-    public String gitDiff() {
-        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-
-            // Gather tracked files only
-            var status = git.status().call();
-            var trackedPaths = new HashSet<String>();
-            trackedPaths.addAll(status.getModified());
-            trackedPaths.addAll(status.getChanged());
-            trackedPaths.addAll(status.getAdded());
-            trackedPaths.addAll(status.getRemoved());
-            trackedPaths.addAll(status.getMissing());
-
-            // Convert the tracked path strings into a TreeFilter
-            var filters = new ArrayList<PathFilter>();
-            for (String path : trackedPaths) {
-                filters.add(PathFilter.create(path));
-            }
-            var filterGroup = PathFilterGroup.create(filters);
-
-            // 1) Staged changes (HEAD vs index)
-            git.diff()
-                    .setCached(true)
-                    .setShowNameAndStatusOnly(false)
-                    .setPathFilter(filterGroup)
-                    .setOutputStream(out)
-                    .call();
-
-            String staged = out.toString(StandardCharsets.UTF_8);
-            out.reset();
-
-            // 2) Unstaged changes (index vs working tree)
-            git.diff()
-                    .setCached(false)
-                    .setShowNameAndStatusOnly(false)
-                    .setPathFilter(filterGroup)
-                    .setOutputStream(out)
-                    .call();
-
-            String unstaged = out.toString(StandardCharsets.UTF_8);
-
-            // Combine with a blank line in between if both are non-empty
-            if (!staged.isEmpty() && !unstaged.isEmpty()) {
-                return staged + "\n" + unstaged;
-            }
-            return staged + unstaged;
-
-        } catch (IOException | GitAPIException e) {
-            throw new UncheckedIOException(new IOException(e));
-        }
-    }
-
-
-    public Path getRoot() {
-        return root;
     }
 
     public record ProcessResult(int status, String stdout, String stderr) {}

@@ -108,7 +108,7 @@ public class EditBlock {
                     succeeded.add(block);
                     if (isCreateNew) {
                         try {
-                            Environment.instance.gitAdd(file.toString());
+                            GitRepo.instance.add(file.toString());
                             io.toolOutput("Added to git " + file);
                         } catch (IOException e) {
                             io.toolError("Failed to git add " + file + ": " + e.getMessage());
