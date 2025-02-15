@@ -9,8 +9,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static io.github.jbellis.brokk.ContextManager.findClassesForMemberAccess;
-import static io.github.jbellis.brokk.ContextManager.getShortClassName;
+import static io.github.jbellis.brokk.Completions.findClassesForMemberAccess;
+import static io.github.jbellis.brokk.Completions.getShortClassName;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -137,7 +137,7 @@ public class CompleteUsageTest {
     public void testSameShortname() {
         var mock = new MockAnalyzer();
         // Input "Zz" -> should match both "x.y.Zz" and "w.u.Zz"
-        var matches = ContextManager.getClassnameMatches("Zz", mock.getAllClasses());
+        var matches = Completions.getClassnameMatches("Zz", mock.getAllClasses());
         assertEquals(Set.of("x.y.Zz", "w.u.Zz"), matches);
 
         var completions = ContextManager.completeUsage("Zz", mock);
@@ -155,15 +155,15 @@ public class CompleteUsageTest {
         );
         
         // Test simple name match
-        var matches = ContextManager.getClassnameMatches("Test", classes);
+        var matches = Completions.getClassnameMatches("Test", classes);
         assertEquals(Set.of("org.different.very.deep.structure.TestClass"), matches);
         
         // Test camel case match in deep hierarchy
-        matches = ContextManager.getClassnameMatches("NC", classes);
+        matches = Completions.getClassnameMatches("NC", classes);
         assertEquals(Set.of("org.different.very.deep.structure.nested.NestedClass"), matches);
         
         // Test exact class name match regardless of package depth
-        matches = ContextManager.getClassnameMatches("MyClass", classes);
+        matches = Completions.getClassnameMatches("MyClass", classes);
         assertEquals(Set.of("com.example.deep.package.hierarchy.MyClass"), matches);
     }
 
@@ -176,7 +176,7 @@ public class CompleteUsageTest {
             "org.other.Handler"
         );
         
-        var matches = ContextManager.getClassnameMatches("Handler", classes);
+        var matches = Completions.getClassnameMatches("Handler", classes);
         assertEquals(4, matches.size());
         assertTrue(matches.containsAll(classes));
     }
@@ -191,12 +191,12 @@ public class CompleteUsageTest {
         );
         
         // Test "ABC" matching only AbstractBaseController
-        var matches = ContextManager.getClassnameMatches("ABC", classes);
+        var matches = Completions.getClassnameMatches("ABC", classes);
         assertEquals(1, matches.size());
         assertTrue(matches.contains("com.example.deep.AbstractBaseController"));
         
         // Test "SBC" matching only SimpleBaseController
-        matches = ContextManager.getClassnameMatches("SBC", classes);
+        matches = Completions.getClassnameMatches("SBC", classes);
         assertEquals(1, matches.size());
         assertTrue(matches.contains("com.example.deepest.SimpleBaseController"));
     }
@@ -206,12 +206,12 @@ public class CompleteUsageTest {
         var mock = new MockAnalyzer();
         
         // Test class-only completions (no dot or $ in input)
-        var completions = ContextManager.completeClassesAndMembers("d", mock, false);
+        var completions = Completions.completeClassesAndMembers("d", mock, false);
         var values = toValues(completions);
         assertEquals(Set.of("Do", "Do$Re", "Do$Re$Sub"), values);
 
         // should match itself
-        var matches = ContextManager.getClassnameMatches("Do", List.of("Do", "Re"));
+        var matches = Completions.getClassnameMatches("Do", List.of("Do", "Re"));
         assertEquals(Set.of("Do"), new HashSet<>(matches));
     }
 
@@ -219,15 +219,15 @@ public class CompleteUsageTest {
     public void testShortNameCompletions() {
         var mock = new MockAnalyzer();
 
-        var completions = ContextManager.completeClassesAndMembers("d", mock, false);
+        var completions = Completions.completeClassesAndMembers("d", mock, false);
         // spelling out the classname doesn't change things
-        assertEquals(completions, ContextManager.completeClassesAndMembers("Do", mock, false));
+        assertEquals(completions, Completions.completeClassesAndMembers("Do", mock, false));
         assertEquals(Set.of("Do", "Do$Re", "Do$Re$Sub"), toValues(completions));
 
-        completions = ContextManager.completeClassesAndMembers("Do.", mock, false);
+        completions = Completions.completeClassesAndMembers("Do.", mock, false);
         assertEquals(Set.of("Do.foo", "Do.bar"), toValues(completions));
 
-        completions = ContextManager.completeClassesAndMembers("Do.", mock, false);
+        completions = Completions.completeClassesAndMembers("Do.", mock, false);
         assertEquals(Set.of("Do.foo", "Do.bar"), toValues(completions));
     }
 

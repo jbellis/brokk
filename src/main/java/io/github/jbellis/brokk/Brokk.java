@@ -4,8 +4,6 @@ import io.github.jbellis.brokk.ContextManager.OperationResult;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -45,7 +43,7 @@ public class Brokk {
         // Create the console with references to commands (we'll build them below)
         var commands = new ArrayList<>(contextManager.getCommands());
         // Dummy command to wire up completion for within-chat identifiers
-        commands.add(new ContextManager.Command("chat", null, null, null, (s -> ContextManager.completeClassesAndMembers(s, analyzer, false))));
+        commands.add(new ContextManager.Command("chat", null, null, null, (s -> Completions.completeClassesAndMembers(s, analyzer, false))));
         io = new ConsoleIO(sourceRoot, commands);
 
         // Create a Coder that deals with LLM calls/streaming

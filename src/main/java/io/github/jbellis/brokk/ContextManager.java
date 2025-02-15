@@ -21,9 +21,6 @@ import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 import java.io.File;
 import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -35,7 +32,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -221,7 +217,7 @@ public class ContextManager implements IContextManager {
 
     @VisibleForTesting
     static List<Candidate> completeUsage(String input, IAnalyzer analyzer) {
-        return completeClassesAndMembers(input, analyzer, true);
+        return Completions.completeClassesAndMembers(input, analyzer, true);
     }
 
     private List<Candidate> completeSummarize(String input) {
@@ -246,34 +242,25 @@ public class ContextManager implements IContextManager {
             if (fragment != null) {
                 return summarizeClasses(fragment.classnames(analyzer));
             }
+            // else fragment == null, so it's not a fragment reference
         } catch (IllegalArgumentException e) {
             return OperationResult.error(e.getMessage());
         }
 
-        // If not a fragment reference, try as a file path
-        var files = expandPath(trimmed);
-        if (files.isEmpty()) {
-            return OperationResult.error("No files found matching: " + trimmed);
+        // If not a fragment reference, try as file path(s)
+        var classnames = new HashSet<String>();
+        for (var rawName : Completions.parseQuotedFilenames(trimmed)) {
+            var matches = Completions.expandPath(root, rawName);
+            if (matches.isEmpty()) {
+                io.toolError("no files matched '%s'".formatted(rawName));
+            } else {
+                matches.stream()
+                        .flatMap(relFile -> analyzer.classesInFile(relFile).stream())
+                        .filter(fqcn -> !fqcn.contains("$"))
+                        .forEach(classnames::add);
+            }
         }
-        if (files.size() > 1) {
-            return OperationResult.error("Multiple files match '%s'. Please specify one of: %s"
-                    .formatted(trimmed, files.stream()
-                            .map(f -> "\n  " + f)
-                            .collect(Collectors.joining())));
-        }
-
-        return summarizeFile(files.getFirst());
-    }
-
-    private OperationResult summarizeFile(RepoFile file) {
-        var classesInFile = analyzer.classesInFile(file).stream()
-                .filter(name -> !name.contains("$"))
-                .collect(Collectors.toSet());
-        if (classesInFile.isEmpty()) {
-            classesInFile = analyzer.classesInFile(file);
-        }
-
-        return summarizeClasses(classesInFile);
+        return summarizeClasses(classnames);
     }
 
     @NotNull
@@ -299,7 +286,7 @@ public class ContextManager implements IContextManager {
         for (String fqcn : coalescedClassnames) {
             var skeleton = analyzer.getSkeleton(fqcn);
             if (skeleton.isDefined()) {
-                shortClassnames.add(getShortClassName(fqcn));
+                shortClassnames.add(Completions.getShortClassName(fqcn));
                 if (!combinedSkeleton.isEmpty()) {
                     combinedSkeleton.append("\n\n");
                 }
@@ -314,167 +301,6 @@ public class ContextManager implements IContextManager {
         pushContext();
         currentContext = currentContext.addSkeletonFragment(shortClassnames, coalescedClassnames, combinedSkeleton.toString());
         return OperationResult.success();
-    }
-
-    @VisibleForTesting
-    static List<Candidate> completeClassesAndMembers(String input, IAnalyzer analyzer, boolean returnFqn) {
-        var allClasses = analyzer.getAllClasses();
-        String partial = input.trim();
-
-        var matchingClasses = findClassesForMemberAccess(input, allClasses);
-        if (matchingClasses.size() == 1) {
-            // find matching members
-            List<Candidate> results = new ArrayList<>();
-            for (var matchedClass : matchingClasses) {
-                String memberPrefix = partial.substring(partial.lastIndexOf(".") + 1);
-                // Add members
-                var trueMembers = analyzer.getMembersInClass(matchedClass).stream().filter(m -> !m.contains("$")).toList();
-                for (String fqMember : trueMembers) {
-                    String shortMember = fqMember.substring(fqMember.lastIndexOf('.') + 1);
-                    if (shortMember.startsWith(memberPrefix)) {
-                        String display = returnFqn ? fqMember : getShortClassName(matchedClass) + "." + shortMember;
-                        results.add(new Candidate(display, display, null, null, null, null, true));
-                    }
-                }
-            }
-            return results;
-        }
-
-        // Otherwise, we're completing class names
-        String partialLower = partial.toLowerCase();
-        Set<String> matchedClasses = new TreeSet<>();
-
-        // Gather matching classes
-        if (partial.isEmpty()) {
-            matchedClasses.addAll(allClasses);
-        } else {
-            var st = returnFqn ? allClasses.stream() : allClasses.stream().map(ContextManager::getShortClassName);
-            st.forEach(name -> {
-                if (name.toLowerCase().startsWith(partialLower)
-                    || getShortClassName(name).toLowerCase().startsWith(partialLower))
-                {
-                    matchedClasses.add(name);
-                }
-            });
-
-            matchedClasses.addAll(getClassnameMatches(partial, allClasses));
-        }
-
-        // Return just the class names
-        return matchedClasses.stream()
-                .map(fqClass -> {
-                    String display = returnFqn ? fqClass : getShortClassName(fqClass);
-                    return new Candidate(display, display, null, null, null, null, false);
-                })
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * Return the FQCNs corresponding to input if it identifies an unambiguous class in [the FQ] allClasses
-     */
-    static Set<String> findClassesForMemberAccess(String input, List<String> allClasses) {
-        // suppose allClasses = [a.b.Do, a.b.Do$Re, d.Do, a.b.Do$Re$Sub]
-        // then we want
-        // a -> []
-        // a.b -> []
-        // a.b.Do -> []
-        // a.b.Do. -> [a.b.Do]
-        // Do -> []
-        // Do. -> [a.b.Do, d.Do]
-        // Do.foo -> [a.b.Do, d.Do]
-        // foo -> []
-        // Do$Re -> []
-        // Do$Re. -> [a.b.Do$Re]
-        // Do$Re$Sub -> [a.b.Do$ReSub]
-
-        // Handle empty or null inputs
-        if (input == null || input.isEmpty() || allClasses == null) {
-            return Set.of();
-        }
-
-        // first look for an unambiguous match to the entire input
-        var lowerCase = input.toLowerCase();
-        var prefixMatches = allClasses.stream()
-                .filter(className -> className.toLowerCase().startsWith(lowerCase)
-                        || getShortClassName(className).toLowerCase().startsWith(lowerCase))
-                .collect(Collectors.toSet());
-        if (prefixMatches.size() == 1) {
-            return prefixMatches;
-        }
-
-        if (input.lastIndexOf(".") < 0) {
-            return Set.of();
-        }
-
-        // see if the input-before-dot is a classname
-        String possibleClassname = input.substring(0, input.lastIndexOf("."));
-        return allClasses.stream()
-                .filter(className -> className.equalsIgnoreCase(possibleClassname)
-                        || getShortClassName(className).equalsIgnoreCase(possibleClassname))
-                .collect(Collectors.toSet());
-    }
-
-    /**
-     * This only does syntactic parsing, if you need to verify whether the parsed element
-     * is actually a class, getUniqueClass() may be what you want
-     */
-    static String getShortClassName(String fqClass) {
-        // a.b.C -> C
-        // a.b.C. -> C
-        // C -> C
-        // a.b.C$D -> C$D
-        // a.b.C$D. -> C$D.
-
-        int lastDot = fqClass.lastIndexOf('.');
-        if (lastDot == -1) {
-            return fqClass;
-        }
-
-        // Handle trailing dot
-        if (lastDot == fqClass.length() - 1) {
-            int nextToLastDot = fqClass.lastIndexOf('.', lastDot - 1);
-            return fqClass.substring(nextToLastDot + 1, lastDot);
-        }
-
-        return fqClass.substring(lastDot + 1);
-    }
-
-    /**
-     * Given a non-fully qualified classname, complete it with camel case or prefix matching 
-     * to a FQCN
-     */
-    static Set<String> getClassnameMatches(String partial, List<String> allClasses) {
-        var partialLower = partial.toLowerCase();
-        var nameMatches = new HashSet<String>();
-        for (String fqClass : allClasses) {
-            // fqClass = a.b.c.FooBar$LedZep
-
-            // Extract the portion after the last '.' and the last '$' if present
-            // simpleName = FooBar$LedZep
-            String simpleName = fqClass;
-            int lastDot = fqClass.lastIndexOf('.');
-            if (lastDot >= 0) {
-                simpleName = fqClass.substring(lastDot + 1);
-            }
-
-            // Now also strip off nested classes for simpler matching
-            // simpleName = LedZep
-            int lastDollar = simpleName.lastIndexOf('$');
-            if (lastDollar >= 0) {
-                simpleName = simpleName.substring(lastDollar + 1);
-            }
-
-            // Check for simple prefix match
-            if (simpleName.toLowerCase().startsWith(partialLower)) {
-                nameMatches.add(fqClass);
-            } else {
-                var capitals = extractCapitals(simpleName);
-                if (capitals.toLowerCase().startsWith(partialLower)) {
-                    nameMatches.add(fqClass);
-                }
-            }
-        }
-        return nameMatches;
     }
 
     /**
@@ -523,9 +349,9 @@ public class ContextManager implements IContextManager {
             return OperationResult.error(e.getMessage());
         }
 
-        var filenames = parseQuotedFilenames(args);
+        var filenames = Completions.parseQuotedFilenames(args);
         for (String token : filenames) {
-            var matches = expandPath(token);
+            var matches = Completions.expandPath(root, token);
             if (matches.isEmpty()) {
                 if (io.confirmAsk("No files matched '%s'. Create?".formatted(token))) {
                     try {
@@ -575,9 +401,9 @@ public class ContextManager implements IContextManager {
             return OperationResult.error(e.getMessage());
         }
 
-        var filenames = parseQuotedFilenames(args);
+        var filenames = Completions.parseQuotedFilenames(args);
         for (String token : filenames) {
-            var matches = expandPath(token);
+            var matches = Completions.expandPath(root, token);
             if (matches.isEmpty()) {
                 return OperationResult.error("No matches found for: " + token);
             } else {
@@ -634,7 +460,7 @@ public class ContextManager implements IContextManager {
             return OperationResult.success();
         }
 
-        var filenames = parseQuotedFilenames(args);
+        var filenames = Completions.parseQuotedFilenames(args);
         var fragments = new ArrayList<>();
         for (String filename : filenames) {
             var fragment = currentContext.toFragment(filename);
@@ -993,7 +819,7 @@ public class ContextManager implements IContextManager {
 
         // Camel-case completions
         baseToFullPath.forEach((base, path) -> {
-            var capitals = extractCapitals(base);
+            var capitals = Completions.extractCapitals(base);
             if (capitals.toLowerCase().startsWith(partialLower)) {
                 completions.add(fileCandidate(path));
             }
@@ -1007,16 +833,6 @@ public class ContextManager implements IContextManager {
         });
 
         return completions;
-    }
-
-    private static String extractCapitals(String base) {
-        StringBuilder capitals = new StringBuilder();
-        for (char c : base.toCharArray()) {
-            if (Character.isUpperCase(c)) {
-                capitals.append(c);
-            }
-        }
-        return capitals.toString();
     }
 
     private Candidate fileCandidate(RepoFile file) {
@@ -1130,18 +946,6 @@ public class ContextManager implements IContextManager {
         }
     }
 
-    /**
-     * A small utility to join multiple strings with a delimiter, skipping empties.
-     */
-    private static class StreamUtils {
-        static String joinNonEmpty(String s1, String s2, String delimiter) {
-            if (s1.isEmpty() && s2.isEmpty()) return "";
-            if (s1.isEmpty()) return s2;
-            if (s2.isEmpty()) return s1;
-            return s1 + delimiter + s2;
-        }
-    }
-
     // ------------------------------------------------------------------
     // Commands / Shell logic
     // ------------------------------------------------------------------
@@ -1242,57 +1046,6 @@ public class ContextManager implements IContextManager {
 
         Command cmd = matching.getFirst();
         return cmd.handler().handle(args);
-    }
-
-    /**
-     * Splits the given string by quoted or unquoted segments.
-     */
-    private static List<String> parseQuotedFilenames(String args) {
-        var pattern = Pattern.compile("\"([^\"]+)\"|\\S+");
-        return pattern.matcher(args)
-                .results()
-                .map(m -> m.group(1) != null ? m.group(1) : m.group())
-                .toList();
-    }
-
-    /**
-     * Expand paths that may contain wildcards (*, ?), returning all matches.
-     */
-    private List<RepoFile> expandPath(String pattern) {
-        // First check if it exists as a relative filename from root
-        var file = new RepoFile(root, pattern);
-        if (file.exists()) {
-            return List.of(file);
-        }
-
-        // Handle glob patterns
-        if (pattern.contains("*") || pattern.contains("?")) {
-            var matcher = FileSystems.getDefault().getPathMatcher("glob:" + pattern);
-            try {
-                return Files.walk(root)
-                        .filter(Files::isRegularFile)
-                        .filter(p -> matcher.matches(root.relativize(p)))
-                        .map(p -> new RepoFile(root, p))
-                        .toList();
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
-
-        // If not a glob and doesn't exist directly, look for matches in git tracked files
-        var filename = Path.of(pattern).getFileName().toString();
-        var matches = getTrackedFiles().stream()
-                .filter(p -> p.getFileName().equals(filename))
-                .toList();
-
-        if (matches.isEmpty()) {
-            return List.of();
-        }
-        if (matches.size() > 1) {
-            return List.of();
-        }
-
-        return matches;
     }
 
     /**
