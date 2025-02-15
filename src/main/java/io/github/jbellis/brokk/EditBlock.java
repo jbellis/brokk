@@ -134,9 +134,9 @@ public class EditBlock {
 
     public record ParseResult(List<SearchReplaceBlock> blocks, String parseError) { }
 
-    private static final Pattern HEAD = Pattern.compile("^<{5,9} SEARCH\\s*$", Pattern.MULTILINE);
+    private static final Pattern HEAD = Pattern.compile("^<{5,9} SEARCH\\W*$", Pattern.MULTILINE);
     private static final Pattern DIVIDER = Pattern.compile("^={5,9}\\s*$", Pattern.MULTILINE);
-    private static final Pattern UPDATED = Pattern.compile("^>{5,9} REPLACE\\s*$", Pattern.MULTILINE);
+    private static final Pattern UPDATED = Pattern.compile("^>{5,9} REPLACE\\W*$", Pattern.MULTILINE);
 
     // Default fence to match triple-backtick usage, e.g. ``` ... ```
     static final String[] DEFAULT_FENCE = {"```", "```"};
