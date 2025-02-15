@@ -109,7 +109,10 @@ public class Brokk {
     private static void runLoop() {
         String prefill = "";
         while (true) {
-            String input = io.getInput(prefill);
+            // If we have a constructed user message, send it to the LLM immediately.
+            // Otherwise, prompt for user input as usual
+            String constructed = contextManager.getConstructedMessage();
+            String input = constructed == null ? io.getInput(prefill) : constructed;
             prefill = "";
             if (input == null || input.isEmpty()) {
                 continue;

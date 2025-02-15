@@ -68,6 +68,9 @@ public class ContextManager implements IContextManager {
     private Coder coder;
     private final ExecutorService backgroundTasks = Executors.newCachedThreadPool();
     private Future<BuildCommand> buildCommand;
+
+    private String lastShellOutput;       // hidden storage of last $ command output
+    private String constructedMessage;    // content to feed into runSession, if /send is used
     
     private Project project;
     private Context currentContext;
@@ -197,6 +200,13 @@ public class ContextManager implements IContextManager {
                         "Evaluate context for the given request",
                         this::cmdPrepare,
                         "<request>",
+                        args -> List.of()
+                ),
+                new Command(
+                        "send",
+                        "Send last shell output to LLM as constructed request",
+                        this::cmdSend,
+                        "[instructions]",
                         args -> List.of()
                 )
         );
@@ -1179,13 +1189,14 @@ public class ContextManager implements IContextManager {
         else if (input.startsWith("$")) {
             var command = input.substring(1).trim();
             OperationResult result = Environment.instance.captureShellCommand(command);
+            // Store the shell output invisibly
+            lastShellOutput = result.message.isBlank() ? null : result.message();
             // If it succeeded, show the output in yellow
             if (result.status() == OperationStatus.SUCCESS) {
                 if (result.message() != null) {
                     io.shellOutput(result.message());
                 }
-            }
-            else {
+            } else {
                 assert result.status() == OperationStatus.ERROR;
                 io.toolError(result.message());
             }
@@ -1404,6 +1415,14 @@ public class ContextManager implements IContextManager {
 
     public List<ChatMessage> getHistoryMessages() {
         return currentContext.getHistory();
+    }
+    
+    public String getConstructedMessage() {
+        try {
+            return constructedMessage;
+        } finally {
+            constructedMessage = null;
+        }
     }
 
     @Override
@@ -1700,5 +1719,18 @@ public class ContextManager implements IContextManager {
         public static BuildCommand failure(String message) {
             return new BuildCommand(null, message);
         }
+    }
+    
+    private OperationResult cmdSend(String args) {
+        if (lastShellOutput == null) {
+            return OperationResult.error("No shell output to send.");
+        }
+        assert !lastShellOutput.isBlank();
+        if (!args.isBlank()) {
+            constructedMessage = args.trim() + "\n\n" + lastShellOutput;
+        } else {
+            constructedMessage = lastShellOutput;
+        }
+        return OperationResult.skipShow();
     }
 }
