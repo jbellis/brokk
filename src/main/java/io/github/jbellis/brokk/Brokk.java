@@ -33,17 +33,13 @@ public class Brokk {
             System.exit(1);
         }
 
-        // Create an Analyzer
-        Analyzer analyzer = new Analyzer(sourceRoot);
-        analyzer.writeGraphAsync();
-
         // Create the ContextManager (holds chat context, code references, etc.)
-        contextManager = new ContextManager(analyzer, sourceRoot);
+        contextManager = new ContextManager(sourceRoot);
 
         // Create the console with references to commands (we'll build them below)
         var commands = new ArrayList<>(contextManager.getCommands());
         // Dummy command to wire up completion for within-chat identifiers
-        commands.add(new ContextManager.Command("chat", null, null, null, (s -> Completions.completeClassesAndMembers(s, analyzer, false))));
+        commands.add(new ContextManager.Command("chat", null, null, null, (s -> Completions.completeClassesAndMembers(s, contextManager.getAnalyzer(), false))));
         io = new ConsoleIO(sourceRoot, commands);
 
         // Create a Coder that deals with LLM calls/streaming

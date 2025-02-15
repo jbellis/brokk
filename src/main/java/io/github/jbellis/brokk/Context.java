@@ -20,7 +20,7 @@ import java.util.stream.Stream;
 public class Context {
     public static final int MAX_AUTO_CONTEXT_FILES = 100;
 
-    private final Analyzer analyzer;
+    private final AnalyzerWrapper analyzer;
     private final List<ContextFragment.PathFragment> editableFiles;
     private final List<ContextFragment.PathFragment> readonlyFiles;
     private final List<ContextFragment.VirtualFragment> virtualFragments;
@@ -33,12 +33,12 @@ public class Context {
     /**
      * Default constructor, with empty files/fragments and autoContext on, and a default of 5 files.
      */
-    public Context(Analyzer analyzer, int autoContextFileCount) {
+    public Context(AnalyzerWrapper analyzer, int autoContextFileCount) {
         this(analyzer, List.of(), List.of(), List.of(), AutoContext.EMPTY, autoContextFileCount, new ArrayList<>());
     }
 
     public Context(
-            Analyzer analyzer,
+            AnalyzerWrapper analyzer,
             List<ContextFragment.PathFragment> editableFiles,
             List<ContextFragment.PathFragment> readonlyFiles,
             List<ContextFragment.VirtualFragment> virtualFragments,
@@ -184,11 +184,11 @@ public class Context {
         // Collect ineligible classnames from fragments not eligible for auto-context
         Set<String> ineligibleClassnames = Streams.concat(editableFiles.stream(), readonlyFiles.stream(), virtualFragments.stream())
                 .filter(f -> !f.isEligibleForAutoContext())
-                .flatMap(f -> f.classnames(analyzer).stream())
+                .flatMap(f -> f.classnames(analyzer.get()).stream())
                 .collect(Collectors.toSet());
 
         var seeds = Streams.concat(editableFiles.stream(), readonlyFiles.stream(), virtualFragments.stream())
-                .flatMap(f -> f.classnames(analyzer).stream())
+                .flatMap(f -> f.classnames(analyzer.get()).stream())
                 .collect(Collectors.toSet());
 
         if (seeds.isEmpty()) {
@@ -197,7 +197,7 @@ public class Context {
         }
 
         // request 3*autoContextFileCount from pagerank to account for out-of-project filtering
-        var pagerankResults = analyzer.getPagerank(seeds, 3 * MAX_AUTO_CONTEXT_FILES);
+        var pagerankResults = analyzer.get().getPagerank(seeds, 3 * MAX_AUTO_CONTEXT_FILES);
 
         // build skeleton lines
         var skeletons = new ArrayList<SkeletonFragment>();
@@ -208,8 +208,8 @@ public class Context {
             boolean eligible = !(ineligibleClassnames.contains(fqName) ||
                             (fqName.contains("$") && ineligibleClassnames.contains(fqName.substring(0, fqName.indexOf('$')))));
             
-            if (eligible && analyzer.classInProject(fqName)) {
-                var opt = analyzer.getSkeleton(fqName);
+            if (eligible && analyzer.get().classInProject(fqName)) {
+                var opt = analyzer.get().getSkeleton(fqName);
                 if (opt.isDefined()) {
                     var shortName = fqName.substring(fqName.lastIndexOf('.') + 1);
                     skeletons.add(new SkeletonFragment(-1, List.of(shortName), Set.of(fqName), opt.get()));

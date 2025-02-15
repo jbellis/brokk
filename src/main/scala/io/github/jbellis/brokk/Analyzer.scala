@@ -44,7 +44,6 @@ class SymbolUsages(
 class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
   // Convert to absolute filename immediately
   private val absolutePath = sourcePath.toAbsolutePath.toRealPath()
-  private val outputPath = os.Path(absolutePath) / ".brokk" / "joern.cpg"
   private implicit val ec: ExecutionContext = ExecutionContext.global
 
   // Adjacency maps for pagerank
@@ -54,31 +53,17 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
 
   // A single queue for all writeGraph calls
   // i.e., each new writeGraph job enqueues behind this Future.
-  private var lastWriteFuture: Future[Unit] = Future.successful(())
 
-  private[brokk] var cpg: Cpg = initializeCpg()
+  private[brokk] var cpg: Cpg = createNewCpg()
 
   private implicit val callResolver: ICallResolver = NoResolve
   
   // Initialize pagerank data structures 
   initializePageRank()
 
-  /**
-   * Constructs the CPG (creating or loading),
-   * then queues up an async writeGraph call.
-   */
-  private def initializeCpg(): Cpg = {
-    if (os.exists(outputPath)) {
-      try {
-        CpgBasedTool.loadFromFile(outputPath.toString)
-      } catch {
-        case e: Exception =>
-          println(s"Failed to load CPG from $outputPath: ${e.getMessage}")
-          createNewCpg()
-      }
-    } else {
-      createNewCpg()
-    }
+  def this(sourcePath: java.nio.file.Path, preloadedPath: java.nio.file.Path) = {
+    this(sourcePath)
+    this.cpg = CpgBasedTool.loadFromFile(preloadedPath.toString)
   }
 
   private def initializePageRank(): Unit = {
@@ -103,10 +88,8 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
   }
 
   private def createNewCpg(): Cpg = {
-    println(s"Creating code graph at $outputPath")
     val config = Config()
       .withInputPath(absolutePath.toString)
-      .withOutputPath(outputPath.toString)
       .withEnableTypeRecovery(true)
     // https://github.com/joernio/joern/issues/5297
     //  .withKeepTypeArguments(true)
@@ -117,28 +100,6 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     val context = new LayerCreatorContext(newCpg)
     new OssDataFlow(OssDataFlow.defaultOpts).create(context)
     newCpg
-  }
-
-  /**
-   * Asynchronously write the CPG to disk, ensuring new writes wait for older ones.
-   */
-  def writeGraphAsync(): Future[Unit] = {
-    lastWriteFuture = lastWriteFuture.flatMap { _ =>
-      Future {
-        Serialization.writeGraph(cpg.graph, outputPath.toNIO)
-      }
-    }
-    lastWriteFuture
-  }
-
-  /**
-   * Forces a re-initialization of the CPG
-   */
-  def rebuild(): Unit = {
-    if (os.exists(outputPath)) {
-      os.remove.all(outputPath)
-    }
-    cpg = initializeCpg()
   }
 
   /**
@@ -842,6 +803,10 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     )
   }
 
+  def writeCpg(path: java.nio.file.Path): Unit = {
+    Serialization.writeGraph(cpg.graph, path)
+  }
+  
   override def close(): Unit = {
     cpg.close()
   }

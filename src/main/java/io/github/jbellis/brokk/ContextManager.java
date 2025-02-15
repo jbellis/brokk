@@ -58,7 +58,7 @@ public class ContextManager implements IContextManager {
         return gitTrackedFilesCache;
     }
 
-    private final Analyzer analyzer;
+    private AnalyzerWrapper analyzerWrapper;
     final Path root;
     private ConsoleIO io;
     private Coder coder;
@@ -67,7 +67,7 @@ public class ContextManager implements IContextManager {
 
     private String lastShellOutput;       // hidden storage of last $ command output
     private String constructedMessage;    // content to feed into runSession, if /send is used
-    
+
     private Project project;
     private Context currentContext;
     private final List<Context> previousContexts = new ArrayList<>();
@@ -81,17 +81,16 @@ public class ContextManager implements IContextManager {
 
     // minimal constructor to create the commands list, which will be passed to ConsoleIO,
     // after which resolveCircularReferences finishes ContextManager construction
-    public ContextManager(Analyzer analyzer, Path root)
-    {
-        this.analyzer = analyzer;
+    public ContextManager(Path root) {
         this.root = root.toAbsolutePath();
-        this.commands = buildCommands(analyzer);
+        this.commands = buildCommands();
     }
+
 
     /**
      * Command construction.
      */
-    private List<Command> buildCommands(Analyzer analyzer) {
+    private List<Command> buildCommands() {
         return List.of(
                 new Command(
                         "add",
@@ -160,7 +159,7 @@ public class ContextManager implements IContextManager {
                 new Command(
                         "refresh",
                         "Refresh code intelligence data",
-                        args -> cmdRefresh(analyzer)
+                        args -> cmdRefresh()
                 ),
                 new Command(
                         "undo",
@@ -177,7 +176,7 @@ public class ContextManager implements IContextManager {
                         "Capture the source code of usages of the target class, method, or field",
                         this::cmdUsage,
                         "<class|member>",
-                        input -> completeUsage(input, this.analyzer)
+                        input -> completeUsage(input, getAnalyzer())
                 ),
                 new Command(
                         "stacktrace",
@@ -222,9 +221,9 @@ public class ContextManager implements IContextManager {
 
     private List<Candidate> completeSummarize(String input) {
         List<Candidate> candidates = new ArrayList<>();
-                candidates.addAll(completeDrop(input)); // Add fragment completion
-                candidates.addAll(completePaths(input, getTrackedFiles())); // Add path completion
-                return candidates;
+        candidates.addAll(completeDrop(input)); // Add fragment completion
+        candidates.addAll(completePaths(input, getTrackedFiles())); // Add path completion
+        return candidates;
     }
 
     private OperationResult cmdSummarize(String input) {
@@ -240,7 +239,7 @@ public class ContextManager implements IContextManager {
                 return OperationResult.error("Autocontext is already summarized");
             }
             if (fragment != null) {
-                return summarizeClasses(fragment.classnames(analyzer));
+                return summarizeClasses(fragment.classnames(getAnalyzer()));
             }
             // else fragment == null, so it's not a fragment reference
         } catch (IllegalArgumentException e) {
@@ -255,7 +254,7 @@ public class ContextManager implements IContextManager {
                 io.toolError("no files matched '%s'".formatted(rawName));
             } else {
                 matches.stream()
-                        .flatMap(relFile -> analyzer.classesInFile(relFile).stream())
+                        .flatMap(relFile -> getAnalyzer().classesInFile(relFile).stream())
                         .filter(fqcn -> !fqcn.contains("$"))
                         .forEach(classnames::add);
             }
@@ -284,7 +283,7 @@ public class ContextManager implements IContextManager {
         List<String> shortClassnames = new ArrayList<>();
         StringBuilder combinedSkeleton = new StringBuilder();
         for (String fqcn : coalescedClassnames) {
-            var skeleton = analyzer.getSkeleton(fqcn);
+            var skeleton = getAnalyzer().getSkeleton(fqcn);
             if (skeleton.isDefined()) {
                 shortClassnames.add(Completions.getShortClassName(fqcn));
                 if (!combinedSkeleton.isEmpty()) {
@@ -319,14 +318,14 @@ public class ContextManager implements IContextManager {
         if (fragment.isEmpty()) {
             throw new IllegalArgumentException("No virtual fragment found at position " + (position + 1));
         }
-        
+
         // Get classnames from fragment and convert to files
-        var classnames = fragment.get().classnames(analyzer);
+        var classnames = fragment.get().classnames(getAnalyzer());
         var files = classnames.stream()
-                .map(analyzer::pathOf)
+                .map(getAnalyzer()::pathOf)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
-        
+
         if (files.isEmpty()) {
             throw new IllegalArgumentException("No files found for fragment at position " + (position + 1));
         }
@@ -422,7 +421,6 @@ public class ContextManager implements IContextManager {
     }
 
 
-
     /**
      * /add autocompleter:
      *   1. filename candidates
@@ -497,14 +495,14 @@ public class ContextManager implements IContextManager {
 
         var messages = PreparePrompts.instance.collectMessages(this);
         var st = """
-        <task>
-        %s
-        </task>
-        <goal>
-        Evaluate whether you have the right summaries and files available to complete the task.
-        DO NOT write code yet, just summarize the task and list any additional files you need.
-        </goal>
-        """.formatted(msg.trim()).stripIndent();
+                <task>
+                %s
+                </task>
+                <goal>
+                Evaluate whether you have the right summaries and files available to complete the task.
+                DO NOT write code yet, just summarize the task and list any additional files you need.
+                </goal>
+                """.formatted(msg.trim()).stripIndent();
         messages.add(new UserMessage(st.formatted(msg)));
         String response = coder.sendStreaming(messages);
         if (response != null) {
@@ -584,12 +582,12 @@ public class ContextManager implements IContextManager {
 
         var messages = AskPrompts.instance.collectMessages(this);
         messages.add(new UserMessage("<question>\n%s\n</question>".formatted(input.trim())));
-        
+
         String response = coder.sendStreaming(messages);
         if (response != null) {
             addToHistory(List.of(messages.getLast(), new AiMessage(response)));
         }
-        
+
         return OperationResult.success();
     }
 
@@ -629,7 +627,7 @@ public class ContextManager implements IContextManager {
 
         return OperationResult.prefill("$git commit -a -m \"%s\"".formatted(commitMsg));
     }
-    
+
     private List<Candidate> completeApply(String partial) {
         return Stream.of("EDIT", "APPLY")
                 .map(Candidate::new)
@@ -649,12 +647,11 @@ public class ContextManager implements IContextManager {
         }
     }
 
-    private OperationResult cmdRefresh(Analyzer analyzer) {
+    private OperationResult cmdRefresh() {
         GitRepo.instance.refresh();
-        analyzer.rebuild();
-        analyzer.writeGraphAsync();
+        analyzerWrapper.rebuild();
         onRefresh();
-        io.toolOutput("Code intelligence refresh complete");
+        io.toolOutput("Code intelligence refresh scheduled");
         return OperationResult.skipShow();
     }
 
@@ -671,7 +668,7 @@ public class ContextManager implements IContextManager {
 
         SymbolUsages uses;
         try {
-            uses = analyzer.getUses(identifier);
+            uses = getAnalyzer().getUses(identifier);
         } catch (IllegalArgumentException e) {
             return OperationResult.error(e.getMessage());
         }
@@ -689,7 +686,7 @@ public class ContextManager implements IContextManager {
         if (!uses.getMethodUses().isEmpty()) {
             var sortedMethods = uses.getMethodUses().stream().sorted().toList();
             code.append("Method uses:\n\n");
-            
+
             // Group methods by classname
             String currentClass = null;
             for (String method : sortedMethods) {
@@ -700,7 +697,7 @@ public class ContextManager implements IContextManager {
                     currentClass = classname;
                 }
 
-                var source = analyzer.getMethodSource(method);
+                var source = getAnalyzer().getMethodSource(method);
                 if (source.isDefined()) {
                     classnames.add(classname);
                     code.append(source.get()).append("\n\n");
@@ -712,7 +709,7 @@ public class ContextManager implements IContextManager {
         if (!uses.getTypeUses().isEmpty()) {
             code.append("Type uses:\n\n");
             for (String className : uses.getTypeUses()) {
-                var skeletonHeader = analyzer.getSkeletonHeader(className);
+                var skeletonHeader = getAnalyzer().getSkeletonHeader(className);
                 if (skeletonHeader.isEmpty()) {
                     // TODO can we do better than just skipping anonymous classes that Analyzer doesn't know how to skeletonize?
                     // io.github.jbellis.brokk.Coder.sendMessage.StreamingResponseHandler$0.<init>' not found
@@ -764,7 +761,7 @@ public class ContextManager implements IContextManager {
             }
 
             String methodFullName = methodLine.substring(0, parenIndex);
-            var methodSource = analyzer.getMethodSource(methodFullName);
+            var methodSource = getAnalyzer().getMethodSource(methodFullName);
             if (methodSource.isDefined()) {
                 classnames.add(ContextFragment.toClassname(methodFullName));
                 content.append(methodFullName).append(":\n");
@@ -805,8 +802,8 @@ public class ContextManager implements IContextManager {
 
     private List<Candidate> completeDrop(String partial) {
         return Streams.concat(currentContext.editableFiles(),
-                            currentContext.readonlyFiles(), 
-                            currentContext.virtualFragments())
+                              currentContext.readonlyFiles(),
+                              currentContext.virtualFragments())
                 .map(f -> new Candidate(f.source()))
                 .collect(Collectors.toList());
     }
@@ -855,7 +852,8 @@ public class ContextManager implements IContextManager {
         this.io = io;
         this.coder = coder;
         this.project = new Project(root, io);
-        this.currentContext = new Context(analyzer, project.getAutoContextFileCount());
+        this.analyzerWrapper = new AnalyzerWrapper(io, this.root, backgroundTasks);
+        this.currentContext = new Context(analyzerWrapper, project.getAutoContextFileCount());
 
         // infer build command from properties
         String loadedCommand = project.getBuildCommand();
@@ -995,8 +993,7 @@ public class ContextManager implements IContextManager {
                 if (result.message() != null) {
                     addStringFragment(command, result.message());
                 }
-            }
-            else {
+            } else {
                 assert result.status() == OperationStatus.ERROR;
                 io.toolError(result.message());
             }
@@ -1065,11 +1062,13 @@ public class ContextManager implements IContextManager {
                 .filter(f -> currentContext.editableFiles().noneMatch(p -> f.equals(p.file())))
                 .filter(f -> currentContext.readonlyFiles().noneMatch(p -> f.equals(p.file())))
                 .filter(f -> text.contains(f.getFileName()));
-        var byClassname = analyzer.getAllClasses().stream()
+        var byClassname = getAnalyzer().getAllClasses().stream()
                 .filter(fqcn -> text.contains(List.of(fqcn.split("\\.")).getLast())) // simple classname in text
-                .filter(fqcn -> currentContext.allFragments().noneMatch(fragment ->  // not already in context
-                    fragment.classnames(analyzer).contains(fqcn)))
-                .map(analyzer::pathOf)
+                .filter(fqcn -> currentContext.allFragments().noneMatch(fragment ->  {
+                    // not already in context
+                    return fragment.classnames(getAnalyzer()).contains(fqcn);
+                }))
+                .map(getAnalyzer()::pathOf)
                 .filter(Objects::nonNull);
 
         return Streams.concat(byFilename, byClassname)
@@ -1104,7 +1103,8 @@ public class ContextManager implements IContextManager {
                 case 'r' -> toRead.add(file);
                 case 's' -> toSummarize.add(file);
                 case 'n' -> continueProcessing = false;
-                default -> {} // ignore
+                default -> {
+                } // ignore
             }
         }
 
@@ -1182,7 +1182,7 @@ public class ContextManager implements IContextManager {
     public List<ChatMessage> getHistoryMessages() {
         return currentContext.getHistory();
     }
-    
+
     public String getConstructedMessage() {
         try {
             return constructedMessage;
@@ -1219,7 +1219,7 @@ public class ContextManager implements IContextManager {
         if (!currentContext.hasReadonlyFragments()) {
             return List.of();
         }
-        
+
         String combined = Streams.concat(currentContext.readonlyFiles(),
                                          currentContext.virtualFragments(),
                                          Stream.of(currentContext.getAutoContext()))
@@ -1238,8 +1238,8 @@ public class ContextManager implements IContextManager {
                 </readonly>
                 """.formatted(combined).stripIndent();
         return List.of(
-            new UserMessage(msg),
-            new AiMessage("Ok, I will use this code as references.")
+                new UserMessage(msg),
+                new AiMessage("Ok, I will use this code as references.")
         );
     }
 
@@ -1272,8 +1272,8 @@ public class ContextManager implements IContextManager {
                 </editable>
                 """.formatted(combined).stripIndent();
         return List.of(
-            new UserMessage(msg),
-            new AiMessage("Ok, any changes I propose will be to those files.")
+                new UserMessage(msg),
+                new AiMessage("Ok, any changes I propose will be to those files.")
         );
     }
 
@@ -1486,7 +1486,7 @@ public class ContextManager implements IContextManager {
             return new BuildCommand(null, message);
         }
     }
-    
+
     private OperationResult cmdSend(String args) {
         if (lastShellOutput == null) {
             return OperationResult.error("No shell output to send.");
@@ -1498,5 +1498,12 @@ public class ContextManager implements IContextManager {
             constructedMessage = lastShellOutput;
         }
         return OperationResult.skipShow();
+    }
+
+    /**
+     * Retrieve the Analyzer, blocking if the Future is not yet complete.
+     */
+    public Analyzer getAnalyzer() {
+        return analyzerWrapper.get();
     }
 }
