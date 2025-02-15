@@ -69,9 +69,9 @@ public abstract class DefaultPrompts {
 
                2. Think step-by-step and explain the needed changes in a few short sentences.
 
-               3. Describe each change with a *SEARCH/REPLACE block* per the examples below.
+               3. Describe each change with a *SEARCH/REPLACE* block per the examples below.
 
-               All changes to files must use this *SEARCH/REPLACE block* format.
+               All changes to files must use this *SEARCH/REPLACE* block format.
                """.stripIndent();
     }
 
@@ -156,9 +156,9 @@ public abstract class DefaultPrompts {
                <rules>
                # *SEARCH/REPLACE block* Rules:
 
-               Every *SEARCH/REPLACE block* must use this format:
-               1. The *FULL* filename filename alone on a line, verbatim. No bold asterisks, no quotes around it, no escaping, etc.
-               2. The opening fence and code language, e.g.: ```python
+               Every *SEARCH/REPLACE* block must use this format:
+               1. The opening fence of backticks: ```
+               2. The *FULL* filename alone on a line, verbatim. No bold asterisks, no quotes around it, no escaping, etc.
                3. The start of search block: <<<<<<< SEARCH
                4. A contiguous chunk of lines to search for in the existing source code
                5. The dividing line: =======
@@ -166,9 +166,10 @@ public abstract class DefaultPrompts {
                7. The end of the replace block: >>>>>>> REPLACE
                8. The closing fence: ```
 
-               Use the *FULL* filename filename, as shown to you by the user.
+               Use the *FULL* filename, as shown to you by the user.  This comes on the line *AFTER* the opening fence of backticks.
+               The SEARCH and REPLACE lines should end immediately after the SEARCH or REPLACE keyword, respectively.
 
-               Every *SEARCH* section must *EXACTLY MATCH* the existing filename content, character for character,
+               Every *SEARCH/REPLACE* block must *EXACTLY MATCH* the existing filename content, character for character,
                including all comments, docstrings, indentation, etc.
                If the filename contains code or other data wrapped in json/xml/quotes or other containers,
                you need to propose edits to the literal contents, including that container markup.
@@ -186,7 +187,7 @@ public abstract class DefaultPrompts {
 
                Pay attention to which filenames the user wants you to edit, especially if they are asking
                you to create a new filename. If you want to put code in a new filename, use a *SEARCH/REPLACE* block with:
-               - A new filename filename
+               - A new filename
                - An empty SEARCH
                - The new filename's contents in REPLACE
 
