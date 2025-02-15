@@ -350,22 +350,26 @@ public class ContextManager implements IContextManager {
         }
 
         var filenames = Completions.parseQuotedFilenames(args);
+        List<RepoFile> aggregateFiles = new ArrayList<>();
         for (String token : filenames) {
             var matches = Completions.expandPath(root, token);
             if (matches.isEmpty()) {
                 if (io.confirmAsk("No files matched '%s'. Create?".formatted(token))) {
                     try {
                         var newFile = createFile(token);
-                        addFiles(List.of(newFile));
                         GitRepo.instance.add(newFile.toString());
+                        aggregateFiles.add(newFile);
                     } catch (Exception e) {
                         return OperationResult.error(
                                 "Error creating filename %s: %s".formatted(token, e.getMessage()));
                     }
                 }
             } else {
-                addFiles(matches);
+                aggregateFiles.addAll(matches);
             }
+        }
+        if (!aggregateFiles.isEmpty()) {
+            addFiles(aggregateFiles);
         }
         return OperationResult.success();
     }
@@ -402,13 +406,17 @@ public class ContextManager implements IContextManager {
         }
 
         var filenames = Completions.parseQuotedFilenames(args);
+        List<RepoFile> aggregateFiles = new ArrayList<>();
         for (String token : filenames) {
             var matches = Completions.expandPath(root, token);
             if (matches.isEmpty()) {
                 return OperationResult.error("No matches found for: " + token);
             } else {
-                addReadOnlyFiles(matches);
+                aggregateFiles.addAll(matches);
             }
+        }
+        if (!aggregateFiles.isEmpty()) {
+            addReadOnlyFiles(aggregateFiles);
         }
         return OperationResult.success();
     }
