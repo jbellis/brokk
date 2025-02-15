@@ -47,6 +47,10 @@ class ReflectionManager {
         buildErrors.add(result.message());
 
         // Return a reflection query with all build error history
+        if (coder.mode != Coder.Mode.EDIT) {
+            coder.mode = Coder.Mode.EDIT;
+            io.toolOutput("/mode set to EDIT by build failure");
+        }
         StringBuilder query = new StringBuilder("The build failed. Here is the history of build attempts:\n\n");
         for (int i = 0; i < buildErrors.size(); i++) {
             query.append("=== Attempt ").append(i + 1).append(" ===\n")

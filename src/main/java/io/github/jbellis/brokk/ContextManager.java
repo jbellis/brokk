@@ -711,7 +711,7 @@ public class ContextManager implements IContextManager {
 
         if (coder.mode != Coder.Mode.APPLY) {
             coder.mode = Coder.Mode.APPLY;
-            io.toolOutput("/mode automatically set to APPLY by /copy");
+            io.toolOutput("/mode set to APPLY by /copy");
         }
         return OperationResult.skipShow();
     }
