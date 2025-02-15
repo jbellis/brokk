@@ -95,11 +95,18 @@ public class Coder {
                     .filter(block -> block.filename() != null)
                     .filter(block -> !contextManager.getEditableFiles().contains(contextManager.toFile(block.filename())))
                     .toList();
-            var blocksToAdd = blocksNotEditable.stream()
-                    .filter(block -> io.confirmAsk("Add as editable %s?".formatted(block.filename())))
+            var uniqueFilenames = blocksNotEditable.stream()
+                    .map(EditBlock.SearchReplaceBlock::filename)
+                    .distinct()
                     .toList();
-            var filesToAdd = blocksToAdd.stream()
-                    .map(block -> contextManager.toFile(block.filename()))
+            var confirmedFilenames = uniqueFilenames.stream()
+                    .filter(filename -> io.confirmAsk("Add as editable %s?".formatted(filename)))
+                    .toList();
+            var blocksToAdd = blocksNotEditable.stream()
+                    .filter(block -> confirmedFilenames.contains(block.filename()))
+                    .toList();
+            var filesToAdd = confirmedFilenames.stream()
+                    .map(contextManager::toFile)
                     .toList();
             logger.debug("files to add: {}", filesToAdd);
             contextManager.addFiles(filesToAdd);
