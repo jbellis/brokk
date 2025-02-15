@@ -1,6 +1,7 @@
 package io.github.jbellis.brokk;
 
 import com.google.common.collect.Streams;
+import dev.langchain4j.data.message.ChatMessage;
 import io.github.jbellis.brokk.ContextFragment.AutoContext;
 import io.github.jbellis.brokk.ContextFragment.SkeletonFragment;
 import io.github.jbellis.brokk.ContextFragment.StacktraceFragment;
@@ -12,8 +13,6 @@ import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-
-import static java.lang.Math.min;
 
 /**
  * Encapsulates all state that will be sent to the model (prompts, filename context, conversation history).
@@ -28,31 +27,24 @@ public class Context {
 
     private final AutoContext autoContext;
     private final int autoContextFileCount;
+    /** history messages are unusual because they are updated in place.  See comments to addHistory and clearHistory */
+    private final List<ChatMessage> historyMessages;
 
     /**
      * Default constructor, with empty files/fragments and autoContext on, and a default of 5 files.
      */
     public Context(Analyzer analyzer, int autoContextFileCount) {
-        this(analyzer, List.of(), List.of(), List.of(), AutoContext.EMPTY, autoContextFileCount);
+        this(analyzer, List.of(), List.of(), List.of(), AutoContext.EMPTY, autoContextFileCount, new ArrayList<>());
     }
 
-    /**
-     * Full constructor; call this from any factory methods so we preserve immutability.
-     *
-     * @param analyzer             The Analyzer instance
-     * @param editableFiles        The editable filename fragments
-     * @param readonlyFiles        The read-only filename fragments
-     * @param virtualFragments     Arbitrary read-only string fragments
-     * @param autoContext         The auto-context instance
-     * @param autoContextFileCount The number of files to include from pagerank
-     */
     public Context(
             Analyzer analyzer,
             List<ContextFragment.PathFragment> editableFiles,
             List<ContextFragment.PathFragment> readonlyFiles,
             List<ContextFragment.VirtualFragment> virtualFragments,
             AutoContext autoContext,
-            int autoContextFileCount
+            int autoContextFileCount,
+            List<ChatMessage> historyMessages
     ) {
         assert analyzer != null;
         assert autoContext != null;
@@ -63,6 +55,7 @@ public class Context {
         this.virtualFragments = List.copyOf(virtualFragments);
         this.autoContext = autoContext;
         this.autoContextFileCount = autoContextFileCount;
+        this.historyMessages = historyMessages;
     }
 
     /**
@@ -276,19 +269,19 @@ public class Context {
     }
 
     private Context withEditableFiles(List<ContextFragment.PathFragment> newEditableFiles) {
-        return new Context(analyzer, newEditableFiles, readonlyFiles, virtualFragments, autoContext, autoContextFileCount);
+        return new Context(analyzer, newEditableFiles, readonlyFiles, virtualFragments, autoContext, autoContextFileCount, historyMessages);
     }
 
     private Context withReadonlyFiles(List<ContextFragment.PathFragment> newReadonlyFiles) {
-        return new Context(analyzer, editableFiles, newReadonlyFiles, virtualFragments, autoContext, autoContextFileCount);
+        return new Context(analyzer, editableFiles, newReadonlyFiles, virtualFragments, autoContext, autoContextFileCount, historyMessages);
     }
 
     private Context withVirtualFragments(List<ContextFragment.VirtualFragment> newVirtualFragments) {
-        return new Context(analyzer, editableFiles, readonlyFiles, newVirtualFragments, autoContext, autoContextFileCount);
+        return new Context(analyzer, editableFiles, readonlyFiles, newVirtualFragments, autoContext, autoContextFileCount, historyMessages);
     }
 
     private Context withAutoContextFileCount(int newAutoContextFileCount) {
-        return new Context(analyzer, editableFiles, readonlyFiles, virtualFragments, autoContext, newAutoContextFileCount);
+        return new Context(analyzer, editableFiles, readonlyFiles, virtualFragments, autoContext, newAutoContextFileCount, historyMessages);
     }
 
     public Context removeAll() {
@@ -304,7 +297,7 @@ public class Context {
     public Context refresh() {
         debug("refreshing autocontext: " + isAutoContextEnabled());
         AutoContext newAutoContext = isAutoContextEnabled() ? buildAutoContext() : AutoContext.DISABLED;
-        return new Context(analyzer, editableFiles, readonlyFiles, virtualFragments, newAutoContext, autoContextFileCount);
+        return new Context(analyzer, editableFiles, readonlyFiles, virtualFragments, newAutoContext, autoContextFileCount, historyMessages);
     }
 
     /**
@@ -334,7 +327,46 @@ public class Context {
     }
 
     public boolean isEmpty() {
-        return editableFiles.isEmpty() && readonlyFiles.isEmpty() && virtualFragments.isEmpty();
+        return editableFiles.isEmpty()
+            && readonlyFiles.isEmpty()
+            && virtualFragments.isEmpty()
+            && historyMessages.isEmpty();
+    }
+
+    /**
+     * Adding to the history DOES NOT create a new context object, it modifies history messages in place
+     * for this and any other contexts that share the same history instance.
+     * Otherwise popping context off with /undo
+     * would clear out the most recent conversation round trip which is not what we want.
+     */
+    public Context addHistory(List<ChatMessage> newMessages) {
+        historyMessages.addAll(newMessages);
+        return this;
+    }
+
+    /**
+     * Clearing the history DOES create a new context object so you can /undo it
+     */
+    public Context clearHistory() {
+        if (historyMessages.isEmpty()) {
+            return this;
+        }
+        return new Context(
+            analyzer,
+            editableFiles,
+            readonlyFiles,
+            virtualFragments,
+            autoContext,
+            autoContextFileCount,
+            new ArrayList<>()
+        );
+    }
+
+    /**
+     * @return an immutable copy of the history messages
+     */
+    public List<ChatMessage> getHistory() {
+        return List.copyOf(historyMessages);
     }
 
     public boolean hasEditableFiles() {

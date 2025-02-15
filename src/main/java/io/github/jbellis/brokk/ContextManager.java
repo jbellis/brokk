@@ -74,8 +74,6 @@ public class ContextManager implements IContextManager {
     private final List<Context> previousContexts = new ArrayList<>();
     private static final int MAX_UNDO_DEPTH = 100;
 
-    private final List<ChatMessage> historyMessages;
-
     /**
      * List of commands; typically constructed in Brokk.buildCommands(...) and passed in.
      * We store them here so we can execute them in handleCommand(...) below.
@@ -88,7 +86,6 @@ public class ContextManager implements IContextManager {
     {
         this.analyzer = analyzer;
         this.root = root.toAbsolutePath();
-        this.historyMessages = new ArrayList<>();
         this.commands = buildCommands(analyzer);
     }
 
@@ -168,7 +165,7 @@ public class ContextManager implements IContextManager {
                 ),
                 new Command(
                         "undo",
-                        "Undo last context changes (/add, /read, /drop)",
+                        "Undo last context changes (/add, /read, /drop, /clear)",
                         args -> cmdUndo()
                 ),
                 new Command(
@@ -765,8 +762,8 @@ public class ContextManager implements IContextManager {
     }
 
     private OperationResult cmdClear() {
-        // TODO move history into context so we can undo this
-        historyMessages.clear();
+        pushContext();
+        currentContext = currentContext.clearHistory();
         return OperationResult.success();
     }
 
@@ -1406,12 +1403,12 @@ public class ContextManager implements IContextManager {
     }
 
     public List<ChatMessage> getHistoryMessages() {
-        return historyMessages;
+        return currentContext.getHistory();
     }
 
     @Override
     public void moveToHistory(List<ChatMessage> messages) {
-        historyMessages.addAll(messages);
+        currentContext.addHistory(messages);
     }
 
     private void pushContext() {
@@ -1430,7 +1427,7 @@ public class ContextManager implements IContextManager {
     }
 
     public boolean isEmpty() {
-        return currentContext.isEmpty() && historyMessages.isEmpty();
+        return currentContext.isEmpty();
     }
 
     public List<ChatMessage> getReadOnlyMessages() {
@@ -1517,12 +1514,12 @@ public class ContextManager implements IContextManager {
         int totalLines = 0;
 
         // History lines
-        int historyLines = historyMessages.stream()
+        int historyLines = currentContext.getHistory().stream()
                 .mapToInt(m -> getText(m).split("\n").length)
                 .sum();
         totalLines += historyLines;
 
-        if (!historyMessages.isEmpty()
+        if (!currentContext.getHistory().isEmpty()
                 || (!currentContext.getAutoContext().text().isEmpty()
                 || (currentContext.isAutoContextEnabled() && currentContext.hasEditableFiles()))
                 || currentContext.hasReadonlyFragments()) {
