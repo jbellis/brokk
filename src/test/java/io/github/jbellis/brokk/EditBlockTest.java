@@ -39,7 +39,7 @@ class EditBlockTest {
         }
 
         @Override
-        public void moveToHistory(List<ChatMessage> messages) {
+        public void addToHistory(List<ChatMessage> messages) {
             throw new UnsupportedOperationException();
         }
 

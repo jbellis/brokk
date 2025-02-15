@@ -664,7 +664,7 @@ public class ContextManager implements IContextManager {
         messages.add(new UserMessage(st.formatted(msg)));
         String response = coder.sendStreaming(messages);
         if (response != null) {
-            moveToHistory(List.of(messages.getLast(), new AiMessage(response)));
+            addToHistory(List.of(messages.getLast(), new AiMessage(response)));
         }
         var mentioned = findMissingFileMentions(response);
         confirmAddRequestedFiles(mentioned);
@@ -738,7 +738,7 @@ public class ContextManager implements IContextManager {
         
         String response = coder.sendStreaming(messages);
         if (response != null) {
-            moveToHistory(List.of(messages.getLast(), new AiMessage(response)));
+            addToHistory(List.of(messages.getLast(), new AiMessage(response)));
         }
         
         return OperationResult.success();
@@ -1407,7 +1407,7 @@ public class ContextManager implements IContextManager {
     }
 
     @Override
-    public void moveToHistory(List<ChatMessage> messages) {
+    public void addToHistory(List<ChatMessage> messages) {
         currentContext.addHistory(messages);
     }
 

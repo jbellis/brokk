@@ -9,7 +9,7 @@ import java.util.Set;
 public interface IContextManager {
     RepoFile toFile(String relName);
 
-    void moveToHistory(List<ChatMessage> messages);
+    void addToHistory(List<ChatMessage> messages);
 
     Set<RepoFile> getEditableFiles();
 
