@@ -27,24 +27,6 @@ import java.util.stream.Collectors;
 public class Environment implements Closeable {
     public static final Environment instance = new Environment();
 
-    private static final IConsoleIO dummyIo = new IConsoleIO() {
-        @Override
-        public void toolOutput(String msg) {}
-
-        @Override
-        public void toolErrorRaw(String msg) {}
-
-        @Override
-        public boolean confirmAsk(String msg) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void llmOutput(String token) {
-            throw new UnsupportedOperationException();
-        }
-    };
-
     private final Repository repository;
     private final Git git;
     private final Path root;
@@ -79,7 +61,7 @@ public class Environment implements Closeable {
     /**
      * Runs a shell command using /bin/sh, returning {stdout, stderr}.
      */
-    public ProcessResult runShellCommand(String command, IConsoleIO io) throws IOException {
+    public ProcessResult runShellCommand(String command) throws IOException {
         var process = createProcessBuilder("/bin/sh", "-c", command).start();
         var sig = new Signal("INT");
         var oldHandler = Signal.handle(sig, signal -> process.destroy());
@@ -88,16 +70,13 @@ public class Environment implements Closeable {
             var out = new StringBuilder();
             var err = new StringBuilder();
             try (var scOut = new Scanner(process.getInputStream());
-                 var scErr = new Scanner(process.getErrorStream())) {
+                 var scErr = new Scanner(process.getErrorStream()))
+            {
                 while (scOut.hasNextLine()) {
-                    var line = scOut.nextLine();
-                    io.toolOutput(line);
-                    out.append(line).append("\n");
+                    out.append(scOut.nextLine()).append("\n");
                 }
                 while (scErr.hasNextLine()) {
-                    var line = scErr.nextLine();
-                    io.toolError(line);
-                    err.append(line).append("\n");
+                    err.append(scErr.nextLine()).append("\n");
                 }
             }
 
@@ -129,7 +108,7 @@ public class Environment implements Closeable {
     public ContextManager.OperationResult captureShellCommand(String command) {
         ProcessResult result;
         try {
-            result = runShellCommand(command, dummyIo);
+            result = runShellCommand(command);
         } catch (Exception e) {
             return ContextManager.OperationResult.error("Error executing command: " + e.getMessage());
         }
