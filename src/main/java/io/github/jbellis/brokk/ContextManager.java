@@ -69,7 +69,7 @@ public class ContextManager implements IContextManager {
     private final ExecutorService backgroundTasks = Executors.newCachedThreadPool();
     private Future<BuildCommand> buildCommand;
     
-    private final Project project;
+    private Project project;
     private Context currentContext;
     private final List<Context> previousContexts = new ArrayList<>();
     private static final int MAX_UNDO_DEPTH = 100;
@@ -82,25 +82,14 @@ public class ContextManager implements IContextManager {
      */
     private final List<Command> commands;
 
-    // ------------------------------------------------------------------
-    // Constructor and core fields
-    // ------------------------------------------------------------------
-
-    public ContextManager(Analyzer analyzer,
-                          Path root,
-                          ConsoleIO io,
-                          Coder coder) {
+    // minimal constructor to create the commands list, which will be passed to ConsoleIO,
+    // after which resolveCircularReferences finishes ContextManager construction
+    public ContextManager(Analyzer analyzer, Path root)
+    {
         this.analyzer = analyzer;
         this.root = root.toAbsolutePath();
-        this.io = io;
-        this.commands = buildCommands(analyzer);
-
-        // Start with an empty Context
-        this.currentContext = new Context(analyzer);
-        this.coder = coder;
-
         this.historyMessages = new ArrayList<>();
-        project = new Project(root, io);
+        this.commands = buildCommands(analyzer);
     }
 
     /**
@@ -1029,9 +1018,11 @@ public class ContextManager implements IContextManager {
     public void resolveCircularReferences(ConsoleIO io, Coder coder) {
         this.io = io;
         this.coder = coder;
+        this.project = new Project(root, io);
+        this.currentContext = new Context(analyzer, project.getAutoContextFileCount());
 
         // infer build command from properties
-        String loadedCommand = project.loadBuildCommand();
+        String loadedCommand = project.getBuildCommand();
         if (loadedCommand != null) {
             buildCommand = CompletableFuture.completedFuture(BuildCommand.success(loadedCommand));
             io.toolOutput("Using saved build command: " + loadedCommand);
@@ -1070,7 +1061,7 @@ public class ContextManager implements IContextManager {
             }
 
             String inferredCommand = response.trim();
-            project.saveBuildCommand(inferredCommand);
+            project.setBuildCommand(inferredCommand);
 
             io.toolOutput("Inferred build command: " + response.trim());
             return BuildCommand.success(inferredCommand);
@@ -1690,6 +1681,7 @@ public class ContextManager implements IContextManager {
     public void setAutoContextFiles(int fileCount) {
         pushContext();
         currentContext = currentContext.setAutoContextFiles(fileCount);
+        project.setAutoContextFileCount(fileCount);
     }
 
     public Set<RepoFile> getEditableFiles() {

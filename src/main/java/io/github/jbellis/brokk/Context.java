@@ -4,11 +4,9 @@ import com.google.common.collect.Streams;
 import io.github.jbellis.brokk.ContextFragment.AutoContext;
 import io.github.jbellis.brokk.ContextFragment.SkeletonFragment;
 import io.github.jbellis.brokk.ContextFragment.StacktraceFragment;
-import scala.Tuple2;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Future;
@@ -34,8 +32,8 @@ public class Context {
     /**
      * Default constructor, with empty files/fragments and autoContext on, and a default of 5 files.
      */
-    public Context(Analyzer analyzer) {
-        this(analyzer, List.of(), List.of(), List.of(), AutoContext.EMPTY, 5);
+    public Context(Analyzer analyzer, int autoContextFileCount) {
+        this(analyzer, List.of(), List.of(), List.of(), AutoContext.EMPTY, autoContextFileCount);
     }
 
     /**

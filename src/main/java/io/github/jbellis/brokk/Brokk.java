@@ -40,12 +40,7 @@ public class Brokk {
         analyzer.writeGraphAsync();
 
         // Create the ContextManager (holds chat context, code references, etc.)
-        contextManager = new ContextManager(
-                analyzer,
-                sourceRoot,
-                null,
-                null
-        );
+        contextManager = new ContextManager(analyzer, sourceRoot);
 
         // Create the console with references to commands (we'll build them below)
         var commands = new ArrayList<>(contextManager.getCommands());
