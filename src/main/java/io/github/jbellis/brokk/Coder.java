@@ -57,6 +57,11 @@ public class Coder {
      * @param userInput The original user message you want to send.
      */
     public void runSession(String userInput) {
+        if (models.editModel() instanceof Models.UnavailableStreamingModel) {
+            io.toolError("No LLM available (missing API keys)");
+            return;
+        }
+
         // Add user input to context
         var sessionMessages = new ArrayList<ChatMessage>();
         sessionMessages.add(new UserMessage("<goal>\n%s\n</goal>".formatted(userInput.trim())));

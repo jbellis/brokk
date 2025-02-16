@@ -55,7 +55,7 @@ public class ContextManager implements IContextManager {
     final Path root;
     private ConsoleIO io;
     private Coder coder;
-    private final ExecutorService backgroundTasks = Executors.newFixedThreadPool(2);
+    private final ExecutorService backgroundTasks = Executors.newFixedThreadPool(1);
     private Future<BuildCommand> buildCommand;
 
     private String lastShellOutput;       // hidden storage of last $ command output
@@ -642,7 +642,7 @@ public class ContextManager implements IContextManager {
 
     private OperationResult cmdRefresh() {
         GitRepo.instance.refresh();
-        analyzerWrapper.rebuild();
+        analyzerWrapper.requestRebuild();
         currentContext = currentContext.refresh();
         io.toolOutput("Code intelligence refresh scheduled");
         return OperationResult.skipShow();
