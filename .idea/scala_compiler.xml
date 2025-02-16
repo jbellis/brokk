@@ -3,6 +3,10 @@
   <component name="ScalaCompilerConfiguration">
     <option name="compileOrder" value="ScalaThenJava" />
     <option name="incrementalityType" value="IDEA" />
-    <profile name="Maven 1" modules="brokk" />
+    <profile name="Maven 1" modules="brokk">
+      <parameters>
+        <parameter value="-print-lines" />
+      </parameters>
+    </profile>
   </component>
 </project>
