@@ -62,6 +62,8 @@ public class Coder {
             return;
         }
 
+        var beginMode = mode;
+
         // Add user input to context
         var sessionMessages = new ArrayList<ChatMessage>();
         sessionMessages.add(new UserMessage("<goal>\n%s\n</goal>".formatted(userInput.trim())));
@@ -131,10 +133,7 @@ public class Coder {
             var parseReflection = reflectionManager.getParseReflection(parseResult, failedBlocks, blocks);
             if (!parseReflection.isEmpty()) {
                 io.toolOutput("Attempting to fix parse/match errors...");
-                if (mode != Mode.APPLY) {
-                    io.toolOutput("/mode set to APPLY for parse errors");
-                    mode = Mode.APPLY;
-                }
+                mode = Mode.APPLY; // faster
                 sessionMessages.add(new UserMessage(parseReflection));
                 continue;
             }
@@ -146,10 +145,7 @@ public class Coder {
             }
 
             io.toolOutput("Attempting to fix build errors...");
-            if (mode != Mode.EDIT) {
-                io.toolOutput("/mode set to EDIT for build errors");
-                mode = Mode.EDIT;
-            }
+            mode = Mode.EDIT; // smarter
             sessionMessages.add(new UserMessage(buildReflection));
 
             // If the reflection manager has also signaled "stop" (maybe user said no),
@@ -159,6 +155,8 @@ public class Coder {
             }
         }
 
+        // Reset mode back to what the user had it set to
+        mode = beginMode;
         // Move conversation to history
         var filteredSession = Streams.concat(Stream.of(sessionMessages.getFirst()),
                                              sessionMessages.stream().filter(m -> m instanceof AiMessage))
