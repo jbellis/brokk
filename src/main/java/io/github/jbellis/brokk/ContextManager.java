@@ -45,7 +45,6 @@ import java.util.stream.Stream;
 /**
  * Manages the current and previous context, along with other state like prompts and message history.
  */
-// TODO standardize handling of paths -- should they be relative or absolute and does Context manage that or do we
 public class ContextManager implements IContextManager {
     private final Logger logger = LogManager.getLogger(ContextManager.class);
     public static List<RepoFile> getTrackedFiles() {
@@ -56,7 +55,7 @@ public class ContextManager implements IContextManager {
     final Path root;
     private ConsoleIO io;
     private Coder coder;
-    private final ExecutorService backgroundTasks = Executors.newCachedThreadPool();
+    private final ExecutorService backgroundTasks = Executors.newFixedThreadPool(2);
     private Future<BuildCommand> buildCommand;
 
     private String lastShellOutput;       // hidden storage of last $ command output
@@ -152,7 +151,7 @@ public class ContextManager implements IContextManager {
                 ),
                 new Command(
                         "refresh",
-                        "Refresh code intelligence data",
+                        "Refresh code intelligence data (should not be necessary, file a bug report if it is)",
                         args -> cmdRefresh()
                 ),
                 new Command(
@@ -876,7 +875,7 @@ public class ContextManager implements IContextManager {
                 )
         );
 
-        // Submit the inference task to our background executor
+        // Submit the build-command inference task to our background executor
         buildCommand = backgroundTasks.submit(() -> {
             String response;
             try {
