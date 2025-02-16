@@ -114,28 +114,44 @@ public class Coder {
             blocks = blocks.stream()
                     .filter(block -> !blocksNotEditable.contains(block) || blocksToAdd.contains(block))
                     .toList();
+            if (blocks.isEmpty()) {
+                break;
+            }
 
             // Attempt to apply any code edits from the LLM
             var failedBlocks = EditBlock.applyEditBlocks(contextManager, io, blocks);
             logger.debug("Failed blocks: {}", failedBlocks);
             
-            // Decide if we need a reflection pass
-            var reflectionMsg = reflectionManager.getReflectionMessage(parseResult, failedBlocks, blocks, contextManager);
-            logger.debug("Reflection message: {}", reflectionMsg);
+            // Check for parse/match failures first
+            var parseReflection = reflectionManager.getParseReflection(parseResult, failedBlocks, blocks);
+            if (!parseReflection.isEmpty()) {
+                io.toolOutput("Attempting to fix parse/match errors...");
+                if (mode != Mode.APPLY) {
+                    io.toolOutput("/mode set to APPLY for parse errors");
+                    mode = Mode.APPLY;
+                }
+                sessionMessages.add(new UserMessage(parseReflection));
+                continue;
+            }
 
-            // If no reflection or we've exhausted attempts, break out
-            if (reflectionMsg.isEmpty()) {
+            // If parsing succeeded, check build
+            var buildReflection = reflectionManager.getBuildReflection(contextManager);
+            if (buildReflection.isEmpty()) {
                 break;
             }
+
+            io.toolOutput("Attempting to fix build errors...");
+            if (mode != Mode.EDIT) {
+                io.toolOutput("/mode set to EDIT for build errors");
+                mode = Mode.EDIT;
+            }
+            sessionMessages.add(new UserMessage(buildReflection));
 
             // If the reflection manager has also signaled "stop" (maybe user said no),
             // or we've reached reflectionManager's maximum tries:
             if (!reflectionManager.shouldContinue()) {
                 break;
             }
-
-            // Another iteration with the new reflection message
-            sessionMessages.add(new UserMessage(reflectionMsg.toString()));
         }
 
         // Move conversation to history

@@ -27,16 +27,34 @@ class ReflectionManager {
     }
 
     /**
-     * Inspect the user's last prompt and the LLM's response,
-     * see if there's a reason to re-ask with a "reflection" query.
-     * The Python logic might check for newly referenced files,
-     * lint/test errors, etc.
-     *
-     * For example, if we see "Test errors" in the LLM output,
-     * we can ask user if they want to fix them => generate reflection query.
+     * getReflectionMessage is responsible for displaying something to the user
      */
-    public String runBuild(IContextManager contextManager) {
-        var result = contextManager.runBuild();
+    String getParseReflection(EditBlock.ParseResult parseResult, List<FailedBlock> failedBlocks, List<EditBlock.SearchReplaceBlock> blocks) {
+        assert !blocks.isEmpty();
+
+        if (parseResult.parseError() == null && failedBlocks.isEmpty()) {
+            resetParseErrors();
+            return "";
+        }
+
+        incrementParseErrors();
+        var reflectionMsg = new StringBuilder();
+        
+        if (parseResult.parseError() != null) {
+            io.toolErrorRaw(parseResult.parseError());
+            reflectionMsg.append(parseResult.parseError()).append("\n");
+        }
+        if (!failedBlocks.isEmpty()) {
+            var failedApplyMessage = handleFailedBlocks(failedBlocks, blocks.size() - failedBlocks.size());
+            io.toolErrorRaw(failedApplyMessage);
+            reflectionMsg.append(failedApplyMessage);
+        }
+
+        return reflectionMsg.toString();
+    }
+
+    String getBuildReflection(IContextManager cm) {
+        var result = cm.runBuild();
         if (result.status() == ContextManager.OperationStatus.SUCCESS) {
             buildErrors.clear(); // Reset on successful build
             return "";
@@ -46,11 +64,6 @@ class ReflectionManager {
         io.toolError(result.message());
         buildErrors.add(result.message());
 
-        // Return a reflection query with all build error history
-        if (coder.mode != Coder.Mode.EDIT) {
-            coder.mode = Coder.Mode.EDIT;
-            io.toolOutput("/mode set to EDIT by build failure");
-        }
         StringBuilder query = new StringBuilder("The build failed. Here is the history of build attempts:\n\n");
         for (int i = 0; i < buildErrors.size(); i++) {
             query.append("=== Attempt ").append(i + 1).append(" ===\n")
@@ -59,38 +72,6 @@ class ReflectionManager {
         }
         query.append("Please fix these build errors.");
         return query.toString();
-    }
-
-    /**
-     * getReflectionMessage is responsible for displaying something to the user
-     */
-    String getReflectionMessage(EditBlock.ParseResult parseResult, List<FailedBlock> failedBlocks, List<EditBlock.SearchReplaceBlock> blocks, IContextManager cm) {
-        // Handle parse errors and failed blocks
-        if (parseResult.parseError() != null || !failedBlocks.isEmpty()) {
-            incrementParseErrors();
-
-            var reflectionMsg = new StringBuilder();
-            if (parseResult.parseError() != null) {
-                io.toolErrorRaw(parseResult.parseError());
-                reflectionMsg.append(parseResult.parseError()).append("\n");
-            }
-            if (!failedBlocks.isEmpty()) {
-                var failedApplyMessage = handleFailedBlocks(failedBlocks, blocks.size() - failedBlocks.size());
-                io.toolErrorRaw(failedApplyMessage);
-                reflectionMsg.append(failedApplyMessage);
-            }
-
-            return reflectionMsg.toString();
-        }
-
-        // Reset parse error counter when there are no parse errors
-        resetParseErrors();
-        if (blocks.isEmpty()) {
-            return "";
-        }
-
-        // If no parse/apply errors, try running build
-        return runBuild(cm);
     }
 
     // responsible for outputting the reason we stopped

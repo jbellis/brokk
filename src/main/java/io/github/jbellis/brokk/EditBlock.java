@@ -17,9 +17,7 @@ public class EditBlock {
      * Parse the LLM response for SEARCH/REPLACE blocks (or shell blocks, etc.) and apply them.
      */
     public static List<ReflectionManager.FailedBlock> applyEditBlocks(IContextManager contextManager, IConsoleIO io, Collection<SearchReplaceBlock> blocks) {
-        if (blocks.isEmpty()) {
-            return Collections.emptyList();
-        }
+        assert !blocks.isEmpty();
 
         // Track which blocks succeed or fail during application
         List<ReflectionManager.FailedBlock> failed = new ArrayList<>();
