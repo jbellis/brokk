@@ -57,7 +57,7 @@ public class Coder {
      * @param userInput The original user message you want to send.
      */
     public void runSession(String userInput) {
-        if (models.editModel() instanceof Models.UnavailableStreamingModel) {
+        if (!isLlmAvailable()) {
             io.toolError("No LLM available (missing API keys)");
             return;
         }
@@ -164,6 +164,10 @@ public class Coder {
                                              sessionMessages.stream().filter(m -> m instanceof AiMessage))
                 .toList();
         contextManager.addToHistory(filteredSession);
+    }
+
+    public boolean isLlmAvailable() {
+        return !(models.editModel() instanceof Models.UnavailableStreamingModel);
     }
 
     /**

@@ -1347,6 +1347,9 @@ public class ContextManager implements IContextManager {
             line += "-".repeat(width - line.length());
         }
         io.toolOutput(line);
+        if (!coder.isLlmAvailable()) {
+            io.toolErrorRaw("LLM is not configured, not much will work besides /copy");
+        }
     }
 
     /**
