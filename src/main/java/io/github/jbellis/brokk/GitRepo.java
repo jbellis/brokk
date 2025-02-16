@@ -27,6 +27,7 @@ public class GitRepo implements Closeable {
     private final Path root;
     private final Repository repository;
     private final Git git;
+    private List<RepoFile> trackedFilesCache = null;
 
     private GitRepo() {
         // Moved "findGitRoot" logic here
@@ -64,6 +65,7 @@ public class GitRepo implements Closeable {
 
     public synchronized void refresh() {
         repository.getRefDatabase().refresh();
+        trackedFilesCache = null;
     }
 
     public synchronized List<String> logShort() {
@@ -94,6 +96,9 @@ public class GitRepo implements Closeable {
      * (changed, modified, added, removed) from the working directory.
      */
     public synchronized List<RepoFile> getTrackedFiles() {
+        if (trackedFilesCache != null) {
+            return trackedFilesCache;
+        }
         var trackedPaths = new HashSet<String>();
         try {
             // HEAD (unchanged) files
@@ -119,9 +124,10 @@ public class GitRepo implements Closeable {
         } catch (IOException | GitAPIException e) {
             throw new UncheckedIOException(new IOException(e));
         }
-        return trackedPaths.stream()
+        trackedFilesCache = trackedPaths.stream()
                 .map(path -> new RepoFile(root, path))
                 .collect(Collectors.toList());
+        return trackedFilesCache;
     }
 
     public synchronized String diff() {

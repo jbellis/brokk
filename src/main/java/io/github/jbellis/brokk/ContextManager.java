@@ -48,14 +48,8 @@ import java.util.stream.Stream;
 // TODO standardize handling of paths -- should they be relative or absolute and does Context manage that or do we
 public class ContextManager implements IContextManager {
     private final Logger logger = LogManager.getLogger(ContextManager.class);
-    private static List<RepoFile> gitTrackedFilesCache = null;
-
-    public static synchronized List<RepoFile> getTrackedFiles() {
-        if (gitTrackedFilesCache != null) {
-            return gitTrackedFilesCache;
-        }
-        gitTrackedFilesCache = GitRepo.instance.getTrackedFiles();
-        return gitTrackedFilesCache;
+    public static List<RepoFile> getTrackedFiles() {
+        return GitRepo.instance.getTrackedFiles();
     }
 
     private AnalyzerWrapper analyzerWrapper;
@@ -650,7 +644,7 @@ public class ContextManager implements IContextManager {
     private OperationResult cmdRefresh() {
         GitRepo.instance.refresh();
         analyzerWrapper.rebuild();
-        onRefresh();
+        currentContext = currentContext.refresh();
         io.toolOutput("Code intelligence refresh scheduled");
         return OperationResult.skipShow();
     }
@@ -1468,13 +1462,6 @@ public class ContextManager implements IContextManager {
 
     public Set<RepoFile> getEditableFiles() {
         return currentContext.editableFiles().map(PathFragment::file).collect(Collectors.toSet());
-    }
-
-    public void onRefresh() {
-        synchronized (ContextManager.class) {
-            gitTrackedFilesCache = null;
-        }
-        currentContext = currentContext.refresh();
     }
 
     private record BuildCommand(String command, String message) {
