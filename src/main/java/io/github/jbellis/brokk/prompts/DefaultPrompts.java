@@ -158,7 +158,8 @@ public abstract class DefaultPrompts {
 
                Every *SEARCH/REPLACE* block must use this format:
                1. The opening fence of backticks: ```
-               2. The *FULL* filename alone on a line, verbatim. No bold asterisks, no quotes around it, no escaping, etc.
+               2. The *FULL* filename ALONE on a line, verbatim. 
+                  Alone means alone: no backticks, no bold asterisks, no quotes around it, no escaping, nothing, just the raw filename.
                3. The start of search block: <<<<<<< SEARCH
                4. A contiguous chunk of lines to search for in the existing source code
                5. The dividing line: =======
