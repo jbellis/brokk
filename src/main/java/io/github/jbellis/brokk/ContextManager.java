@@ -30,6 +30,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -690,22 +691,25 @@ public class ContextManager implements IContextManager {
             .toList();
 
         if (!methodUses.isEmpty()) {
-            code.append("Method uses:\n\n");
-
-            // Group methods by classname
-            String currentClass = null;
+            Map<String, List<String>> groupedMethods = new LinkedHashMap<>();
             for (var cu : methodUses) {
-                String classname = ContextFragment.toClassname(cu.reference());
-                if (!classname.equals(currentClass)) {
-                    // Print class header when we switch to a new class
-                    code.append("In ").append(classname).append(":\n\n");
-                    currentClass = classname;
-                }
-
                 var source = getAnalyzer().getMethodSource(cu.reference());
                 if (source.isDefined()) {
+                    String classname = ContextFragment.toClassname(cu.reference());
+                    groupedMethods.computeIfAbsent(classname, k -> new ArrayList<>()).add(source.get());
                     sources.add(cu);
-                    code.append(source.get()).append("\n\n");
+                }
+            }
+            if (!groupedMethods.isEmpty()) {
+                code.append("Method uses:\n\n");
+                for (var entry : groupedMethods.entrySet()) {
+                    List<String> methods = entry.getValue();
+                    if (!methods.isEmpty()) {
+                        code.append("In ").append(entry.getKey()).append(":\n\n");
+                        for (String methodSource : methods) {
+                            code.append(methodSource).append("\n\n");
+                        }
+                    }
                 }
             }
         }
