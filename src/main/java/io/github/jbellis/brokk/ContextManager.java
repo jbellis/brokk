@@ -1285,7 +1285,7 @@ public class ContextManager implements IContextManager {
         // Show message history as one "fragment" line
         if (historyLines > 0) {
             // We only show a single line with the total
-            io.context(formatLine(historyLines, "[Message History]", termWidth));
+            io.context(formatLine(historyLines, "  [Message History]", termWidth));
         }
 
         // Auto context
