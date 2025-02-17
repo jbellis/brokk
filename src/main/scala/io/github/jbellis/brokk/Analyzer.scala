@@ -447,9 +447,6 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     val sortedAll = scores.toList.sortBy { case (_, score) => -score }
     val filteredSortedAll = sortedAll.filterNot { case (cls, _) => seedSeq.exists(seed => partOfClass(seed, cls)) }
 
-    def isInnerClass(child: String, parent: String): Boolean =
-      child.startsWith(parent + "$")
-
     // Coalesce inner classes while maintaining k results
     def coalesceInnerClasses(initial: List[(String, Double)], k: Int): mutable.Buffer[(String, Double)] = {
       var results = initial.take(k).toBuffer
@@ -464,7 +461,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
           val (pClass, _) = results(i)
           for (j <- results.indices if j != i) {
             val (cClass, _) = results(j)
-            if (isInnerClass(cClass, pClass)) {
+            if (partOfClass(pClass, cClass)) {
               toRemove += cClass
             }
           }

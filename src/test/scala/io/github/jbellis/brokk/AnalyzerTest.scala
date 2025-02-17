@@ -157,7 +157,7 @@ class AnalyzerTest {
     // A and B should rank highly as they are both called by D
     assert(ranked.size() == 3, ranked)
     val classes = asScala(ranked).map(_._1).toSet
-    assertEquals(Set("A", "A.method6.Runnable$0", "B"), classes)
+    assertEquals(Set("A", "B", "AnonymousUsage.foo.Runnable$0"), classes)
   }
 
   @Test
