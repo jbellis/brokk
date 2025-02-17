@@ -78,7 +78,6 @@ public class ContextManager implements IContextManager {
         this.commands = buildCommands();
     }
 
-
     /**
      * Command construction.
      */
@@ -244,9 +243,15 @@ public class ContextManager implements IContextManager {
             var matches = Completions.expandPath(root, rawName);
             if (matches.isEmpty()) {
                 io.toolError("no files matched '%s'".formatted(rawName));
-            } else {
-                matches.stream()
-                        .flatMap(relFile -> getAnalyzer().classesInFile(relFile).stream())
+                continue;
+            }
+
+            for (var file : matches) {
+                if (file instanceof ExternalFile) {
+                    io.toolError("Cannot summarize external file: " + rawName);
+                    continue;
+                }
+                getAnalyzer().classesInFile((RepoFile)file).stream()
                         .filter(fqcn -> !fqcn.contains("$"))
                         .forEach(classnames::add);
             }
@@ -341,7 +346,7 @@ public class ContextManager implements IContextManager {
         }
 
         var filenames = Completions.parseQuotedFilenames(args);
-        List<RepoFile> aggregateFiles = new ArrayList<>();
+        var aggregateFiles = new ArrayList<RepoFile>();
         for (String token : filenames) {
             var matches = Completions.expandPath(root, token);
             if (matches.isEmpty()) {
@@ -356,7 +361,13 @@ public class ContextManager implements IContextManager {
                     }
                 }
             } else {
-                aggregateFiles.addAll(matches);
+                for (var file : matches) {
+                    if (file instanceof ExternalFile) {
+                        io.toolError("Cannot add external file: " + token);
+                        continue;
+                    }
+                    aggregateFiles.add((RepoFile)file);
+                }
             }
         }
         if (!aggregateFiles.isEmpty()) {
@@ -397,7 +408,7 @@ public class ContextManager implements IContextManager {
         }
 
         var filenames = Completions.parseQuotedFilenames(args);
-        List<RepoFile> aggregateFiles = new ArrayList<>();
+        List<BrokkFile> aggregateFiles = new ArrayList<>();
         for (String token : filenames) {
             var matches = Completions.expandPath(root, token);
             if (matches.isEmpty()) {
@@ -411,7 +422,6 @@ public class ContextManager implements IContextManager {
         }
         return OperationResult.success();
     }
-
 
     /**
      * /add autocompleter:
@@ -1129,21 +1139,13 @@ public class ContextManager implements IContextManager {
 
     @Override
     public void addFiles(Collection<RepoFile> files) {
-        var fragments = toFragments(files);
+        var fragments = files.stream().map(ContextFragment.RepoPathFragment::new).toList();
         pushContext();
         currentContext = currentContext.removeReadonlyFiles(fragments).addEditableFiles(fragments);
     }
 
-    private ArrayList<PathFragment> toFragments(Collection<RepoFile> files) {
-        var fragments = new ArrayList<PathFragment>();
-        for (var file : files) {
-            fragments.add(new PathFragment(file));
-        }
-        return fragments;
-    }
-
-    public void addReadOnlyFiles(Collection<RepoFile> files) {
-        var fragments = toFragments(files);
+    public void addReadOnlyFiles(Collection<? extends BrokkFile> files) {
+        var fragments = files.stream().map(ContextFragment::toPathFragment).toList();
         pushContext();
         currentContext = currentContext.removeEditableFiles(fragments).addReadonlyFiles(fragments);
     }
@@ -1437,7 +1439,9 @@ public class ContextManager implements IContextManager {
     }
 
     public Set<RepoFile> getEditableFiles() {
-        return currentContext.editableFiles().map(PathFragment::file).collect(Collectors.toSet());
+        return currentContext.editableFiles()
+                .map(ContextFragment.RepoPathFragment::file)
+                .collect(Collectors.toSet());
     }
 
     private record BuildCommand(String command, String message) {

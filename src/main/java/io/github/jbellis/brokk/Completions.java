@@ -201,21 +201,28 @@ public class Completions {
     /**
      * Expand paths that may contain wildcards (*, ?), returning all matches.
      */
-    static List<RepoFile> expandPath(Path root, String pattern) {
-        // First check if it exists as a relative filename from root
-        var file = new RepoFile(root, pattern);
+    static List<? extends BrokkFile> expandPath(Path root, String pattern) {
+        // First check if this is a single file
+        var file = maybeExternalFile(root, pattern);
         if (file.exists()) {
             return List.of(file);
         }
 
+        // Handle relative path
+        var repoFile = (RepoFile)file;
+        if (repoFile.exists()) {
+            return List.of(repoFile);
+        }
+
         // Handle glob patterns
         if (pattern.contains("*") || pattern.contains("?")) {
+            var parent = Path.of(pattern).getParent();
             var matcher = FileSystems.getDefault().getPathMatcher("glob:" + pattern);
-            try (var stream = Files.walk(root)) {
+            try (var stream = Files.walk(parent)) {
                 return stream
                         .filter(Files::isRegularFile)
-                        .filter(p -> matcher.matches(root.relativize(p)))
-                        .map(p -> new RepoFile(root, root.relativize(p)))
+                        .filter(p -> matcher.matches(p))
+                        .map(p -> maybeExternalFile(root, p.toString()))
                         .toList();
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
@@ -227,14 +234,18 @@ public class Completions {
         var matches = ContextManager.getTrackedFiles().stream()
                 .filter(p -> p.getFileName().equals(filename))
                 .toList();
-
-        if (matches.isEmpty()) {
-            return List.of();
-        }
-        if (matches.size() > 1) {
+        if (matches.size() != 1) {
             return List.of();
         }
 
         return matches;
+    }
+
+    public static BrokkFile maybeExternalFile(Path root, String pathStr) {
+        Path p = Path.of(pathStr).toAbsolutePath();
+        if (!p.startsWith(root)) {
+            return new ExternalFile(p);
+        }
+        return new RepoFile(root, root.relativize(p));
     }
 }

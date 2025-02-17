@@ -20,29 +20,33 @@ public interface ContextFragment {
     /** should classes found in this fragment be included in AutoContext? */
     boolean isEligibleForAutoContext();
 
-    record PathFragment(RepoFile file) implements ContextFragment {
+    sealed interface PathFragment extends ContextFragment 
+        permits RepoPathFragment, ExternalPathFragment
+    {
+        BrokkFile file();
+
+        default String text() throws IOException {
+            return file().read();
+        }
+
+        default String format() throws IOException {
+            return """
+            <file path="%s">
+            %s
+            </file>
+            """.formatted(file().toString(), text()).stripIndent();
+        }
+    }
+
+    record RepoPathFragment(RepoFile file) implements PathFragment {
         @Override
         public String source() {
             return file.getFileName();
         }
 
         @Override
-        public String text() throws IOException {
-            return file.read();
-        }
-
-        @Override
         public String description() {
             return file.getParent();
-        }
-
-        @Override
-        public String format() throws IOException {
-            return """
-            <file path="%s">
-            %s
-            </file>
-            """.formatted(file.toString(), text()).stripIndent();
         }
 
         @Override
@@ -52,13 +56,44 @@ public interface ContextFragment {
 
         @Override
         public boolean isEligibleForAutoContext() {
-            return false;
+            return true;
         }
 
         @Override
         public String toString() {
-            return "PathFragment('%s')".formatted(file);
+            return "RepoPathFragment('%s')".formatted(file);
         }
+    }
+
+    record ExternalPathFragment(ExternalFile file) implements PathFragment {
+        @Override
+        public String source() {
+            return file.toString();
+        }
+
+        @Override
+        public String description() {
+            return "(External)";
+        }
+
+        @Override
+        public Set<String> classnames(Analyzer analyzer) {
+            return Set.of();
+        }
+
+        @Override
+        public boolean isEligibleForAutoContext() {
+            return false;
+        }
+    }
+
+    static PathFragment toPathFragment(BrokkFile bf) {
+        if (bf instanceof RepoFile repo) {
+            return new RepoPathFragment(repo);
+        } else if (bf instanceof ExternalFile ext) {
+            return new ExternalPathFragment(ext);
+        }
+        throw new IllegalArgumentException("Unknown BrokkFile subtype: " + bf.getClass().getName());
     }
 
     abstract class VirtualFragment implements ContextFragment {

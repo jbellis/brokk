@@ -21,7 +21,7 @@ public class Context {
     public static final int MAX_AUTO_CONTEXT_FILES = 100;
 
     private final AnalyzerWrapper analyzer;
-    private final List<ContextFragment.PathFragment> editableFiles;
+    private final List<ContextFragment.RepoPathFragment> editableFiles;
     private final List<ContextFragment.PathFragment> readonlyFiles;
     private final List<ContextFragment.VirtualFragment> virtualFragments;
 
@@ -39,7 +39,7 @@ public class Context {
 
     public Context(
             AnalyzerWrapper analyzer,
-            List<ContextFragment.PathFragment> editableFiles,
+            List<ContextFragment.RepoPathFragment> editableFiles,
             List<ContextFragment.PathFragment> readonlyFiles,
             List<ContextFragment.VirtualFragment> virtualFragments,
             AutoContext autoContext,
@@ -61,12 +61,12 @@ public class Context {
     /**
      * Creates a new Context with an additional set of editable files. Rebuilds autoContext if toggled on.
      */
-    public Context addEditableFiles(Collection<ContextFragment.PathFragment> paths) {
+    public Context addEditableFiles(Collection<ContextFragment.RepoPathFragment> paths) {
         var toAdd = paths.stream().filter(fragment -> !editableFiles.contains(fragment)).toList();
         if (toAdd.isEmpty()) {
             return this;
         }
-        List<ContextFragment.PathFragment> newEditable = new ArrayList<>(editableFiles);
+        var newEditable = new ArrayList<>(editableFiles);
         newEditable.addAll(toAdd);
         return withEditableFiles(newEditable).refresh();
     }
@@ -86,7 +86,7 @@ public class Context {
     }
 
     public Context removeEditableFiles(List<ContextFragment.PathFragment> fragments) {
-        List<ContextFragment.PathFragment> newEditable = new ArrayList<>(editableFiles);
+        var newEditable = new ArrayList<>(editableFiles);
         newEditable.removeAll(fragments);
         if (newEditable.equals(editableFiles)) {
             return this;
@@ -94,7 +94,7 @@ public class Context {
         return withEditableFiles(newEditable).refresh();
     }
 
-    public Context removeReadonlyFiles(List<ContextFragment.PathFragment> fragments) {
+    public Context removeReadonlyFiles(List<? extends ContextFragment.PathFragment> fragments) {
         List<ContextFragment.PathFragment> newReadOnly = new ArrayList<>(readonlyFiles);
         newReadOnly.removeAll(fragments);
         if (newReadOnly.equals(readonlyFiles)) {
@@ -228,7 +228,7 @@ public class Context {
     // Accessors
     // ---------------------------------------------------------
 
-    public Stream<ContextFragment.PathFragment> editableFiles() {
+    public Stream<ContextFragment.RepoPathFragment> editableFiles() {
         return editableFiles.stream();
     }
 
@@ -262,7 +262,7 @@ public class Context {
         return autoContextFileCount;
     }
 
-    private Context withEditableFiles(List<ContextFragment.PathFragment> newEditableFiles) {
+    private Context withEditableFiles(List<ContextFragment.RepoPathFragment> newEditableFiles) {
         return new Context(analyzer, newEditableFiles, readonlyFiles, virtualFragments, autoContext, autoContextFileCount, historyMessages);
     }
 

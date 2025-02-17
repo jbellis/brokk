@@ -36,6 +36,8 @@ class RepoFile(private val root: Path, private val relPath: Path) extends BrokkF
     Option(relPath.getParent).map(_.toString).getOrElse("")
   }
 
+  override def toString: String = relPath.toString
+
   override def equals(o: Any): Boolean = o match {
     case repoFile: RepoFile => root == repoFile.root && relPath == repoFile.relPath
     case _ => false
