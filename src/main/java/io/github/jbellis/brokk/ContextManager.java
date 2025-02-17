@@ -953,7 +953,7 @@ public class ContextManager implements IContextManager {
     @Override
     public OperationResult runBuild() {
         try {
-            if (buildCommand.get().command == null) {
+            if (buildCommand.get().command == null || buildCommand.get().command.isBlank()) {
                 io.toolOutput("No build command configured");
                 return OperationResult.success();
             }

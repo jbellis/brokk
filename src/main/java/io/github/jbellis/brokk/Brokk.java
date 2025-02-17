@@ -61,7 +61,7 @@ public class Brokk {
             Properties props = new Properties();
             props.load(Brokk.class.getResourceAsStream("/version.properties"));
             version = props.getProperty("version");
-        } catch (IOException e) {
+        } catch (IOException | NullPointerException e) {
             version = "[unknown]";
         }
         io.toolOutput("Editor model: " + models.editModelName());
