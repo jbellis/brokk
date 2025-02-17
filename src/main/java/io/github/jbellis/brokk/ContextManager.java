@@ -739,11 +739,14 @@ public class ContextManager implements IContextManager {
         io.toolOutput("Paste your stacktrace below and press Enter when done:");
         String stacktraceText = io.getRawInput();
         if (stacktraceText == null || stacktraceText.isBlank()) {
-            return OperationResult.error("No stacktrace pasted");
+            return OperationResult.error("no stacktrace pasted");
         }
 
         try {
             var stacktrace = StackTrace.parse(stacktraceText);
+            if (stacktrace == null) {
+                return OperationResult.error("unable to parse stacktrace");
+            }
             String exception = stacktrace.getExceptionType();
 
             StringBuilder content = new StringBuilder();
