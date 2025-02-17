@@ -162,7 +162,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
         startLine <- method.lineNumber
         endLine <- method.lineNumberEnd
       } yield {
-        scala.util.Using(Source.fromFile(file.absPath.toFile)) { source =>
+        scala.util.Using(Source.fromFile(file.absPath().toFile)) { source =>
           source
             .getLines()
             .slice(startLine - 1, endLine)
