@@ -642,8 +642,7 @@ public class ContextManager implements IContextManager {
     private OperationResult cmdRefresh() {
         GitRepo.instance.refresh();
         analyzerWrapper.requestRebuild();
-        currentContext = currentContext.refresh();
-        io.toolOutput("Code intelligence refresh scheduled");
+        io.toolOutput("Code intelligence will refresh in the background");
         return OperationResult.skipShow();
     }
 
@@ -1279,29 +1278,22 @@ public class ContextManager implements IContextManager {
                 .sum();
         totalLines += historyLines;
 
-        if (!currentContext.getHistory().isEmpty()
-                || (!currentContext.getAutoContext().text().isEmpty()
-                || (currentContext.isAutoContextEnabled() && currentContext.hasEditableFiles()))
-                || currentContext.hasReadonlyFragments()) {
-            io.context("Read-only:");
-
-            // Show message history as one "fragment" line
-            if (historyLines > 0) {
-                // We only show a single line with the total
-                io.context(formatLine(historyLines, "[Message History]", termWidth));
-            }
-
-            // Auto context
-            if (currentContext.isAutoContextEnabled()) {
-                totalLines += formatFragments(Stream.of(currentContext.getAutoContext()), termWidth);
-            }
-
-            // Virtual fragments (e.g. stacktrace, pasted text, etc.)
-            totalLines += formatFragments(currentContext.virtualFragments(), termWidth);
-
-            // Read-only filename fragments
-            totalLines += formatFragments(currentContext.readonlyFiles(), termWidth);
+        // Read-only section
+        io.context("Read-only:");
+        // Show message history as one "fragment" line
+        if (historyLines > 0) {
+            // We only show a single line with the total
+            io.context(formatLine(historyLines, "[Message History]", termWidth));
         }
+
+        // Auto context
+        totalLines += formatFragments(Stream.of(currentContext.getAutoContext()), termWidth);
+
+        // Virtual fragments (e.g. stacktrace, pasted text, etc.)
+        totalLines += formatFragments(currentContext.virtualFragments(), termWidth);
+
+        // Read-only filename fragments
+        totalLines += formatFragments(currentContext.readonlyFiles(), termWidth);
 
         // Editable fragments
         if (currentContext.hasEditableFiles()) {

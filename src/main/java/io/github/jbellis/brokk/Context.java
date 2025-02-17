@@ -177,7 +177,6 @@ public class Context {
      */
     private AutoContext buildAutoContext() {
         if (!isAutoContextEnabled()) {
-            debug("pagerank disabled");
             return AutoContext.DISABLED;
         }
         
@@ -192,7 +191,6 @@ public class Context {
                 .collect(Collectors.toSet());
 
         if (seeds.isEmpty()) {
-            debug("Empty pagerank seeds");
             return AutoContext.EMPTY;
         }
 
@@ -224,10 +222,6 @@ public class Context {
         }
 
         return new AutoContext(skeletons);
-    }
-
-    private static void debug(String msg) {
-//        System.out.println("[debug] " + msg);
     }
 
     // ---------------------------------------------------------
@@ -295,7 +289,6 @@ public class Context {
      * Produces a new Context object with a fresh AutoContext if enabled.
      */
     public Context refresh() {
-        debug("refreshing autocontext: " + isAutoContextEnabled());
         AutoContext newAutoContext = isAutoContextEnabled() ? buildAutoContext() : AutoContext.DISABLED;
         return new Context(analyzer, editableFiles, readonlyFiles, virtualFragments, newAutoContext, autoContextFileCount, historyMessages);
     }

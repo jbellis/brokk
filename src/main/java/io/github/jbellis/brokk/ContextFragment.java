@@ -301,7 +301,7 @@ public interface ContextFragment {
      */
     class AutoContext implements ContextFragment {
         public static final AutoContext EMPTY = new AutoContext(List.of(new SkeletonFragment(-1, List.of("Enabled, but no references found"), Set.of(), "")));
-        public static final AutoContext DISABLED  = new AutoContext(List.of());
+        public static final AutoContext DISABLED  = new AutoContext(List.of(new SkeletonFragment(-1, List.of("Disabled"), Set.of(), "")));
 
         private final List<SkeletonFragment> skeletons;
 
