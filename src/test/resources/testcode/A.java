@@ -21,4 +21,18 @@ public class A {
     public static int method4(double foo, Integer bar) {
         return 0;
     }
+
+    public void method5() {
+        // self-reference
+        System.out.println(new A());
+    }
+
+    public void method6() {
+        // nested self-reference
+        new Runnable() {
+            public void run() {
+                System.out.println(new A());
+            }
+        }.run();
+    }
 }

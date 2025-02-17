@@ -41,6 +41,8 @@ sealed trait CodeUnit extends Comparable[CodeUnit] {
     case CodeUnit.FunctionType(ref) => s"FUNCTION[$ref]"
   }
 
+  override def hashCode(): Int = reference.hashCode()
+  override def equals(obj: Any): Boolean = obj.isInstanceOf[CodeUnit] && this.reference == obj.asInstanceOf[CodeUnit].reference
   override def compareTo(other: CodeUnit): Int = this.reference.compareTo(other.reference)
 }
 
@@ -649,7 +651,11 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
   private def callersOfMethodNode(m: Method, excludeSelfRefs: Boolean): List[String] = {
     var calls = m.callIn
     if (excludeSelfRefs) {
-      calls = calls.filterNot(call => call.method.typeDecl.fullName.head == m.typeDecl.fullName.head)
+      val selfSource = m.typeDecl.fullName.head
+      calls = calls.filterNot(call => {
+        val callerSource = call.method.typeDecl.fullName.head
+        partOfClass(selfSource, callerSource)
+      })
     }
     calls
       .method
@@ -659,29 +665,31 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
       .l
   }
 
+  private def partOfClass(parentFqcn: String, childFqcn: String) = {
+    childFqcn == parentFqcn || childFqcn.startsWith(parentFqcn + ".") || childFqcn.startsWith(parentFqcn + "$")
+  }
+
   /**
    * Return all methods that reference a given field "classFullName.fieldName".
    * If `excludeSelfRefs` is true, references from the same class are omitted.
    */
-  private def referencesToField(
-                                 classFullName: String,
+  private def referencesToField(selfSource: String,
                                  fieldName: String,
-                                 excludeSelfRefs: Boolean
-                               ): List[String] = {
-    val baseCalls = cpg.call
+                                 excludeSelfRefs: Boolean): List[String] = {
+    var calls = cpg.call
       .nameExact("<operator>.fieldAccess")
       // The first argument is the "base" or receiver,
       // typed with `classFullName` for an instance, or referencing the class for a static field.
-      .where(_.argument(1).typ.fullNameExact(classFullName))
+      .where(_.argument(1).typ.fullNameExact(selfSource))
       // The second argument is the field identifier code
       .where(_.argument(2).codeExact(fieldName))
 
-    val maybeFiltered = if (excludeSelfRefs) {
-      baseCalls.whereNot(_.method.typeDecl.fullNameExact(classFullName))
-    } else {
-      baseCalls
+    if (excludeSelfRefs) {
+      calls = calls.filterNot(call => {
+        partOfClass(selfSource, call.method.typeDecl.fullName.head)
+      })
     }
-    maybeFiltered
+    calls
       .method
       .fullName
       // Chop off everything after the colon, e.g. "Foo.bar:void()" → "Foo.bar"
@@ -706,7 +714,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
       .typeFullName(typePattern)
       .astParent
       .isTypeDecl
-      .filter(td => td.fullName != classFullName)
+      .filter(td => !partOfClass(classFullName, td.fullName))
       .fullName
       .l
 
@@ -714,7 +722,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     val paramRefs = cpg.parameter
       .typeFullName(typePattern)
       .method
-      .filter(m => m.typeDecl.fullName.l.head != classFullName)
+      .filter(m => !partOfClass(classFullName, m.typeDecl.fullName.l.head))
       .fullName
       .l
 
@@ -722,7 +730,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     val localRefs = cpg.local
       .typeFullName(typePattern)
       .method
-      .filter(m => m.typeDecl.fullName.l.head != classFullName)
+      .filter(m => !partOfClass(classFullName, m.typeDecl.fullName.l.head))
       .fullName
       .l
 

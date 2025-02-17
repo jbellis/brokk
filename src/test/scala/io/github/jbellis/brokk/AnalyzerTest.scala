@@ -86,6 +86,8 @@ class AnalyzerTest {
         |  public String method2(String input, int otherInput) {...}
         |  public Function method3() {...}
         |  public static int method4(double foo, Integer bar) {...}
+        |  public void method5() {...}
+        |  public void method6() {...}
         |}""".stripMargin
     assertEquals(expected, skeleton)
   }
@@ -155,7 +157,7 @@ class AnalyzerTest {
     // A and B should rank highly as they are both called by D
     assert(ranked.size() == 3, ranked)
     val classes = asScala(ranked).map(_._1).toSet - "D"
-    assertEquals(Set("B", "AnonymousUsage.foo.Runnable$0"), classes)
+    assertEquals(Set("A", "A.method6.Runnable$0"), classes)
   }
 
   @Test

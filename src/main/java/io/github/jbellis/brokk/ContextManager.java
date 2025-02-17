@@ -675,6 +675,7 @@ public class ContextManager implements IContextManager {
         } catch (IllegalArgumentException e) {
             return OperationResult.error(e.getMessage());
         }
+        logger.debug("Uses of {} are {}", identifier, uses);
         if (uses.isEmpty()) {
             return OperationResult.success("No uses found for " + identifier);
         }
