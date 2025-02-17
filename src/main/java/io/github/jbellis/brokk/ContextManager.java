@@ -38,7 +38,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -720,55 +719,38 @@ public class ContextManager implements IContextManager {
 
     private OperationResult cmdStacktrace() {
         io.toolOutput("Paste your stacktrace below and press Enter when done:");
-        String stacktrace = io.getRawInput();
-        if (stacktrace == null || stacktrace.isBlank()) {
+        String stacktraceText = io.getRawInput();
+        if (stacktraceText == null || stacktraceText.isBlank()) {
             return OperationResult.error("No stacktrace pasted");
         }
 
-        String[] lines = stacktrace.split("\n");
-        String exception = "Unknown";
-        Pattern exceptionPattern = Pattern.compile("^\\s*(\\S+):\\s*");
-        for (String line : lines) {
-            var matcher = exceptionPattern.matcher(line);
-            if (matcher.find()) {
-                exception = matcher.group(1);
-                break;
-            }
-        }
-        if (exception.equals("Unknown")) {
-            io.toolOutput("Warning: Could not identify exception type from stacktrace");
-        }
-        StringBuilder content = new StringBuilder();
-        var classnames = new HashSet<String>();
+        try {
+            var stacktrace = StackTrace.parse(stacktraceText);
+            String exception = stacktrace.getExceptionType();
 
-        // Process each line
-        for (String line : lines) {
-            // check that line looks like a stack entry
-            if (!line.trim().startsWith("at ")) {
-                continue;
-            }
-            String methodLine = line.trim().substring(3);
-            int parenIndex = methodLine.indexOf('(');
-            if (parenIndex <= 0) {
-                continue;
+            StringBuilder content = new StringBuilder();
+            var classnames = new HashSet<String>();
+
+            for (var element : stacktrace.getFrames()) {
+                String methodFullName = element.getClassName() + "." + element.getMethodName();
+                var methodSource = getAnalyzer().getMethodSource(methodFullName);
+                if (methodSource.isDefined()) {
+                    classnames.add(ContextFragment.toClassname(methodFullName));
+                    content.append(methodFullName).append(":\n");
+                    content.append(methodSource.get()).append("\n\n");
+                }
             }
 
-            String methodFullName = methodLine.substring(0, parenIndex);
-            var methodSource = getAnalyzer().getMethodSource(methodFullName);
-            if (methodSource.isDefined()) {
-                classnames.add(ContextFragment.toClassname(methodFullName));
-                content.append(methodFullName).append(":\n");
-                content.append(methodSource).append("\n\n");
+            if (content.isEmpty()) {
+                return OperationResult.error("no relevant methods found in stacktrace");
             }
-        }
 
-        if (content.isEmpty()) {
-            return OperationResult.error("no relevant methods found in stacktrace");
+            pushContext();
+            currentContext = currentContext.addStacktraceFragment(classnames, stacktraceText, exception, content.toString());
+            return OperationResult.success();
+        } catch (Exception e) {
+            return OperationResult.error("Failed to parse stacktrace: " + e.getMessage());
         }
-
-        pushContext();
-        currentContext = currentContext.addStacktraceFragment(classnames, stacktrace, exception, content.toString());
-        return OperationResult.success();
     }
 
     private OperationResult cmdPaste() {
