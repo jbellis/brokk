@@ -487,7 +487,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
   /**
    * Returns a set of all classes in the given .java filename.
    */
-  def classesInFile(file: RepoFile): java.util.Set[String] = {
+  def getClassesInFile(file: RepoFile): java.util.Set[String] = {
     val matches = cpg.typeDecl.l.filter { td =>
       file == toFile(td)
     }
@@ -502,11 +502,11 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     }
   }
 
-  def toFile(relName: String): RepoFile = {
+  private[brokk] def toFile(relName: String): RepoFile = {
     RepoFile(absolutePath, relName)
   }
 
-  def classInProject(className: String): Boolean = {
+  def isClassInProject(className: String): Boolean = {
     val td = cpg.typeDecl.fullNameExact(className).l
     td.nonEmpty && !(td.member.isEmpty && td.method.isEmpty && td.derivedTypeDecl.isEmpty)
   }

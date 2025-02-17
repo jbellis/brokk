@@ -251,7 +251,7 @@ public class ContextManager implements IContextManager {
                     io.toolError("Cannot summarize external file: " + rawName);
                     continue;
                 }
-                getAnalyzer().classesInFile((RepoFile)file).stream()
+                getAnalyzer().getClassesInFile((RepoFile)file).stream()
                         .filter(fqcn -> !fqcn.contains("$"))
                         .forEach(classnames::add);
             }

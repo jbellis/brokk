@@ -22,12 +22,12 @@ class AnalyzerTest {
   }
 
   @Test
-  def classInProjectTest(): Unit = {
+  def isClassInProjectTest(): Unit = {
     val analyzer = getAnalyzer
-    assert(analyzer.classInProject("A"))
+    assert(analyzer.isClassInProject("A"))
 
-    assert(!analyzer.classInProject("java.nio.filename.Path"))
-    assert(!analyzer.classInProject("org.foo.Bar"))
+    assert(!analyzer.isClassInProject("java.nio.filename.Path"))
+    assert(!analyzer.isClassInProject("org.foo.Bar"))
   }
   
   @Test
@@ -162,16 +162,16 @@ class AnalyzerTest {
   }
 
   @Test
-  def classesInFileTest(): Unit = {
+  def getClassesInFileTest(): Unit = {
     val analyzer = getAnalyzer
-    val classes = analyzer.classesInFile(analyzer.toFile("D.java"))
+    val classes = analyzer.getClassesInFile(analyzer.toFile("D.java"))
     assertEquals(Set("D", "D$DSub", "D$DSubStatic"), asScala(classes).toSet)
   }
 
   @Test 
   def classesInPackagedFileTest(): Unit = {
     val analyzer = getAnalyzer
-    val classes = analyzer.classesInFile(analyzer.toFile("Packaged.java"))
+    val classes = analyzer.getClassesInFile(analyzer.toFile("Packaged.java"))
     assertEquals(Set("io.github.jbellis.brokk.Foo"), asScala(classes).toSet)
   }
 

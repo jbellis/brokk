@@ -1,7 +1,6 @@
 package io.github.jbellis.brokk;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Future;
@@ -51,7 +50,7 @@ public interface ContextFragment {
 
         @Override
         public Set<String> classnames(Analyzer analyzer) {
-            return analyzer.classesInFile(file);
+            return analyzer.getClassesInFile(file);
         }
 
         @Override
@@ -130,7 +129,7 @@ public interface ContextFragment {
         public Set<String> classnames(Analyzer analyzer) {
             return ContextManager.getTrackedFiles().stream().parallel()
                     .filter(f -> text().contains(f.toString()))
-                    .flatMap(f -> analyzer.classesInFile(f).stream())
+                    .flatMap(f -> analyzer.getClassesInFile(f).stream())
                     .collect(java.util.stream.Collectors.toSet());
         }
 
