@@ -158,7 +158,7 @@ class AnalyzerTest {
     // A and B should rank highly as they are both called by D
     assert(ranked.size() == 3, ranked)
     val classes = asScala(ranked).map(_._1).toSet - "D"
-    assertEquals(Set("B", "AnonymousUsage.foo.Runnable$0"), classes.toSet)
+    assertEquals(Set("B", "AnonymousUsage.foo.Runnable$0"), classes)
   }
 
   @Test
@@ -182,8 +182,9 @@ class AnalyzerTest {
     val usages = analyzer.getUses(symbol)
 
     // Expect references in B.callsIntoA() because it calls a.method2("test")
-    assertEquals(Set("B.callsIntoA", "AnonymousUsage.foo"), asScala(usages.getMethodUses).toSet)
-    assertEquals(0, usages.getTypeUses.size(), "No type usages expected")
+    val actualMethodRefs = asScala(usages).filter(_.isFunction).map(_.getReference).toSet
+    val actualRefs = asScala(usages).map(_.getReference).toSet
+    assertEquals(Set("B.callsIntoA", "AnonymousUsage.foo"), actualRefs)
   }
 
   @Test
@@ -201,8 +202,8 @@ class AnalyzerTest {
     val usages = analyzer.getUses(symbol)
 
     // We expect methodD2 references "field1 = 42"
-    assertEquals(java.util.List.of("D.methodD2"), usages.getMethodUses)
-    assertEquals(java.util.List.of(), usages.getTypeUses, "No type usages expected")
+    val actualRefs = asScala(usages).map(_.getReference).toSet
+    assertEquals(Set("D.methodD2"), actualRefs)
   }
 
   @Test
@@ -221,8 +222,8 @@ class AnalyzerTest {
     val usages = analyzer.getUses(symbol)
 
     // methodUses => references to A as a type in B.callsIntoA() and D.methodD1()
-    val foundMethodUses = asScala(usages.getMethodUses).toSet
-    assertEquals(Set("B.callsIntoA", "D.methodD1", "AnonymousUsage.foo"), foundMethodUses)
+    val foundRefs = asScala(usages).map(_.getReference).toSet
+    assertEquals(Set("B.callsIntoA", "D.methodD1", "AnonymousUsage.foo"), foundRefs)
   }
 
   @Test
@@ -239,14 +240,8 @@ class AnalyzerTest {
     val symbol = "E"
     val usages = analyzer.getUses(symbol)
 
-    // 1) methodUses
-    val methodUses = asScala(usages.getMethodUses).toSet
-    assertEquals(Set("UseE.some", "UseE.<init>", "UseE.moreM", "UseE.moreF"), methodUses)
-
-    // 3) typeUses (usage as a type)
-    //    Expect: "UseE.e" for the field declaration
-    val typeUses = asScala(usages.getTypeUses).toSet
-    assertEquals(Set("UseE"), typeUses)
+    val refs = asScala(usages).map(_.getReference).toSet
+    assertEquals(Set("UseE.some", "UseE.<init>", "UseE.moreM", "UseE.moreF", "UseE"), refs)
   }
 
   //

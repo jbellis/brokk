@@ -23,22 +23,35 @@ import scala.jdk.javaapi.CollectionConverters
 import scala.util.Using
 import scala.util.matching.Regex
 
-/**
- * Represents the different usage "buckets" for a symbol. Java-friendly fields/getters.
- *
- * Method uses are fully-qualified method names that include methods where
- *  1. A target method is called
- *  2. A target field is referenced
- *  3. A target class is used as a parameter or local
- *
- * Type uses are fully-qualified class names that declare a field of the target type.
- */
-class SymbolUsages(
-    val methodUses: java.util.List[String],
-    val typeUses: java.util.List[String]
-) {
-  def getMethodUses: java.util.List[String] = methodUses
-  def getTypeUses: java.util.List[String]   = typeUses
+sealed trait CodeUnit {
+  def reference: String
+
+  def isClass: Boolean = this match {
+    case _: CodeUnit.ClassType => true
+    case _ => false
+  }
+
+  def isFunction: Boolean = this match {
+    case _: CodeUnit.FunctionType => true
+    case _ => false
+  }
+
+  def getReference: String = reference
+
+  override def toString: String = this match {
+    case CodeUnit.ClassType(ref) => s"CLASS[$ref]"
+    case CodeUnit.FunctionType(ref) => s"FUNCTION[$ref]"
+  }
+}
+
+object CodeUnit {
+  case class ClassType(reference: String) extends CodeUnit
+
+  case class FunctionType(reference: String) extends CodeUnit
+
+  def cls(reference: String): CodeUnit = ClassType(reference)
+
+  def fn(reference: String): CodeUnit = FunctionType(reference)
 }
 
 class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
@@ -133,22 +146,13 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
   }
 
   def resolveMethodName(methodName: String): String = {
-    // Joern's lambdas do not know their parent method, they just look like this
-    //   Foo.<lambda>0:java.lang.Comparable(java.lang.Object)
-    // Similarly,
-    // Our workaround is to transform Java lambdas like
-    //   Foo.lambda$myMethod$0
-    // or anonymous class methods like
-    //   Foo.bar.Runnable$0.run
-    // into their parent method,
-    //   Foo.myMethod
-    //   Foo.bar
     val javaLambdaPattern = """(.*)\.lambda\$(.*)\$.*""".r
-    val anonymousClassPattern = """(.*)\..*\$\d+\..*""".r
     methodName match {
       case javaLambdaPattern(parent, method) => s"$parent.$method"
-      case anonymousClassPattern(parent) => parent
-      case _ => methodName
+      case _ =>
+        val parts = methodName.split("\\.")
+        val index = parts.indexWhere(_.contains("$"))
+        if (index > 0) parts.take(index).mkString(".") else methodName
     }
   }
 
@@ -565,7 +569,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     val methods = typeDecl.method
       .filterNot(_.name.startsWith("<")) // skip constructors/initializers
       .fullName.l
-      .map(_.split(":").head) // remove return type and param info
+      .map(chopColon) // remove return type and param info
 
     // Get all field declarations
     val fields = typeDecl.member.name.map(m => className + "." + m).l
@@ -616,7 +620,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
       .distinct
       .l
 
-    calls.map(_.split(":").head)
+    calls.map(chopColon)
   }
 
 
@@ -630,8 +634,8 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
 
     calls
       .map(_.method.fullName)
+      .map(chopColon)
       .distinct
-      .map(_.split(":").head)
   }
 
   import scala.util.matching.Regex
@@ -648,7 +652,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     calls
       .method
       .fullName
-      .map((name: String) => resolveMethodName(name.split(":").head))
+      .map((name: String) => resolveMethodName(chopColon(name)))
       .distinct
       .l
   }
@@ -679,10 +683,12 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
       .method
       .fullName
       // Chop off everything after the colon, e.g. "Foo.bar:void()" → "Foo.bar"
-      .map(_.split(":").head)
+      .map(x => resolveMethodName(chopColon(x)))
       .distinct
       .l
   }
+
+  private def chopColon(full: String) = full.split(":").head
 
   /**
    * Find all references to a given class used as a type (fields, parameters, locals).
@@ -690,8 +696,6 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
    */
   private def referencesToClassAsType(classFullName: String): List[String] = {
     val typePattern = "^" + Regex.quote(classFullName) + "(\\$.*)?(\\[\\])?"
-
-    def chopColon(full: String) = full.split(":").head
 
     // Fields typed with this class → parent is a TypeDecl.
     // 1) Grab all TypeDecl parents for these fields
@@ -702,7 +706,6 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
       .isTypeDecl
       .filter(td => td.fullName != classFullName)
       .fullName
-      .distinct
       .l
 
     // Parameters typed with this class → parent is a Method.
@@ -711,8 +714,6 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
       .method
       .filter(m => m.typeDecl.fullName.l.head != classFullName)
       .fullName
-      .map(chopColon)
-      .distinct
       .l
 
     // Locals typed with this class → parent is a Method.
@@ -721,11 +722,9 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
       .method
       .filter(m => m.typeDecl.fullName.l.head != classFullName)
       .fullName
-      .map(chopColon)
-      .distinct
       .l
 
-    (fieldRefs ++ paramRefs ++ localRefs).distinct
+    (fieldRefs ++ paramRefs ++ localRefs).map(chopColon).map(resolveMethodName).distinct
   }
 
   /**
@@ -741,7 +740,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
    *
    * If symbol is not found at all, throws IllegalArgumentException.
    */
-  def getUses(symbol: String): SymbolUsages = {
+  def getUses(symbol: String): java.util.List[CodeUnit] = {
     //
     // 1) If symbol is recognized as a method name
     //
@@ -749,10 +748,8 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     if (methodMatches.nonEmpty) {
       // Do NOT exclude self references in the method branch
       val calls = methodMatches.flatMap(m => callersOfMethodNode(m, excludeSelfRefs = false)).distinct
-      return new SymbolUsages(
-        CollectionConverters.asJava(calls),
-        CollectionConverters.asJava(List.empty[String])
-      )
+      val methodUnits = calls.map(CodeUnit.fn)
+      return CollectionConverters.asJava(methodUnits)
     }
 
     //
@@ -770,10 +767,8 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
         if (maybeFieldDecl.nonEmpty) {
           // Do NOT exclude self references in the field branch
           val refs = referencesToField(classPart, fieldPart, excludeSelfRefs = false)
-          return new SymbolUsages(
-            CollectionConverters.asJava(refs),
-            CollectionConverters.asJava(List.empty[String])
-          )
+          val refUnits = refs.map(CodeUnit.fn)
+          return CollectionConverters.asJava(refUnits)
         }
       }
     }
@@ -797,10 +792,8 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     )
     val typeUses = referencesToClassAsType(symbol)
 
-    new SymbolUsages(
-      CollectionConverters.asJava(methodUses),
-      CollectionConverters.asJava(typeUses)
-    )
+    val combined = methodUses.distinct ++ typeUses
+    CollectionConverters.asJava(combined.map(CodeUnit.fn))
   }
 
   def writeCpg(path: java.nio.file.Path): Unit = {

@@ -667,30 +667,35 @@ public class ContextManager implements IContextManager {
             return OperationResult.error("Please provide a symbol name to search for");
         }
 
-        SymbolUsages uses;
+        List<CodeUnit> uses;
         try {
             uses = getAnalyzer().getUses(identifier);
         } catch (IllegalArgumentException e) {
             return OperationResult.error(e.getMessage());
         }
-
-        // Check if we found any uses
-        if (uses.getMethodUses().isEmpty() && uses.getTypeUses().isEmpty()) {
+        if (uses.isEmpty()) {
             return OperationResult.success("No uses found for " + identifier);
         }
 
-        // Build code block containing all uses
         StringBuilder code = new StringBuilder();
-        var classnames = new HashSet<String>();
+        Set<String> classnames = new HashSet<>();
+        List<String> methodUses = uses.stream()
+            .filter(u -> u.isFunction())
+            .map(u -> u.getReference())
+            .sorted()
+            .toList();
+        List<String> typeUses = uses.stream()
+            .filter(u -> u.isClass())
+            .map(u -> u.getReference())
+            .sorted()
+            .toList();
 
-        // Method uses
-        if (!uses.getMethodUses().isEmpty()) {
-            var sortedMethods = uses.getMethodUses().stream().sorted().toList();
+        if (!methodUses.isEmpty()) {
             code.append("Method uses:\n\n");
 
             // Group methods by classname
             String currentClass = null;
-            for (String method : sortedMethods) {
+            for (String method : methodUses) {
                 String classname = ContextFragment.toClassname(method);
                 if (!classname.equals(currentClass)) {
                     // Print class header when we switch to a new class
@@ -707,9 +712,9 @@ public class ContextManager implements IContextManager {
         }
 
         // Type uses
-        if (!uses.getTypeUses().isEmpty()) {
+        if (!typeUses.isEmpty()) {
             code.append("Type uses:\n\n");
-            for (String className : uses.getTypeUses()) {
+            for (String className : typeUses) {
                 var skeletonHeader = getAnalyzer().getSkeletonHeader(className);
                 if (skeletonHeader.isEmpty()) {
                     // TODO can we do better than just skipping anonymous classes that Analyzer doesn't know how to skeletonize?
