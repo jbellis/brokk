@@ -343,6 +343,10 @@ public interface ContextFragment {
             this.skeletons = skeletons;
         }
 
+        public List<SkeletonFragment> getSkeletons() {
+            return skeletons;
+        }
+
         @Override
         public String source() {
             return "0 [Auto]";

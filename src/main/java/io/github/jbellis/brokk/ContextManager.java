@@ -6,6 +6,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import io.github.jbellis.brokk.ContextFragment.PathFragment;
+import io.github.jbellis.brokk.ContextFragment.SkeletonFragment;
 import io.github.jbellis.brokk.ContextFragment.VirtualFragment;
 import io.github.jbellis.brokk.prompts.ArchitectPrompts;
 import io.github.jbellis.brokk.prompts.AskPrompts;
@@ -1128,7 +1129,8 @@ public class ContextManager implements IContextManager {
     @NotNull
     public String getReadOnlySummary() {
         return Streams.concat(currentContext.readonlyFiles().map(f -> f.file().toString()),
-                              currentContext.virtualFragments().map(vf -> "'" + vf.description() + "'"))
+                              currentContext.virtualFragments().map(vf -> "'" + vf.description() + "'"),
+                              currentContext.getAutoContext().getSkeletons().stream().map(SkeletonFragment::description))
                 .collect(Collectors.joining(", "));
     }
 
