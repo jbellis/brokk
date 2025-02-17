@@ -444,8 +444,8 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     }
 
     // Sort results, ignoring seed classes in final listing
-    val sortedAll = scores.toList
-      .sortBy { case (_, score) => -score }
+    val sortedAll = scores.toList.sortBy { case (_, score) => -score }
+    val filteredSortedAll = sortedAll.filterNot { case (cls, _) => seedSeq.exists(seed => partOfClass(seed, cls)) }
 
     def isInnerClass(child: String, parent: String): Boolean =
       child.startsWith(parent + "$")
@@ -487,7 +487,7 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
       results
     }
 
-    CollectionConverters.asJava(coalesceInnerClasses(sortedAll, k))
+    CollectionConverters.asJava(coalesceInnerClasses(filteredSortedAll, k))
   }
 
   /**
