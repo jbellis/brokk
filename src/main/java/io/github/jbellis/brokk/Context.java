@@ -124,8 +124,8 @@ public class Context {
         return addVirtualFragment(fragment);
     }
 
-    public Context addStacktraceFragment(Set<String> classnames, String original, String exception, String methods) {
-        var fragment = new StacktraceFragment(virtualFragments.size(), classnames, original, exception, methods);
+    public Context addStacktraceFragment(Set<CodeUnit> sources, String original, String exception, String methods) {
+        var fragment = new StacktraceFragment(virtualFragments.size(), sources, original, exception, methods);
         return addVirtualFragment(fragment);
     }
 
@@ -181,13 +181,13 @@ public class Context {
         }
         
         // Collect ineligible classnames from fragments not eligible for auto-context
-        Set<String> ineligibleClassnames = Streams.concat(editableFiles.stream(), readonlyFiles.stream(), virtualFragments.stream())
+        var ineligibleSources = Streams.concat(editableFiles.stream(), readonlyFiles.stream(), virtualFragments.stream())
                 .filter(f -> !f.isEligibleForAutoContext())
-                .flatMap(f -> f.classnames(analyzer.get()).stream())
+                .flatMap(f -> f.sources(analyzer.get()).stream())
                 .collect(Collectors.toSet());
 
         var seeds = Streams.concat(editableFiles.stream(), readonlyFiles.stream(), virtualFragments.stream())
-                .flatMap(f -> f.classnames(analyzer.get()).stream())
+                .flatMap(f -> f.sources(analyzer.get()).stream())
                 .collect(Collectors.toSet());
 
         if (seeds.isEmpty()) {
@@ -195,7 +195,7 @@ public class Context {
         }
 
         // request 3*autoContextFileCount from pagerank to account for out-of-project filtering
-        var pagerankResults = analyzer.get().getPagerank(seeds, 3 * MAX_AUTO_CONTEXT_FILES);
+        var pagerankResults = analyzer.get().getPagerank(seeds.stream().map(CodeUnit::reference).toList(), 3 * MAX_AUTO_CONTEXT_FILES);
 
         // build skeleton lines
         var skeletons = new ArrayList<SkeletonFragment>();
@@ -203,14 +203,14 @@ public class Context {
             String fqName = pair._1;
             
             // Check if the class or its parent is in ineligible classnames
-            boolean eligible = !(ineligibleClassnames.contains(fqName) ||
-                            (fqName.contains("$") && ineligibleClassnames.contains(fqName.substring(0, fqName.indexOf('$')))));
+            boolean eligible = !(ineligibleSources.contains(CodeUnit.cls(fqName))
+                    || (fqName.contains("$") && ineligibleSources.contains(CodeUnit.cls(fqName.substring(0, fqName.indexOf('$'))))));
             
             if (eligible && analyzer.get().isClassInProject(fqName)) {
                 var opt = analyzer.get().getSkeleton(fqName);
                 if (opt.isDefined()) {
                     var shortName = fqName.substring(fqName.lastIndexOf('.') + 1);
-                    skeletons.add(new SkeletonFragment(-1, List.of(shortName), Set.of(fqName), opt.get()));
+                    skeletons.add(new SkeletonFragment(-1, List.of(shortName), Set.of(CodeUnit.cls(fqName)), opt.get()));
                 }
             }
             if (skeletons.size() >= autoContextFileCount) {
@@ -366,12 +366,12 @@ public class Context {
         return !editableFiles.isEmpty();
     }
 
-    public Context addUsageFragment(String identifier, Set<String> classnames, String code) {
+    public Context addUsageFragment(String identifier, Set<CodeUnit> classnames, String code) {
         var fragment = new ContextFragment.UsageFragment(virtualFragments.size(), identifier, classnames, code);
         return addVirtualFragment(fragment);
     }
 
-    public Context addSkeletonFragment(List<String> shortClassnames, Set<String> classnames, String skeleton) {
+    public Context addSkeletonFragment(List<String> shortClassnames, Set<CodeUnit> classnames, String skeleton) {
         var fragment = new SkeletonFragment(virtualFragments.size(), shortClassnames, classnames, skeleton);
         return addVirtualFragment(fragment);
     }

@@ -15,7 +15,7 @@ public interface ContextFragment {
     /** content formatted for LLM */
     String format() throws IOException;
     /** fq classes found in this fragment */
-    Set<String> classnames(Analyzer analyzer);
+    Set<CodeUnit> sources(Analyzer analyzer);
     /** should classes found in this fragment be included in AutoContext? */
     boolean isEligibleForAutoContext();
 
@@ -49,7 +49,7 @@ public interface ContextFragment {
         }
 
         @Override
-        public Set<String> classnames(Analyzer analyzer) {
+        public Set<CodeUnit> sources(Analyzer analyzer) {
             return analyzer.getClassesInFile(file);
         }
 
@@ -76,7 +76,7 @@ public interface ContextFragment {
         }
 
         @Override
-        public Set<String> classnames(Analyzer analyzer) {
+        public Set<CodeUnit> sources(Analyzer analyzer) {
             return Set.of();
         }
 
@@ -126,7 +126,7 @@ public interface ContextFragment {
         }
 
         @Override
-        public Set<String> classnames(Analyzer analyzer) {
+        public Set<CodeUnit> sources(Analyzer analyzer) {
             return ContextManager.getTrackedFiles().stream().parallel()
                     .filter(f -> text().contains(f.toString()))
                     .flatMap(f -> analyzer.getClassesInFile(f).stream())
@@ -207,14 +207,14 @@ public interface ContextFragment {
     }
 
     class StacktraceFragment extends VirtualFragment {
-        private final Set<String> classnames;
+        private final Set<CodeUnit> sources;
         private final String original;
         private final String exception;
         private final String code;
 
-        public StacktraceFragment(int position, Set<String> classnames, String original, String exception, String code) {
+        public StacktraceFragment(int position, Set<CodeUnit> sources, String original, String exception, String code) {
             super(position);
-            this.classnames = classnames;
+            this.sources = sources;
             this.original = original;
             this.exception = exception;
             this.code = code;
@@ -226,8 +226,8 @@ public interface ContextFragment {
         }
 
         @Override
-        public Set<String> classnames(Analyzer analyzer) {
-            return classnames;
+        public Set<CodeUnit> sources(Analyzer analyzer) {
+            return sources;
         }
 
         @Override
@@ -251,10 +251,10 @@ public interface ContextFragment {
 
     class UsageFragment extends VirtualFragment {
         private final String targetIdentifier;
-        private final Set<String> classnames;
+        private final Set<CodeUnit> classnames;
         private final String code;
 
-        public UsageFragment(int position, String targetIdentifier, Set<String> classnames, String code) {
+        public UsageFragment(int position, String targetIdentifier, Set<CodeUnit> classnames, String code) {
             super(position);
             this.targetIdentifier = targetIdentifier;
             this.classnames = classnames;
@@ -267,7 +267,7 @@ public interface ContextFragment {
         }
 
         @Override
-        public Set<String> classnames(Analyzer analyzer) {
+        public Set<CodeUnit> sources(Analyzer analyzer) {
             return classnames;
         }
 
@@ -284,13 +284,13 @@ public interface ContextFragment {
 
     class SkeletonFragment extends VirtualFragment {
         private final List<String> shortClassnames;
-        private final Set<String> classnames;
+        private final Set<CodeUnit> sources;
         private final String skeletonText;
 
-        public SkeletonFragment(int position, List<String> shortClassnames, Set<String> classnames, String skeletonText) {
+        public SkeletonFragment(int position, List<String> shortClassnames, Set<CodeUnit> sources, String skeletonText) {
             super(position);
             this.shortClassnames = shortClassnames;
-            this.classnames = classnames;
+            this.sources = sources;
             this.skeletonText = skeletonText;
         }
 
@@ -300,8 +300,8 @@ public interface ContextFragment {
         }
 
         @Override
-        public Set<String> classnames(Analyzer analyzer) {
-            return classnames;
+        public Set<CodeUnit> sources(Analyzer analyzer) {
+            return sources;
         }
 
         @Override
@@ -320,7 +320,7 @@ public interface ContextFragment {
             <summary classes="%s">
             %s
             </summary>
-            """.formatted(String.join(", ", classnames.stream().sorted().toList()), text()).stripIndent();
+            """.formatted(String.join(", ", sources.stream().map(CodeUnit::reference).sorted().toList()), text()).stripIndent();
         }
 
         @Override
@@ -354,8 +354,8 @@ public interface ContextFragment {
         }
 
         @Override
-        public Set<String> classnames(Analyzer analyzer) {
-            return skeletons.stream().flatMap(s -> s.classnames.stream()).collect(java.util.stream.Collectors.toSet());
+        public Set<CodeUnit> sources(Analyzer analyzer) {
+            return skeletons.stream().flatMap(s -> s.sources.stream()).collect(java.util.stream.Collectors.toSet());
         }
 
         /**

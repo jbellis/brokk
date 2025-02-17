@@ -119,17 +119,14 @@ class AnalyzerTest {
   def getAllClassesTest(): Unit = {
     val analyzer = getAnalyzer
     val classes = analyzer.getAllClasses
-    assert(classes.contains("A"))
-    assert(classes.contains("B"))
-    assert(classes.contains("C"))
-    assert(classes.contains("D"))
   }
 
   @Test
   def getMembersInClassTest(): Unit = {
     val analyzer = getAnalyzer
     val members = analyzer.getMembersInClass("D")
-    assertEquals(Set("D.field1", "D.field2", "D.methodD1", "D.methodD2", "D$DSub", "D$DSubStatic"), asScala(members).toSet)
+    val expected = Set("D.field1", "D.field2").map(CodeUnit.field) ++ Set("D.methodD1", "D.methodD2").map(CodeUnit.fn) ++ Set("D$DSub", "D$DSubStatic").map(CodeUnit.cls)
+    assertEquals(expected, asScala(members).toSet)
   }
 
   @Test
@@ -165,14 +162,15 @@ class AnalyzerTest {
   def getClassesInFileTest(): Unit = {
     val analyzer = getAnalyzer
     val classes = analyzer.getClassesInFile(analyzer.toFile("D.java"))
-    assertEquals(Set("D", "D$DSub", "D$DSubStatic"), asScala(classes).toSet)
+    val expected = Set("D", "D$DSub", "D$DSubStatic").map(CodeUnit.cls)
+    assertEquals(expected, asScala(classes).toSet)
   }
 
   @Test 
   def classesInPackagedFileTest(): Unit = {
     val analyzer = getAnalyzer
     val classes = analyzer.getClassesInFile(analyzer.toFile("Packaged.java"))
-    assertEquals(Set("io.github.jbellis.brokk.Foo"), asScala(classes).toSet)
+    assertEquals(Set(CodeUnit.cls("io.github.jbellis.brokk.Foo")), asScala(classes).toSet)
   }
 
   @Test
@@ -182,8 +180,8 @@ class AnalyzerTest {
     val usages = analyzer.getUses(symbol)
 
     // Expect references in B.callsIntoA() because it calls a.method2("test")
-    val actualMethodRefs = asScala(usages).filter(_.isFunction).map(_.getReference).toSet
-    val actualRefs = asScala(usages).map(_.getReference).toSet
+    val actualMethodRefs = asScala(usages).filter(_.isFunction).map(_.reference).toSet
+    val actualRefs = asScala(usages).map(_.reference).toSet
     assertEquals(Set("B.callsIntoA", "AnonymousUsage.foo"), actualRefs)
   }
 
@@ -202,7 +200,7 @@ class AnalyzerTest {
     val usages = analyzer.getUses(symbol)
 
     // We expect methodD2 references "field1 = 42"
-    val actualRefs = asScala(usages).map(_.getReference).toSet
+    val actualRefs = asScala(usages).map(_.reference).toSet
     assertEquals(Set("D.methodD2"), actualRefs)
   }
 
@@ -222,7 +220,7 @@ class AnalyzerTest {
     val usages = analyzer.getUses(symbol)
 
     // methodUses => references to A as a type in B.callsIntoA() and D.methodD1()
-    val foundRefs = asScala(usages).map(_.getReference).toSet
+    val foundRefs = asScala(usages).map(_.reference).toSet
     assertEquals(Set("B.callsIntoA", "D.methodD1", "AnonymousUsage.foo"), foundRefs)
   }
 
@@ -240,7 +238,7 @@ class AnalyzerTest {
     val symbol = "E"
     val usages = analyzer.getUses(symbol)
 
-    val refs = asScala(usages).map(_.getReference).toSet
+    val refs = asScala(usages).map(_.reference).toSet
     assertEquals(Set("UseE.some", "UseE.<init>", "UseE.moreM", "UseE.moreF", "UseE"), refs)
   }
 

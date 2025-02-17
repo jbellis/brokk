@@ -46,10 +46,6 @@ import java.util.stream.Stream;
  */
 public class ContextManager implements IContextManager {
     private final Logger logger = LogManager.getLogger(ContextManager.class);
-    public static List<RepoFile> getTrackedFiles() {
-        return GitRepo.instance.getTrackedFiles();
-    }
-
     private AnalyzerWrapper analyzerWrapper;
     final Path root;
     private ConsoleIO io;
@@ -76,6 +72,10 @@ public class ContextManager implements IContextManager {
     public ContextManager(Path root) {
         this.root = root.toAbsolutePath();
         this.commands = buildCommands();
+    }
+
+    public static List<RepoFile> getTrackedFiles() {
+        return GitRepo.instance.getTrackedFiles();
     }
 
     /**
@@ -230,7 +230,7 @@ public class ContextManager implements IContextManager {
                 return OperationResult.error("Autocontext is already summarized");
             }
             if (fragment != null) {
-                return summarizeClasses(fragment.classnames(getAnalyzer()));
+                return summarizeClasses(fragment.sources(getAnalyzer()));
             }
             // else fragment == null, so it's not a fragment reference
         } catch (IllegalArgumentException e) {
@@ -238,7 +238,7 @@ public class ContextManager implements IContextManager {
         }
 
         // If not a fragment reference, try as file path(s)
-        var classnames = new HashSet<String>();
+        var sources = new HashSet<CodeUnit>();
         for (var rawName : Completions.parseQuotedFilenames(trimmed)) {
             var matches = Completions.expandPath(root, rawName);
             if (matches.isEmpty()) {
@@ -252,37 +252,38 @@ public class ContextManager implements IContextManager {
                     continue;
                 }
                 getAnalyzer().getClassesInFile((RepoFile)file).stream()
-                        .filter(fqcn -> !fqcn.contains("$"))
-                        .forEach(classnames::add);
+                        .filter(cu -> !cu.reference().contains("$"))
+                        .forEach(sources::add);
             }
         }
-        return summarizeClasses(classnames);
+        return summarizeClasses(sources);
     }
 
     @NotNull
-    private OperationResult summarizeClasses(Set<String> classesInFile) {
+    private OperationResult summarizeClasses(Set<CodeUnit> classesInFile) {
         // coalesce inner classes when a parent class is present
         // {A, A$B} -> {A}
-        var coalescedClassnames = classesInFile.stream()
-                .filter(className -> {
+        var coalescedUnits = classesInFile.stream()
+                .filter(cu -> {
                     // Keep this class if:
                     // 1. It has no $ (not an inner class)
                     // 2. OR its parent class is not in the set
-                    if (!className.contains("$")) {
+                    var name = cu.reference();
+                    if (!name.contains("$")) {
                         return true;
                     }
-                    String parentClass = className.substring(0, className.indexOf('$'));
-                    return !classesInFile.contains(parentClass);
+                    String parentClass = name.substring(0, name.indexOf('$'));
+                    return !classesInFile.stream().map(CodeUnit::reference).collect(Collectors.toSet()).contains(parentClass);
                 })
                 .collect(Collectors.toSet());
 
         // Build combined skeleton of all classes
         List<String> shortClassnames = new ArrayList<>();
         StringBuilder combinedSkeleton = new StringBuilder();
-        for (String fqcn : coalescedClassnames) {
-            var skeleton = getAnalyzer().getSkeleton(fqcn);
+        for (var cu : coalescedUnits) {
+            var skeleton = getAnalyzer().getSkeleton(cu.reference());
             if (skeleton.isDefined()) {
-                shortClassnames.add(Completions.getShortClassName(fqcn));
+                shortClassnames.add(Completions.getShortClassName(cu.reference()));
                 if (!combinedSkeleton.isEmpty()) {
                     combinedSkeleton.append("\n\n");
                 }
@@ -295,7 +296,7 @@ public class ContextManager implements IContextManager {
         }
 
         pushContext();
-        currentContext = currentContext.addSkeletonFragment(shortClassnames, coalescedClassnames, combinedSkeleton.toString());
+        currentContext = currentContext.addSkeletonFragment(shortClassnames, coalescedUnits, combinedSkeleton.toString());
         return OperationResult.success();
     }
 
@@ -317,9 +318,9 @@ public class ContextManager implements IContextManager {
         }
 
         // Get classnames from fragment and convert to files
-        var classnames = fragment.get().classnames(getAnalyzer());
+        var classnames = fragment.get().sources(getAnalyzer());
         var files = classnames.stream()
-                .map(getAnalyzer()::pathOf)
+                .map(cu -> getAnalyzer().pathOf(cu.reference()))
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
 
@@ -678,15 +679,13 @@ public class ContextManager implements IContextManager {
         }
 
         StringBuilder code = new StringBuilder();
-        Set<String> classnames = new HashSet<>();
-        List<String> methodUses = uses.stream()
-            .filter(u -> u.isFunction())
-            .map(u -> u.getReference())
+        Set<CodeUnit> sources = new HashSet<>();
+        var methodUses = uses.stream()
+            .filter(CodeUnit::isFunction)
             .sorted()
             .toList();
-        List<String> typeUses = uses.stream()
-            .filter(u -> u.isClass())
-            .map(u -> u.getReference())
+        var typeUses = uses.stream()
+            .filter(CodeUnit::isClass)
             .sorted()
             .toList();
 
@@ -695,17 +694,17 @@ public class ContextManager implements IContextManager {
 
             // Group methods by classname
             String currentClass = null;
-            for (String method : methodUses) {
-                String classname = ContextFragment.toClassname(method);
+            for (var cu : methodUses) {
+                String classname = ContextFragment.toClassname(cu.reference());
                 if (!classname.equals(currentClass)) {
                     // Print class header when we switch to a new class
                     code.append("In ").append(classname).append(":\n\n");
                     currentClass = classname;
                 }
 
-                var source = getAnalyzer().getMethodSource(method);
+                var source = getAnalyzer().getMethodSource(cu.reference());
                 if (source.isDefined()) {
-                    classnames.add(classname);
+                    sources.add(cu);
                     code.append(source.get()).append("\n\n");
                 }
             }
@@ -714,20 +713,20 @@ public class ContextManager implements IContextManager {
         // Type uses
         if (!typeUses.isEmpty()) {
             code.append("Type uses:\n\n");
-            for (String className : typeUses) {
-                var skeletonHeader = getAnalyzer().getSkeletonHeader(className);
+            for (var cu : typeUses) {
+                var skeletonHeader = getAnalyzer().getSkeletonHeader(cu.reference());
                 if (skeletonHeader.isEmpty()) {
                     // TODO can we do better than just skipping anonymous classes that Analyzer doesn't know how to skeletonize?
                     // io.github.jbellis.brokk.Coder.sendMessage.StreamingResponseHandler$0.<init>' not found
                     continue;
                 }
                 code.append(skeletonHeader.get()).append("\n");
-                classnames.add(className);
+                sources.add(cu);
             }
         }
 
         pushContext();
-        currentContext = currentContext.addUsageFragment(identifier, classnames, code.toString());
+        currentContext = currentContext.addUsageFragment(identifier, sources, code.toString());
         return OperationResult.success();
     }
 
@@ -743,13 +742,13 @@ public class ContextManager implements IContextManager {
             String exception = stacktrace.getExceptionType();
 
             StringBuilder content = new StringBuilder();
-            var classnames = new HashSet<String>();
+            var sources = new HashSet<CodeUnit>();
 
             for (var element : stacktrace.getFrames()) {
                 String methodFullName = element.getClassName() + "." + element.getMethodName();
                 var methodSource = getAnalyzer().getMethodSource(methodFullName);
                 if (methodSource.isDefined()) {
-                    classnames.add(ContextFragment.toClassname(methodFullName));
+                    sources.add(CodeUnit.cls(ContextFragment.toClassname(methodFullName)));
                     content.append(methodFullName).append(":\n");
                     content.append(methodSource.get()).append("\n\n");
                 }
@@ -760,7 +759,7 @@ public class ContextManager implements IContextManager {
             }
 
             pushContext();
-            currentContext = currentContext.addStacktraceFragment(classnames, stacktraceText, exception, content.toString());
+            currentContext = currentContext.addStacktraceFragment(sources, stacktraceText, exception, content.toString());
             return OperationResult.success();
         } catch (Exception e) {
             return OperationResult.error("Failed to parse stacktrace: " + e.getMessage());
@@ -1052,12 +1051,12 @@ public class ContextManager implements IContextManager {
                 .filter(f -> currentContext.readonlyFiles().noneMatch(p -> f.equals(p.file())))
                 .filter(f -> text.contains(f.getFileName()));
         var byClassname = getAnalyzer().getAllClasses().stream()
-                .filter(fqcn -> text.contains(List.of(fqcn.split("\\.")).getLast())) // simple classname in text
-                .filter(fqcn -> currentContext.allFragments().noneMatch(fragment ->  {
+                .filter(cu -> text.contains(List.of(cu.reference().split("\\.")).getLast())) // simple classname in text
+                .filter(cu -> currentContext.allFragments().noneMatch(fragment ->  {
                     // not already in context
-                    return fragment.classnames(getAnalyzer()).contains(fqcn);
+                    return fragment.sources(getAnalyzer()).contains(cu);
                 }))
-                .map(getAnalyzer()::pathOf)
+                .map(cu -> getAnalyzer().pathOf(cu.reference()))
                 .filter(Objects::nonNull);
 
         return Streams.concat(byFilename, byClassname)

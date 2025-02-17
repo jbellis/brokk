@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static io.github.jbellis.brokk.Completions.findClassesForMemberAccess;
 import static io.github.jbellis.brokk.Completions.getShortClassName;
@@ -18,31 +19,31 @@ public class CompleteUsageTest {
 
     // A simple inline "mock" analyzer: no mocking library used.
     private static class MockAnalyzer implements IAnalyzer {
-        private final List<String> allClasses = List.of(
+        private final List<CodeUnit> allClasses = Stream.of(
                 "a.b.Do",
                 "a.b.Do$Re",
                 "a.b.Do$Re$Sub",  // nested inside Re
                 "x.y.Zz",
                 "w.u.Zz",
                 "test.CamelClass"
-        );
+        ).map(CodeUnit::cls).toList();
 
-        private final Map<String, List<String>> methodsMap = Map.of(
-                "a.b.Do", List.of("a.b.Do.foo", "a.b.Do.bar"),
-                "a.b.Do$Re", List.of("a.b.Do$Re.baz"),
-                "a.b.Do$Re$Sub", List.of("a.b.Do$Re$Sub.qux"),
+        private final Map<String, List<CodeUnit>> methodsMap = Map.of(
+                "a.b.Do", Stream.of("a.b.Do.foo", "a.b.Do.bar").map(CodeUnit::fn).toList(),
+                "a.b.Do$Re", Stream.of("a.b.Do$Re.baz").map(CodeUnit::fn).toList(),
+                "a.b.Do$Re$Sub", Stream.of("a.b.Do$Re$Sub.qux").map(CodeUnit::fn).toList(),
                 "x.y.Zz", List.of(),
                 "w.u.Zz", List.of(),
-                "test.CamelClass", List.of("test.CamelClass.someMethod")
+                "test.CamelClass", Stream.of("test.CamelClass.someMethod").map(CodeUnit::fn).toList()
         );
 
         @Override
-        public List<String> getAllClasses() {
+        public List<CodeUnit> getAllClasses() {
             return allClasses;
         }
 
         @Override
-        public List<String> getMembersInClass(String fqClass) {
+        public List<CodeUnit> getMembersInClass(String fqClass) {
             return methodsMap.getOrDefault(fqClass, List.of());
         }
     }
@@ -137,7 +138,7 @@ public class CompleteUsageTest {
     public void testSameShortname() {
         var mock = new MockAnalyzer();
         // Input "Zz" -> should match both "x.y.Zz" and "w.u.Zz"
-        var matches = Completions.getClassnameMatches("Zz", mock.getAllClasses());
+        var matches = Completions.getClassnameMatches("Zz", mock.getAllClasses().stream().map(CodeUnit::reference).toList());
         assertEquals(Set.of("x.y.Zz", "w.u.Zz"), matches);
 
         var completions = ContextManager.completeUsage("Zz", mock);

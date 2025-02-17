@@ -11,19 +11,19 @@ import io.shiftleft.codepropertygraph.generated.nodes.{Method, TypeDecl}
 import io.shiftleft.semanticcpg.language.{ICallResolver, NoResolve, *}
 import io.shiftleft.semanticcpg.layers.LayerCreatorContext
 
-import java.io.{Closeable, File}
+import java.io.Closeable
 import java.nio.file.Path
 import java.util
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
 import scala.collection.parallel.CollectionConverters.IterableIsParallelizable
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 import scala.io.Source
 import scala.jdk.javaapi.CollectionConverters
 import scala.util.Using
 import scala.util.matching.Regex
 
-sealed trait CodeUnit {
+sealed trait CodeUnit extends Comparable[CodeUnit] {
   def reference: String
 
   def isClass: Boolean = this match {
@@ -36,22 +36,22 @@ sealed trait CodeUnit {
     case _ => false
   }
 
-  def getReference: String = reference
-
   override def toString: String = this match {
     case CodeUnit.ClassType(ref) => s"CLASS[$ref]"
     case CodeUnit.FunctionType(ref) => s"FUNCTION[$ref]"
   }
+
+  override def compareTo(other: CodeUnit): Int = this.reference.compareTo(other.reference)
 }
 
 object CodeUnit {
   case class ClassType(reference: String) extends CodeUnit
-
   case class FunctionType(reference: String) extends CodeUnit
+  case class FieldType(reference: String) extends CodeUnit
 
   def cls(reference: String): CodeUnit = ClassType(reference)
-
   def fn(reference: String): CodeUnit = FunctionType(reference)
+  def field(reference: String): CodeUnit = FieldType(reference)
 }
 
 class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
@@ -491,11 +491,11 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
   /**
    * Returns a set of all classes in the given .java filename.
    */
-  def getClassesInFile(file: RepoFile): java.util.Set[String] = {
+  def getClassesInFile(file: RepoFile): java.util.Set[CodeUnit] = {
     val matches = cpg.typeDecl.l.filter { td =>
       file == toFile(td)
     }
-    CollectionConverters.asJava(matches.map(_.fullName).toSet)
+    CollectionConverters.asJava(matches.map(td => CodeUnit.cls(td.fullName)).toSet)
   }
 
   private def toFile(td: TypeDecl): RepoFile = {
@@ -515,11 +515,12 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     td.nonEmpty && !(td.member.isEmpty && td.method.isEmpty && td.derivedTypeDecl.isEmpty)
   }
 
-  def getAllClasses: java.util.List[String] = {
+  def getAllClasses: java.util.List[CodeUnit] = {
     val results = cpg.typeDecl
       .filterNot(toFile(_) == null)
       .fullName
       .l
+      .map(CodeUnit.cls)
     CollectionConverters.asJava(results)
   }
 
@@ -558,29 +559,30 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     sb.toString
   }
 
-  def getMembersInClass(className: String): java.util.List[String] = {
+  def getMembersInClass(className: String): java.util.List[CodeUnit] = {
     val matches = cpg.typeDecl.fullNameExact(className)
     if (matches.isEmpty) {
       throw new IllegalArgumentException(s"Class '$className' not found")
     }
     val typeDecl = matches.head
 
-    // Get all method declarations
+    // Get all method declarations as FunctionType
     val methods = typeDecl.method
       .filterNot(_.name.startsWith("<")) // skip constructors/initializers
       .fullName.l
-      .map(chopColon) // remove return type and param info
+      .map(chopColon)
+      .map(CodeUnit.fn)
 
-    // Get all field declarations
-    val fields = typeDecl.member.name.map(m => className + "." + m).l
+    // Get all field declarations as FieldType
+    val fields = typeDecl.member.name.l.map(name => CodeUnit.field(className + "." + name))
 
-    // Get all nested types (inner classes, interfaces, enums)
+    // Get all nested types as ClassType
     // typeDecl.typeDecl doesn't exist and typeDecl.derivedTypeDecl is empty, so search by name instead
     val nestedPrefix = className + "\\$.*"
-    val nestedTypes = cpg.typeDecl.fullName(nestedPrefix).fullName.l
+    val nestedTypes = cpg.typeDecl.fullName(nestedPrefix).fullName.l.map(CodeUnit.cls)
 
     // Combine all members and convert to Java list
-    CollectionConverters.asJava(fields ++ methods ++ nestedTypes)
+    CollectionConverters.asJava(methods ++ fields ++ nestedTypes)
   }
 
   /**

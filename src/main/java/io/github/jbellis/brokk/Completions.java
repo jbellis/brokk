@@ -19,18 +19,19 @@ import java.util.stream.Collectors;
 public class Completions {
     @VisibleForTesting
     static List<Candidate> completeClassesAndMembers(String input, IAnalyzer analyzer, boolean returnFqn) {
-        var allClasses = analyzer.getAllClasses();
+        var allCodeUnits = analyzer.getAllClasses();
+        var allClassnames = allCodeUnits.stream().map(CodeUnit::reference).toList();
         String partial = input.trim();
 
-        var matchingClasses = findClassesForMemberAccess(input, allClasses);
+        var matchingClasses = findClassesForMemberAccess(input, allClassnames);
         if (matchingClasses.size() == 1) {
             // find matching members
             List<Candidate> results = new ArrayList<>();
             for (var matchedClass : matchingClasses) {
                 String memberPrefix = partial.substring(partial.lastIndexOf(".") + 1);
                 // Add members
-                var trueMembers = analyzer.getMembersInClass(matchedClass).stream().filter(m -> !m.contains("$")).toList();
-                for (String fqMember : trueMembers) {
+                var trueMembers = analyzer.getMembersInClass(matchedClass).stream().filter(m -> !m.reference().contains("$")).toList();
+                for (String fqMember : trueMembers.stream().map(CodeUnit::reference).toList()) {
                     String shortMember = fqMember.substring(fqMember.lastIndexOf('.') + 1);
                     if (shortMember.startsWith(memberPrefix)) {
                         String display = returnFqn ? fqMember : getShortClassName(matchedClass) + "." + shortMember;
@@ -47,9 +48,9 @@ public class Completions {
 
         // Gather matching classes
         if (partial.isEmpty()) {
-            matchedClasses.addAll(allClasses);
+            matchedClasses.addAll(allClassnames);
         } else {
-            var st = returnFqn ? allClasses.stream() : allClasses.stream().map(Completions::getShortClassName);
+            var st = returnFqn ? allClassnames.stream() : allClassnames.stream().map(Completions::getShortClassName);
             st.forEach(name -> {
                 if (name.toLowerCase().startsWith(partialLower)
                         || getShortClassName(name).toLowerCase().startsWith(partialLower)) {
@@ -57,7 +58,7 @@ public class Completions {
                 }
             });
 
-            matchedClasses.addAll(getClassnameMatches(partial, allClasses));
+            matchedClasses.addAll(getClassnameMatches(partial, allClassnames));
         }
 
         // Return just the class names
@@ -221,7 +222,7 @@ public class Completions {
             try (var stream = Files.walk(parent)) {
                 return stream
                         .filter(Files::isRegularFile)
-                        .filter(p -> matcher.matches(p))
+                        .filter(matcher::matches)
                         .map(p -> maybeExternalFile(root, p.toString()))
                         .toList();
             } catch (IOException e) {

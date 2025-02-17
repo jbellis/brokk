@@ -4,6 +4,6 @@ import java.util
 import java.util.List
 
 trait IAnalyzer {
-  def getAllClasses: util.List[String]
-  def getMembersInClass(fqClass: String): util.List[String]
+  def getAllClasses: util.List[CodeUnit]
+  def getMembersInClass(fqClass: String): util.List[CodeUnit]
 }
