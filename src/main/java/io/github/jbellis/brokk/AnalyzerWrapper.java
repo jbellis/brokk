@@ -173,29 +173,54 @@ public class AnalyzerWrapper {
      */
     private Analyzer loadOrCreateAnalyzer() {
         logger.debug("Loading/creating analyzer");
-        try {
-            Path analyzerPath = root.resolve(".brokk").resolve("joern.cpg");
-            if (Files.exists(analyzerPath)) {
-                long cpgMTime = Files.getLastModifiedTime(analyzerPath).toMillis();
-                List<RepoFile> trackedFiles = ContextManager.getTrackedFiles();
-                long maxTrackedMTime = 0L;
-                for (RepoFile rf : trackedFiles) {
-                    Path p = rf.absPath();
-                    FileTime fTime = Files.getLastModifiedTime(p);
-                    maxTrackedMTime = Math.max(maxTrackedMTime, fTime.toMillis());
-                }
-    
-                if (cpgMTime > maxTrackedMTime) {
-                    logger.debug("Using cached code intelligence data ({} > {})", cpgMTime, maxTrackedMTime);
-                    return new Analyzer(root, analyzerPath);
-                }
-            }
-    
-            logger.debug("Rebuilding code intelligence data (cache unavailable/outdated)");
-            return new Analyzer(root);
-        } catch (IOException e) {
-            throw new RuntimeException("Error loading analyzer", e);
+        Path analyzerPath = root.resolve(".brokk").resolve("joern.cpg");
+        Set<String> newerFiles = new HashSet<>();
+        
+        if (!Files.exists(analyzerPath)) {
+            logger.debug("Rebuilding code intelligence data (cache unavailable)");
+            return createAndSaveAnalyzer();
         }
+
+        long cpgMTime;
+        try {
+            cpgMTime = Files.getLastModifiedTime(analyzerPath).toMillis();
+        } catch (IOException e) {
+            throw new RuntimeException("Error reading analyzer file timestamp", e);
+        }
+
+        List<RepoFile> trackedFiles = ContextManager.getTrackedFiles();
+        long maxTrackedMTime = 0L;
+        try {
+            for (RepoFile rf : trackedFiles) {
+                Path p = rf.absPath();
+                FileTime fTime = Files.getLastModifiedTime(p);
+                long fileMTime = fTime.toMillis();
+                if (fileMTime > cpgMTime) {
+                    newerFiles.add(p.toString());
+                }
+                maxTrackedMTime = Math.max(maxTrackedMTime, fileMTime);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Error reading file timestamp", e);
+        }
+
+        if (cpgMTime > maxTrackedMTime) {
+            logger.debug("Using cached code intelligence data ({} > {})", cpgMTime, maxTrackedMTime);
+            return new Analyzer(root, analyzerPath);
+        }
+
+        assert !newerFiles.isEmpty();
+        logger.debug("Rebuilding code intelligence data. Files newer than cache: {}",
+                   String.join(", ", newerFiles));
+        return createAndSaveAnalyzer();
+    }
+
+    private Analyzer createAndSaveAnalyzer() {
+        Analyzer newAnalyzer = new Analyzer(root);
+        Path analyzerPath = root.resolve(".brokk").resolve("joern.cpg");
+        newAnalyzer.writeCpg(analyzerPath);
+        logger.debug("Analyzer (re)build completed");
+        return newAnalyzer;
     }
 
     /**
@@ -205,10 +230,8 @@ public class AnalyzerWrapper {
         rebuildInProgress = true;
         future = analyzerExecutor.submit(() -> {
             try {
-                Analyzer newAnalyzer = new Analyzer(root);
-                Path analyzerPath = root.resolve(".brokk").resolve("joern.cpg");
-                newAnalyzer.writeCpg(analyzerPath);
-                return newAnalyzer;
+                Analyzer result = createAndSaveAnalyzer();
+                return result;
             } finally {
                 rebuildInProgress = false;
                 externalRebuildRequested = false;
