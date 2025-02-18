@@ -64,19 +64,17 @@ public class Coder {
 
         var beginMode = mode;
 
-        // Add user input to context
-        var sessionMessages = new ArrayList<ChatMessage>();
-        sessionMessages.add(new UserMessage("<goal>\n%s\n</goal>".formatted(userInput.trim())));
+        var requestMsg = new UserMessage("<goal>\n%s\n</goal>".formatted(userInput.trim()));
 
         // Reflection loop: up to reflectionManager.maxReflections passes
         var reflectionManager = new ReflectionManager(io, this);
         while (true) {
             // Collect messages from context
-            var cmMessages = DefaultPrompts.instance.collectMessages((ContextManager) contextManager);
-            List<ChatMessage> messages = Streams.concat(cmMessages.stream(), sessionMessages.stream()).toList();
+            var messages = DefaultPrompts.instance.collectMessages((ContextManager) contextManager);
+            messages.add(requestMsg);
 
             // Actually send the message to the LLM and get the response
-            logger.debug("Sending to LLM [only last message shown]: {}", messages.getLast());
+            logger.debug("Sending to LLM [only last message shown]: {}", requestMsg);
             String llmResponse = sendStreaming(messages);
             logger.debug("response:\n{}", llmResponse);
             if (llmResponse == null) {
@@ -89,8 +87,8 @@ public class Coder {
                 continue;
             }
 
-            // Add the assistant reply to context
-            sessionMessages.add(new AiMessage(llmResponse));
+            // Add the request/response to history
+            contextManager.addToHistory(List.of(requestMsg, new AiMessage(llmResponse)));
 
             // Gather all edit blocks in the reply
             var parseResult = EditBlock.findOriginalUpdateBlocks(llmResponse, contextManager.getEditableFiles());
@@ -134,7 +132,7 @@ public class Coder {
             if (!parseReflection.isEmpty()) {
                 io.toolOutput("Attempting to fix parse/match errors...");
                 mode = Mode.APPLY; // faster
-                sessionMessages.add(new UserMessage(parseReflection));
+                requestMsg = new UserMessage(parseReflection);
                 continue;
             }
 
@@ -146,7 +144,7 @@ public class Coder {
 
             io.toolOutput("Attempting to fix build errors...");
             mode = Mode.EDIT; // smarter
-            sessionMessages.add(new UserMessage(buildReflection));
+            requestMsg = new UserMessage(buildReflection);
 
             // If the reflection manager has also signaled "stop" (maybe user said no),
             // or we've reached reflectionManager's maximum tries:
@@ -157,11 +155,6 @@ public class Coder {
 
         // Reset mode back to what the user had it set to
         mode = beginMode;
-        // Move conversation to history
-        var filteredSession = Streams.concat(Stream.of(sessionMessages.getFirst()),
-                                             sessionMessages.stream().filter(m -> m instanceof AiMessage))
-                .toList();
-        contextManager.addToHistory(filteredSession);
     }
 
     public boolean isLlmAvailable() {
