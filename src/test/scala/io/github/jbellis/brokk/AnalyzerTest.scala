@@ -132,6 +132,14 @@ class AnalyzerTest {
   }
 
   @Test
+  def getClassesInFilePythonTest(): Unit = {
+    val analyzer = Analyzer(Path.of("src/test/resources/testcode"), Language.Python)
+    val classes = analyzer.getClassesInFile(analyzer.toFile("A.py"))
+//    val expected = Set("D", "D$DSub", "D$DSubStatic").map(CodeUnit.cls)
+//    assertEquals(expected, asScala(classes).toSet)
+  }
+
+  @Test
   def getReferrersOfFieldTest(): Unit = {
     val analyzer = getAnalyzer
     val referrers = analyzer.getReferrersOfField("D.field1")
@@ -244,11 +252,8 @@ class AnalyzerTest {
     assertEquals(Set("UseE.some", "UseE.<init>", "UseE.moreM", "UseE.moreF", "UseE"), refs)
   }
 
-  //
-  // Helper to get a prebuilt analyzer
-  //
+  /** Helper to get a prebuilt analyzer */
   private def getAnalyzer = {
-    // Points to your test code directory with A, B, C, D, CamelClass, E, UseE, etc.
-    new Analyzer(Path.of("src/test/resources/testcode"))
+    Analyzer(Path.of("src/test/resources/testcode"))
   }
 }

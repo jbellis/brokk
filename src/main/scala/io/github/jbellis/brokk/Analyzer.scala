@@ -2,7 +2,9 @@ package io.github.jbellis.brokk
 
 import flatgraph.storage.Serialization
 import io.joern.dataflowengineoss.layers.dataflows.OssDataFlow
-import io.joern.javasrc2cpg.{Config, JavaSrc2Cpg}
+import io.joern.javasrc2cpg.{Config => JavaConfig, JavaSrc2Cpg}
+import io.joern.pysrc2cpg.Py2Cpg
+import io.joern.x2cpg.ValidationMode
 import io.joern.joerncli.CpgBasedTool
 import io.joern.x2cpg.X2Cpg
 import io.shiftleft.codepropertygraph.generated.Cpg
@@ -56,9 +58,19 @@ object CodeUnit {
   def field(reference: String): CodeUnit = FieldType(reference)
 }
 
-class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
-  // Convert to absolute filename immediately
-  private val absolutePath = sourcePath.toAbsolutePath.toRealPath()
+sealed trait Language
+object Language {
+  case object Java extends Language
+  case object Python extends Language
+}
+
+class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnalyzer, Closeable {
+  // Convert to absolute filename immediately and verify it's a directory
+  private val absolutePath = {
+    val path = sourcePath.toAbsolutePath.toRealPath()
+    require(path.toFile.isDirectory, s"Source path must be a directory: $path")
+    path
+  }
   private implicit val ec: ExecutionContext = ExecutionContext.global
 
   // Adjacency maps for pagerank
@@ -76,8 +88,8 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
   // Initialize pagerank data structures 
   initializePageRank()
 
-  def this(sourcePath: java.nio.file.Path, preloadedPath: java.nio.file.Path) = {
-    this(sourcePath)
+  def this(sourcePath: java.nio.file.Path, preloadedPath: java.nio.file.Path, language: Language) = {
+    this(sourcePath, language)
     this.cpg = CpgBasedTool.loadFromFile(preloadedPath.toString)
   }
 
@@ -102,13 +114,56 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
     classesForPagerank = (adjacency.keys ++ adjacency.values.flatMap(_.keys)).toSet
   }
 
+  def this(sourcePath: java.nio.file.Path) = {
+    this(sourcePath, Language.Java)
+  }
+
+  def this(sourcePath: java.nio.file.Path, preloadedPath: java.nio.file.Path) = {
+    this(sourcePath, preloadedPath, Language.Java) 
+  }
+
   private def createNewCpg(): Cpg = {
-    val config = Config()
-      .withInputPath(absolutePath.toString)
-      .withEnableTypeRecovery(true)
-    // https://github.com/joernio/joern/issues/5297
-    //  .withKeepTypeArguments(true)
-    val newCpg = JavaSrc2Cpg().createCpg(config).get
+    val newCpg = language match {
+      case Language.Java =>
+        val config = JavaConfig()
+          .withInputPath(absolutePath.toString)
+          .withEnableTypeRecovery(true)
+        // unnecessary?
+        //  .withDisableFileContent(false)
+        // https://github.com/joernio/joern/issues/5297
+        //  .withKeepTypeArguments(true)
+        JavaSrc2Cpg().createCpg(config).get
+      case Language.Python =>
+        val cpg = Cpg.empty
+        
+        // Create list of all .py files in directory recursively, as relative paths
+        val pythonFiles = {
+          import scala.collection.JavaConverters._
+          val files = java.nio.file.Files.walk(absolutePath).iterator().asScala.toList
+          files
+            .filter(f => f.toString.endsWith(".py") && f.toFile.isFile)
+            .map(absolutePath.relativize(_))
+        }
+
+        // Create input providers for each Python file
+        val inputProviders = pythonFiles.map { relPath =>
+          val absPath = absolutePath.resolve(relPath)
+          () => Py2Cpg.InputPair(
+            Source.fromFile(absPath.toFile).mkString,
+            relPath.toString
+          )
+        }
+
+        new Py2Cpg(
+          inputProviders,
+          cpg,
+          absolutePath.toString,
+          "requirements.txt",
+          ValidationMode.Enabled,
+          false
+        ).buildCpg()
+        cpg
+    }
     X2Cpg.applyDefaultOverlays(newCpg)
 
     // Add dataflow overlay
@@ -804,7 +859,12 @@ class Analyzer(sourcePath: java.nio.file.Path) extends IAnalyzer, Closeable {
   }
 
   def writeCpg(path: java.nio.file.Path): Unit = {
-    Serialization.writeGraph(cpg.graph, path)
+    val langSuffix = language match {
+      case Language.Java => "java"
+      case Language.Python => "python"
+    }
+    val finalPath = path.resolveSibling(s"joern-${langSuffix}.cpg")
+    Serialization.writeGraph(cpg.graph, finalPath)
   }
   
   override def close(): Unit = {
