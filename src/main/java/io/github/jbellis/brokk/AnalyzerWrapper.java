@@ -47,41 +47,48 @@ public class AnalyzerWrapper {
         // build the initial Analyzer
         future = analyzerExecutor.submit(this::loadOrCreateAnalyzer);
 
-        // AFTER kicking the initial build off, set up directory watcher, also async
-        // (this takes several seconds)
-        analyzerExecutor.submit(() -> {
-            logger.debug("Setting up directoryWatcher");
-            DirectoryWatcher directoryWatcher = null;
-            try {
-                directoryWatcher = DirectoryWatcher.builder()
-                        .path(root)
-                        .listener(event -> {
-                            // Check for overflow
-                            if (event.eventType() == DirectoryChangeEvent.EventType.OVERFLOW) {
-                                return;
-                            }
+        var watcherThread = new Thread(() -> beginWatching(root), "DirectoryWatcher");
+        watcherThread.start();
+    }
 
-                            // Filter out changes in .brokk or the log file (also in .brokk but doesn't show that way in the events)
-                            Path changedAbs = event.path();
-                            String changedAbsStr = changedAbs.toString();
-                            if (changedAbsStr.contains("${sys:logfile.path}")
-                                    || changedAbs.startsWith(root.resolve(".brokk"))) {
-                                return;
-                            }
+    private void beginWatching(Path root) {
+        try {
+            future.get(); // Wait for the initial analyzer to be built
+        } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException(e);
+        }
 
-                            logger.trace("Directory event: {} on {}", event.eventType(), changedAbs);
-                            boolean offered = eventQueue.offer(event);
-                            assert offered;
-                        })
-                        .build();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            // Start the watcher and the event thread
-            directoryWatcher.watchAsync();
-            Thread eventThread = new Thread(this::eventLoop);
-            eventThread.start();
-        });
+        logger.debug("Setting up directoryWatcher");
+        DirectoryWatcher directoryWatcher;
+        try {
+            directoryWatcher = DirectoryWatcher.builder()
+                    .path(root)
+                    .listener(event -> {
+                        // Check for overflow
+                        if (event.eventType() == DirectoryChangeEvent.EventType.OVERFLOW) {
+                            return;
+                        }
+
+                        // Filter out changes in .brokk or the log file (also in .brokk but doesn't show that way in the events)
+                        Path changedAbs = event.path();
+                        String changedAbsStr = changedAbs.toString();
+                        if (changedAbsStr.contains("${sys:logfile.path}")
+                                || changedAbs.startsWith(root.resolve(".brokk"))) {
+                            return;
+                        }
+
+                        logger.trace("Directory event: {} on {}", event.eventType(), changedAbs);
+                        boolean offered = eventQueue.offer(event);
+                        assert offered;
+                    })
+                    .build();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        // start watching!
+        directoryWatcher.watchAsync();
+        eventLoop();
     }
 
     /**
@@ -230,8 +237,7 @@ public class AnalyzerWrapper {
         rebuildInProgress = true;
         future = analyzerExecutor.submit(() -> {
             try {
-                Analyzer result = createAndSaveAnalyzer();
-                return result;
+                return createAndSaveAnalyzer();
             } finally {
                 rebuildInProgress = false;
                 externalRebuildRequested = false;

@@ -52,7 +52,7 @@ public class ContextManager implements IContextManager {
     final Path root;
     private ConsoleIO io;
     private Coder coder;
-    private final ExecutorService backgroundTasks = Executors.newFixedThreadPool(1);
+    private final ExecutorService backgroundTasks = Executors.newFixedThreadPool(2);
     private Future<BuildCommand> buildCommand;
 
     private String lastShellOutput;       // hidden storage of last $ command output
@@ -875,7 +875,8 @@ public class ContextManager implements IContextManager {
                 new SystemMessage("You are a build assistant that suggests a single command to perform a quick compile check."),
                 new UserMessage(
                         "We have these files:\n\n" + filenames
-                                + "\n\nSuggest a minimal single-line shell command to compile them incrementally, not a full build.  Respond with JUST the command, no commentary."
+                                + "\n\nSuggest a minimal single-line shell command to compile them incrementally, not a full build."
+                                + "\n Respond with JUST the command, no commentary and no markup (no headings, no backticks, just the raw command)."
                 )
         );
 
@@ -883,7 +884,7 @@ public class ContextManager implements IContextManager {
         buildCommand = backgroundTasks.submit(() -> {
             String response;
             try {
-                response = coder.sendMessage("Inferring build progress", messages);
+                response = coder.sendMessage(messages);
             } catch (Throwable th) {
                 return BuildCommand.failure(th.getMessage());
             }
