@@ -47,12 +47,13 @@ Requirements: Java 21+
 
 1. `cd /path/to/my/project`
 2. `export ANTHROPIC_API_KEY=xxy`
-   - or, `export OPENAI_API_KEY=xxy` -- but! users are reporting timeouts with o3-mini (the only openai model really appropriate for Brokk), you will probably have better luck with Anthropic if you have that option
+   - or, `export OPENAI_API_KEY=xxy`
    - other providers and models are technically supported, making them easier to use is high priority.
      In the meantime, look at Models.java for how to set up a ~/.config/brokk/brokk.yml file with
      your preferred option if the defaults don't work for you.
-1. `java -jar /path/to/brokk/target/brokk-0.1.jar`
+1. `java -jar /path/to/brokk/brokk-0.1.jar`
 
+There is a [Brokk Discord](https://discord.gg/ugXqhRem) for questions and suggestions.
 
 # Finer points on some commands
 
@@ -69,27 +70,8 @@ Requirements: Java 21+
   Instead, Brokk has the `send` command which will send the output of the last `$` command to
   the LLM as instructions.
 
-# Known bugs
-
-- 
-
 # FAQ
-
-1. What is the difference between `$$git show HEAD` and `/read HEAD`?
-
-The former will add just the diff as context.  The latter will add
-the full text of all files referenced by the diff.
 
 1. What code intelligence library does Brokk use?
 
 Brokk uses [Joern](https://github.com/joernio/joern), an industrial-strength code analysis engine from [Qwiet](qwiet.ai) (formerly Shiftleft).  I spent multiple days evaluating all the relevant options and Joern is the only one powerful enough (and fast enough) to do what I want, so huge thanks to the team at Qwiet for that!
-
-# Requests for help
-
-I hate Maven and it hates me back.  These issues have defeated me:
-1. How to suppress the build warnings for the use of sun.misc.Signal
-   (or alternatively, how to handle ^C without Signal without insane complexity)
-2. How to suppress "initialising from existing storage" message from [flatgraph.Graph](https://github.com/joernio/flatgraph/blob/4b0057cdf22458fe13873d315a86c9e939752e03/core/src/main/scala/flatgraph/Graph.scala#L29)
-  a. I have tried all the obvious ways to make it shut up, it is definitely using the Log4j2 appender and I've passed -Dlog4j.configurationFile with -Dlog4j2.debug to confirm that it's loaded. But it won't die!
-3. How to suppress "Found different number lambda params and param types for column"
-  a. I haven't spent as much time on this, I am not sure what code is logging this
