@@ -35,6 +35,7 @@ public class AnalyzerWrapper {
     private volatile Future<Analyzer> future;
     private volatile boolean rebuildInProgress = false;
     private volatile boolean externalRebuildRequested = false;
+    private volatile boolean rebuildPending = false;
 
     /**
      * Create a new orchestrator. (We assume the analyzer executor is provided externally.)
@@ -232,15 +233,31 @@ public class AnalyzerWrapper {
 
     /**
      * Force a fresh rebuild of the analyzer by scheduling a job on the analyzerExecutor.
+     * Avoids concurrent rebuilds by setting a flag, but if a change is detected during
+     * the rebuild, a new rebuild will be scheduled immediately afterwards.
      */
-    private void rebuild() {
+    private synchronized void rebuild() {
+        // If a rebuild is already running, just mark that another rebuild is pending.
+        if (rebuildInProgress) {
+            rebuildPending = true;
+            return;
+        }
+
         rebuildInProgress = true;
         future = analyzerExecutor.submit(() -> {
             try {
                 return createAndSaveAnalyzer();
             } finally {
-                rebuildInProgress = false;
-                externalRebuildRequested = false;
+                synchronized (AnalyzerWrapper.this) {
+                    rebuildInProgress = false;
+                    // If another rebuild got requested while we were busy, immediately start a new one.
+                    if (rebuildPending) {
+                        rebuildPending = false;
+                        rebuild();
+                    } else {
+                        externalRebuildRequested = false;
+                    }
+                }
             }
         });
     }
