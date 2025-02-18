@@ -41,6 +41,16 @@ public class Brokk {
         // Dummy command to wire up completion for within-chat identifiers
         commands.add(new ContextManager.Command("chat", null, null, null, (s -> Completions.completeClassesAndMembers(s, contextManager.getAnalyzer(), false))));
         io = new ConsoleIO(sourceRoot, commands);
+        // Output header as soon as `io` is available
+        String version;
+        try {
+            Properties props = new Properties();
+            props.load(Brokk.class.getResourceAsStream("/version.properties"));
+            version = props.getProperty("version");
+        } catch (IOException | NullPointerException e) {
+            version = "[unknown]";
+        }
+        io.toolOutput("Brokk %s".formatted(version));
 
         // Create a Coder that deals with LLM calls/streaming
         Models models;
@@ -56,19 +66,10 @@ public class Brokk {
         contextManager.resolveCircularReferences(io, coder);
 
         // MOTD
-        String version;
-        try {
-            Properties props = new Properties();
-            props.load(Brokk.class.getResourceAsStream("/version.properties"));
-            version = props.getProperty("version");
-        } catch (IOException | NullPointerException e) {
-            version = "[unknown]";
-        }
         io.toolOutput("Editor model: " + models.editModelName());
         io.toolOutput("Apply model: " + models.applyModelName());
         io.toolOutput("Quick model: " + models.quickModelName());
         io.toolOutput("Git repo found at %s with %d files".formatted(sourceRoot, ContextManager.getTrackedFiles().size()));
-        io.toolOutput("Brokk %s initialized".formatted(version));
         maybeShowMotd();
 
         // kick off repl
@@ -87,9 +88,8 @@ public class Brokk {
             // Show welcome message
             try (var welcomeStream = Brokk.class.getResourceAsStream("/WELCOME.md")) {
                 if (welcomeStream != null) {
-                    String welcome = new String(welcomeStream.readAllBytes(), StandardCharsets.UTF_8);
-                    io.toolOutput("\n" + welcome);
                     io.toolOutput("-".repeat(io.getTerminalWidth()));
+                    io.toolOutput(new String(welcomeStream.readAllBytes(), StandardCharsets.UTF_8));
                 }
             }
         } catch (IOException e) {

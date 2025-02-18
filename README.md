@@ -29,7 +29,6 @@ Brokk and it will apply the edits.
 
 # What Brokk can do very soon
 
-1. Run tests and incorporate that into the LLM loop
 1. Automerge
 1. Better autocomplete of identifiers while composing a request to the LLM.
    Right now Brokk requires you to complete a classname before it will
@@ -38,25 +37,21 @@ Brokk and it will apply the edits.
 
 # Current status
 
-Brokk only knows about Java right now.  Once Java support is stable then
-we can extend support to other languages.  The non-intelligent pieces should
-work fine in the meantime, but without the intelligence you might as well
-use Aider.
-
-There are no binary builds available, if you are not comfortable installing
-and running a JDK then you should wait a bit longer.
+Code intelligence only supports Java right now, but the non-intelligent pieces
+work fine in the meantime (I've edited my Python project
+[llmap](https://github.com/jbellis/llmap) with Brokk).
 
 # Getting started
 
-1. `git clone`
-2. `./mvnw package`
-3. `cd /path/to/my/project`
-3. `export ANTHROPIC_API_KEY=xxy`
+Requirements: Java 21+
+
+1. `cd /path/to/my/project`
+2. `export ANTHROPIC_API_KEY=xxy`
    - or, `export OPENAI_API_KEY=xxy` -- but! users are reporting timeouts with o3-mini (the only openai model really appropriate for Brokk), you will probably have better luck with Anthropic if you have that option
    - other providers and models are technically supported, making them easier to use is high priority.
      In the meantime, look at Models.java for how to set up a ~/.config/brokk/brokk.yml file with
      your preferred option if the defaults don't work for you.
-4. `java -ea -Dlog4j.configurationFile=/path/to/brokk/src/main/resources/log4j2.xml -jar /path/to/brokk/target/brokk-0.1-SNAPSHOT-jar-with-dependencies.jar`
+1. `java -jar /path/to/brokk/target/brokk-0.1.jar`
 
 
 # Finer points on some commands
@@ -70,11 +65,13 @@ and running a JDK then you should wait a bit longer.
 - Brokk doesn't automatically detect filesystem changes, not even the ones it makes itself.
   You will need to `/refresh` after making changes in your code for Brokk to see them.  You will
   also need `/refresh` if you make changes to the git repo outside Brokk.
+- Brokk doesn't offer automatic running of tests (too much variance in what you might want it to do).
+  Instead, Brokk has the `send` command which will send the output of the last `$` command to
+  the LLM as instructions.
 
 # Known bugs
 
-- `commit` doesn't work well when you don't have message history in your session, it should work
-  from just the diff but it doesn't.
+- 
 
 # FAQ
 
