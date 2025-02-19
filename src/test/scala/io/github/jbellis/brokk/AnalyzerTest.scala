@@ -73,12 +73,7 @@ class AnalyzerTest {
   def getSkeletonTestA(): Unit = {
     val skeleton = getAnalyzer.getSkeleton("A").get
     // https://github.com/joernio/joern/issues/5297
-//    val expected =
-//      """class A {
-//        |  public void method1() {...}
-//        |  public String method2(String input) {...}
-//        |  public Function<Integer, Integer> method3() {...}
-//        |}""".stripMargin
+    //    |  public Function<Integer, Integer> method3() {...}
     val expected =
       """class A {
         |  public void method1() {...}
@@ -88,6 +83,17 @@ class AnalyzerTest {
         |  public static int method4(double foo, Integer bar) {...}
         |  public void method5() {...}
         |  public void method6() {...}
+        |  public void <init>() {...}
+        |  class A$AInner {
+        |    public void <init>(A outerClass) {...}
+        |    class A$AInner$AInnerInner {
+        |      public void method7() {...}
+        |      public void <init>(A$AInner outerClass) {...}
+        |    }
+        |  }
+        |  class A$AInnerStatic {
+        |    public void <init>() {...}
+        |  }
         |}""".stripMargin
     assertEquals(expected, skeleton)
   }
@@ -97,10 +103,17 @@ class AnalyzerTest {
     val skeleton = getAnalyzer.getSkeleton("D").get
     val expected =
       """class D {
-        |  private int field1;
-        |  private String field2;
         |  public void methodD1() {...}
         |  public void methodD2() {...}
+        |  public void <init>() {...}
+        |  int field1;
+        |  String field2;
+        |  class D$DSubStatic {
+        |    public void <init>() {...}
+        |  }
+        |  class D$DSub {
+        |    public void <init>(D outerClass) {...}
+        |  }
         |}""".stripMargin
     assertEquals(expected, skeleton)
   }

@@ -35,4 +35,14 @@ public class A {
             }
         }.run();
     }
+
+    public class AInner {
+        public class AInnerInner {
+            public void method7() {
+                System.out.println("hello");
+            }
+        }
+    }
+
+    public static class AInnerStatic {}
 }

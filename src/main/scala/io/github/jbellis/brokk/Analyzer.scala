@@ -293,17 +293,36 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
 
     val className = sanitizeType(td.name)
 
-    // class signature + fields
-    sb.append(headerString(td, indent))
+    // Print this class's signature
+    sb.append(indentStr(indent))
+      .append("class ")
+      .append(className)
+      .append(" {\n")
 
-    // methods
-    td.method.foreach { m =>
-      val name = m.name
-      if (!name.startsWith("<")) {
+    // Methods: skip any whose name starts with "<lambda>"
+    td.method
+      .filterNot(_.name.startsWith("<lambda>"))
+      .foreach { m =>
         sb.append(indentStr(indent + 1))
           .append(methodSignature(m))
           .append(" {...}\n")
       }
+
+    // Fields: skip any whose name is exactly "outerClass"
+    td.member
+      .filterNot(_.name == "outerClass")
+      .foreach { f =>
+        sb.append(indentStr(indent + 1))
+          .append(s"${sanitizeType(f.typeFullName)} ${f.name};\n")
+      }
+
+    // Nested classes: skip any named "<lambda>N", skip if a segment is purely numeric (like Runnable$0)
+    td.astChildren.isTypeDecl.filterNot { nested =>
+      nested.name.startsWith("<lambda>") ||
+        nested.name.split("\\$").exists(_.forall(_.isDigit))
+    }.foreach { nested =>
+      sb.append(outlineTypeDecl(nested, indent + 1))
+        .append("\n")
     }
 
     sb.append(indentStr(indent)).append("}")
