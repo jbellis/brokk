@@ -17,6 +17,7 @@ import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jline.reader.Candidate;
 import org.msgpack.core.annotations.VisibleForTesting;
+import java.util.function.Function;
 
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
@@ -60,9 +61,15 @@ public class ContextManager implements IContextManager {
     private String constructedMessage;    // content to feed into runSession, if /send is used
 
     private Project project;
-    private Context currentContext;
-    private final List<Context> previousContexts = new ArrayList<>();
+
     private static final int MAX_UNDO_DEPTH = 100;
+    private final List<Context> contextHistory = new ArrayList<>();
+    private Context currentContext() {
+        if (contextHistory.isEmpty()) {
+            throw new IllegalStateException("No context available");
+        }
+        return contextHistory.getLast();
+    }
 
     /**
      * List of commands; typically constructed in Brokk.buildCommands(...) and passed in.
@@ -228,7 +235,7 @@ public class ContextManager implements IContextManager {
 
         // First check if it's a virtual fragment reference
         try {
-            var fragment = currentContext.toFragment(input);
+            var fragment = currentContext().toFragment(input);
             if (fragment instanceof ContextFragment.AutoContext) {
                 return OperationResult.error("Autocontext is already summarized");
             }
@@ -298,8 +305,7 @@ public class ContextManager implements IContextManager {
             return OperationResult.error("Unable to read source to summarize");
         }
 
-        pushContext();
-        currentContext = currentContext.addSkeletonFragment(shortClassnames, coalescedUnits, combinedSkeleton.toString());
+        pushContext(context -> context.addSkeletonFragment(shortClassnames, coalescedUnits, combinedSkeleton.toString()));
         return OperationResult.success();
     }
 
@@ -313,7 +319,7 @@ public class ContextManager implements IContextManager {
         }
 
         int position = Integer.parseInt(args.trim()) - 1; // UI shows 1-based positions
-        var fragment = currentContext.virtualFragments()
+        var fragment = currentContext().virtualFragments()
                 .filter(f -> f.position() == position)
                 .findFirst();
         if (fragment.isEmpty()) {
@@ -475,7 +481,7 @@ public class ContextManager implements IContextManager {
         var filenames = Completions.parseQuotedFilenames(args);
         var fragments = new ArrayList<>();
         for (String filename : filenames) {
-            var fragment = currentContext.toFragment(filename);
+            var fragment = currentContext().toFragment(filename);
             if (fragment instanceof ContextFragment.AutoContext) {
                 return cmdAutoContext("0");
             }
@@ -486,12 +492,11 @@ public class ContextManager implements IContextManager {
         var paths = fragments.stream().filter(f -> f instanceof PathFragment).map(f -> (PathFragment) f).toList();
         var virtual = fragments.stream().filter(f -> f instanceof VirtualFragment).map(f -> (VirtualFragment) f).toList();
 
-        pushContext();
-        currentContext = currentContext.removeEditableFiles(paths).removeReadonlyFiles(paths).removeVirtualFragments(virtual);
-        boolean dropped = previousContexts.getLast() != currentContext;
-        return dropped
-                ? OperationResult.success()
-                : OperationResult.error("No matching content to drop");
+        Context before = currentContext();
+        pushContext(context -> context.removeEditableFiles(paths).removeReadonlyFiles(paths).removeVirtualFragments(virtual));
+        return currentContext() == before
+                ? OperationResult.error("No matching content to drop")
+                : OperationResult.success();
     }
 
     private OperationResult cmdPrepare(String msg) {
@@ -532,7 +537,7 @@ public class ContextManager implements IContextManager {
                         .collect(Collectors.joining("\n\n"));
             } else {
                 // Try to find matching fragment
-                var fragment = currentContext.toFragment(args.trim());
+                var fragment = currentContext().toFragment(args.trim());
                 if (fragment == null) {
                     return OperationResult.error("No matching fragment found for: " + args);
                 }
@@ -615,8 +620,7 @@ public class ContextManager implements IContextManager {
     }
 
     private OperationResult cmdClear() {
-        pushContext();
-        currentContext = currentContext.clearHistory();
+        pushContext(context -> context.clearHistory());
         return OperationResult.success();
     }
 
@@ -661,12 +665,13 @@ public class ContextManager implements IContextManager {
     }
 
     private OperationResult cmdUndo() {
-        if (previousContexts.isEmpty()) {
-            return OperationResult.error(" no undo state available");
+        assert !contextHistory.isEmpty();
+        if (contextHistory.size() == 1) {
+            return OperationResult.error("no undo state available");
         }
 
         // undo changes made in the most recent context
-        currentContext.originalContents.forEach((key, value) -> {
+        currentContext().originalContents.forEach((key, value) -> {
             try {
                 Files.writeString(key.absPath(), value);
             } catch (IOException e) {
@@ -674,7 +679,9 @@ public class ContextManager implements IContextManager {
             }
         });
 
-        currentContext = previousContexts.removeLast();
+        // The previous context becomes current by removing the last entry
+        contextHistory.removeLast();
+
         return OperationResult.success();
     }
 
@@ -745,8 +752,8 @@ public class ContextManager implements IContextManager {
             }
         }
 
-        pushContext();
-        currentContext = currentContext.addUsageFragment(identifier, sources, code.toString());
+        String finalIdentifier = identifier;
+        pushContext(context -> context.addUsageFragment(finalIdentifier, sources, code.toString()));
         return OperationResult.success();
     }
 
@@ -781,8 +788,7 @@ public class ContextManager implements IContextManager {
                 return OperationResult.error("no relevant methods found in stacktrace");
             }
 
-            pushContext();
-            currentContext = currentContext.addStacktraceFragment(sources, stacktraceText, exception, content.toString());
+            pushContext(context -> context.addStacktraceFragment(sources, stacktraceText, exception, content.toString()));
             return OperationResult.success();
         } catch (Exception e) {
             return OperationResult.error("Failed to parse stacktrace: " + e.getMessage());
@@ -806,15 +812,14 @@ public class ContextManager implements IContextManager {
             return coder.sendMessage(messages);
         });
 
-        pushContext();
-        currentContext = currentContext.addPasteFragment(pastedContent, summaryFuture);
+        pushContext(context -> context.addPasteFragment(pastedContent, summaryFuture));
         return OperationResult.success("Added pasted content");
     }
 
     private List<Candidate> completeDrop(String partial) {
-        return Streams.concat(currentContext.editableFiles(),
-                              currentContext.readonlyFiles(),
-                              currentContext.virtualFragments())
+        return Streams.concat(currentContext().editableFiles(),
+                              currentContext().readonlyFiles(),
+                              currentContext().virtualFragments())
                 .map(f -> new Candidate(f.source()))
                 .collect(Collectors.toList());
     }
@@ -864,7 +869,7 @@ public class ContextManager implements IContextManager {
         this.coder = coder;
         this.project = new Project(root, io);
         this.analyzerWrapper = new AnalyzerWrapper(io, this.root, backgroundTasks);
-        this.currentContext = new Context(analyzerWrapper, project.getAutoContextFileCount());
+        contextHistory.add(new Context(analyzerWrapper, project.getAutoContextFileCount()));
 
         // infer build command from properties
         String loadedCommand = project.getBuildCommand();
@@ -1071,12 +1076,12 @@ public class ContextManager implements IContextManager {
     @Override
     public Set<RepoFile> findMissingFileMentions(String text) {
         var byFilename = getTrackedFiles().stream().parallel()
-                .filter(f -> currentContext.editableFiles().noneMatch(p -> f.equals(p.file())))
-                .filter(f -> currentContext.readonlyFiles().noneMatch(p -> f.equals(p.file())))
+                .filter(f -> currentContext().editableFiles().noneMatch(p -> f.equals(p.file())))
+                .filter(f -> currentContext().readonlyFiles().noneMatch(p -> f.equals(p.file())))
                 .filter(f -> text.contains(f.getFileName()));
         var byClassname = getAnalyzer().getAllClasses().stream()
                 .filter(cu -> text.contains(List.of(cu.reference().split("\\.")).getLast())) // simple classname in text
-                .filter(cu -> currentContext.allFragments().noneMatch(fragment ->  {
+                .filter(cu -> currentContext().allFragments().noneMatch(fragment ->  {
                     // not already in context
                     return fragment.sources(getAnalyzer()).contains(cu);
                 }))
@@ -1143,49 +1148,44 @@ public class ContextManager implements IContextManager {
 
     @NotNull
     public String getReadOnlySummary() {
-        return Streams.concat(currentContext.readonlyFiles().map(f -> f.file().toString()),
-                              currentContext.virtualFragments().map(vf -> "'" + vf.description() + "'"),
-                              currentContext.getAutoContext().getSkeletons().stream().map(SkeletonFragment::description))
+        return Streams.concat(currentContext().readonlyFiles().map(f -> f.file().toString()),
+                              currentContext().virtualFragments().map(vf -> "'" + vf.description() + "'"),
+                              currentContext().getAutoContext().getSkeletons().stream().map(SkeletonFragment::description))
                 .collect(Collectors.joining(", "));
     }
 
     @NotNull
     public String getEditableSummary() {
-        return currentContext.editableFiles()
+        return currentContext().editableFiles()
                 .map(p -> p.file().toString())
                 .collect(Collectors.joining(", "));
     }
 
     public void dropAll() {
-        pushContext();
-        currentContext = currentContext.removeAll();
+        pushContext(context -> context.removeAll());
     }
 
     public void convertAllToReadOnly() {
-        pushContext();
-        currentContext = currentContext.convertAllToReadOnly();
+        pushContext(context -> context.convertAllToReadOnly());
     }
 
     @Override
     public void addFiles(Collection<RepoFile> files) {
         var fragments = files.stream().map(ContextFragment.RepoPathFragment::new).toList();
-        pushContext();
-        currentContext = currentContext.removeReadonlyFiles(fragments).addEditableFiles(fragments);
+        pushContext(context -> context.removeReadonlyFiles(fragments).addEditableFiles(fragments));
     }
 
     public void addReadOnlyFiles(Collection<? extends BrokkFile> files) {
         var fragments = files.stream().map(ContextFragment::toPathFragment).toList();
-        pushContext();
-        currentContext = currentContext.removeEditableFiles(fragments).addReadonlyFiles(fragments);
+        pushContext(context -> context.removeEditableFiles(fragments).addReadonlyFiles(fragments));
     }
 
     public void addStringFragment(String description, String content) {
-        pushContext();
-        currentContext = currentContext.addStringFragment(description, content);
+        pushContext(context -> context.addStringFragment(description, content));
     }
 
     public List<ChatMessage> getHistoryMessages() {
-        return currentContext.getHistory();
+        return currentContext().getHistory();
     }
 
     public String getConstructedMessage() {
@@ -1198,33 +1198,35 @@ public class ContextManager implements IContextManager {
 
     @Override
     public void addToHistory(List<ChatMessage> messages, Map<RepoFile, String> originalContents) {
-        pushContext();
-        currentContext = currentContext.addHistory(messages, originalContents);
+        pushContext(context -> context.addHistory(messages, originalContents));
     }
 
     public void addToHistory(List<ChatMessage> messages) {
         addToHistory(messages, Map.of());
     }
 
-    private void pushContext() {
-        previousContexts.add(currentContext);
-        if (previousContexts.size() > MAX_UNDO_DEPTH) {
-            previousContexts.removeFirst();
+    private void pushContext(Function<Context, Context> contextGenerator) {
+        var newContext = contextGenerator.apply(currentContext());
+        if (newContext != currentContext()) {
+            contextHistory.add(newContext);
+            if (contextHistory.size() > MAX_UNDO_DEPTH) {
+                contextHistory.removeFirst();
+            }
         }
     }
 
     public boolean isEmpty() {
-        return currentContext.isEmpty();
+        return currentContext().isEmpty();
     }
 
     public List<ChatMessage> getReadOnlyMessages() {
-        if (!currentContext.hasReadonlyFragments()) {
+        if (!currentContext().hasReadonlyFragments()) {
             return List.of();
         }
 
-        String combined = Streams.concat(currentContext.readonlyFiles(),
-                                         currentContext.virtualFragments(),
-                                         Stream.of(currentContext.getAutoContext()))
+        String combined = Streams.concat(currentContext().readonlyFiles(),
+                                         currentContext().virtualFragments(),
+                                         Stream.of(currentContext().getAutoContext()))
                 .map(this::formattedOrNull)
                 .filter(Objects::nonNull)
                 .collect(Collectors.joining("\n\n"));
@@ -1249,13 +1251,13 @@ public class ContextManager implements IContextManager {
         try {
             return fragment.format();
         } catch (Exception e) {
-            currentContext = currentContext.removeBadFragment(fragment);
+            currentContext().removeBadFragment(fragment);
             return null;
         }
     }
 
     public List<ChatMessage> getEditableMessages() {
-        String combined = currentContext.editableFiles()
+        String combined = currentContext().editableFiles()
                 .map(this::formattedOrNull)
                 .filter(Objects::nonNull)
                 .collect(Collectors.joining("\n\n"));
@@ -1301,7 +1303,7 @@ public class ContextManager implements IContextManager {
         int totalLines = 0;
 
         // History lines
-        int historyLines = currentContext.getHistory().stream()
+        int historyLines = currentContext().getHistory().stream()
                 .mapToInt(m -> getText(m).split("\n").length)
                 .sum();
         totalLines += historyLines;
@@ -1315,18 +1317,18 @@ public class ContextManager implements IContextManager {
         }
 
         // Auto context
-        totalLines += formatFragments(Stream.of(currentContext.getAutoContext()), termWidth);
+        totalLines += formatFragments(Stream.of(currentContext().getAutoContext()), termWidth);
 
         // Virtual fragments (e.g. stacktrace, pasted text, etc.)
-        totalLines += formatFragments(currentContext.virtualFragments(), termWidth);
+        totalLines += formatFragments(currentContext().virtualFragments(), termWidth);
 
         // Read-only filename fragments
-        totalLines += formatFragments(currentContext.readonlyFiles(), termWidth);
+        totalLines += formatFragments(currentContext().readonlyFiles(), termWidth);
 
         // Editable fragments
-        if (currentContext.hasEditableFiles()) {
+        if (currentContext().hasEditableFiles()) {
             io.context("\nEditable:");
-            totalLines += formatFragments(currentContext.editableFiles(), termWidth);
+            totalLines += formatFragments(currentContext().editableFiles(), termWidth);
         }
 
         // Finally, show the total lines and approximate tokens (if available)
@@ -1389,7 +1391,7 @@ public class ContextManager implements IContextManager {
             } catch (IOException e) {
                 logger.warn("Removing unreadable fragment %s".formatted(f.source()), e);
                 io.toolErrorRaw("Removing unreadable fragment %s".formatted(f.source()));
-                currentContext = currentContext.removeBadFragment(f);
+                currentContext().removeBadFragment(f);
             }
         });
         return sum.get();
@@ -1459,13 +1461,12 @@ public class ContextManager implements IContextManager {
     }
 
     public void setAutoContextFiles(int fileCount) {
-        pushContext();
-        currentContext = currentContext.setAutoContextFiles(fileCount);
+        pushContext(context -> context.setAutoContextFiles(fileCount));
         project.setAutoContextFileCount(fileCount);
     }
 
     public Set<RepoFile> getEditableFiles() {
-        return currentContext.editableFiles()
+        return currentContext().editableFiles()
                 .map(ContextFragment.RepoPathFragment::file)
                 .collect(Collectors.toSet());
     }
