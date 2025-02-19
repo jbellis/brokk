@@ -144,16 +144,14 @@ public class Coder {
             if (buildReflection.isEmpty()) {
                 break;
             }
-
-            io.toolOutput("Attempting to fix build errors...");
-            mode = Mode.EDIT; // smarter
-            requestMsg = new UserMessage(buildReflection);
-
             // If the reflection manager has also signaled "stop" (maybe user said no),
             // or we've reached reflectionManager's maximum tries:
             if (!reflectionManager.shouldContinue()) {
                 break;
             }
+            io.toolOutput("Attempting to fix build errors...");
+            mode = Mode.EDIT; // smarter
+            requestMsg = new UserMessage(buildReflection);
         }
 
         // Reset mode back to what the user had it set to

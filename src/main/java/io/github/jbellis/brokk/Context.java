@@ -358,9 +358,6 @@ public class Context {
      * Clearing the history DOES create a new context object so you can /undo it
      */
     public Context clearHistory() {
-        if (historyMessages.isEmpty()) {
-            return this;
-        }
         return new Context(
             analyzer,
             editableFiles,
@@ -370,6 +367,19 @@ public class Context {
             autoContextFileCount,
             List.of(),
             Map.of()
+        );
+    }
+
+    public Context withOriginalContents(Map<RepoFile, String> fileContents) {
+        return new Context(
+                analyzer,
+                editableFiles,
+                readonlyFiles,
+                virtualFragments,
+                autoContext,
+                autoContextFileCount,
+                historyMessages,
+                fileContents
         );
     }
 

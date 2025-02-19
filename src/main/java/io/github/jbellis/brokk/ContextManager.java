@@ -64,6 +64,7 @@ public class ContextManager implements IContextManager {
 
     private static final int MAX_UNDO_DEPTH = 100;
     private final List<Context> contextHistory = new ArrayList<>();
+    private final List<Context> redoHistory = new ArrayList<>();
     private Context currentContext() {
         if (contextHistory.isEmpty()) {
             throw new IllegalStateException("No context available");
@@ -166,6 +167,11 @@ public class ContextManager implements IContextManager {
                         "undo",
                         "Undo last context changes (/add, /read, /drop, /clear)",
                         args -> cmdUndo()
+                ),
+                new Command(
+                        "redo",
+                        "Redo last undone changes",
+                        args -> cmdRedo()
                 ),
                 new Command(
                         "paste",
@@ -670,8 +676,27 @@ public class ContextManager implements IContextManager {
             return OperationResult.error("no undo state available");
         }
 
+        var popped = contextHistory.removeLast();
+        var redoContext = undoAndInvertChanges(popped);
+        redoHistory.add(redoContext);
+
+        return OperationResult.success();
+    }
+
+    @NotNull
+    private Context undoAndInvertChanges(Context original) {
+        Map<RepoFile, String> redoContents = new HashMap<>();
+        original.originalContents.forEach((key, value) -> {
+            try {
+                String currentContent = Files.readString(key.absPath());
+                redoContents.put(key, currentContent);
+            } catch (IOException e) {
+                io.toolError("Failed to read current contents of " + key + ": " + e.getMessage());
+            }
+        });
+
         // undo changes made in the most recent context
-        currentContext().originalContents.forEach((key, value) -> {
+        original.originalContents.forEach((key, value) -> {
             try {
                 Files.writeString(key.absPath(), value);
             } catch (IOException e) {
@@ -679,8 +704,17 @@ public class ContextManager implements IContextManager {
             }
         });
 
-        // The previous context becomes current by removing the last entry
-        contextHistory.removeLast();
+        return original.withOriginalContents(redoContents);
+    }
+
+    private OperationResult cmdRedo() {
+        if (redoHistory.isEmpty()) {
+            return OperationResult.error("no redo state available");
+        }
+
+        var popped = redoHistory.removeLast();
+        var undoContext = undoAndInvertChanges(popped);
+        contextHistory.add(undoContext);
 
         return OperationResult.success();
     }
@@ -869,7 +903,8 @@ public class ContextManager implements IContextManager {
         this.coder = coder;
         this.project = new Project(root, io);
         this.analyzerWrapper = new AnalyzerWrapper(io, this.root, backgroundTasks);
-        contextHistory.add(new Context(analyzerWrapper, project.getAutoContextFileCount()));
+        var newContext = new Context(this.analyzerWrapper, project.getAutoContextFileCount());
+        contextHistory.add(newContext);
 
         // infer build command from properties
         String loadedCommand = project.getBuildCommand();
@@ -1212,6 +1247,8 @@ public class ContextManager implements IContextManager {
             if (contextHistory.size() > MAX_UNDO_DEPTH) {
                 contextHistory.removeFirst();
             }
+            // Clear redo history since we've made a new change
+            redoHistory.clear();
         }
     }
 
