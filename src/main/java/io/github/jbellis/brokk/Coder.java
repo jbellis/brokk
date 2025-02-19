@@ -129,7 +129,7 @@ public class Coder {
             logger.debug("Failed blocks: {}", failedBlocks);
             
             // Check for parse/match failures first
-            var parseReflection = reflectionManager.getParseReflection(parseResult, failedBlocks, blocks);
+            var parseReflection = reflectionManager.getParseReflection(parseResult, failedBlocks, blocks, contextManager);
             if (!parseReflection.isEmpty()) {
                 io.toolOutput("Attempting to fix parse/match errors...");
                 mode = Mode.APPLY; // faster

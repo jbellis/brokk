@@ -13,14 +13,18 @@ import java.util.regex.Pattern;
  * Utility for extracting and applying before/after search-replace blocks in content
  */
 public class EditBlock {
+    public record EditResult(Map<RepoFile, String> changedFiles, List<FailedBlock> blocks) { }
+
+    public record FailedBlock(SearchReplaceBlock block, ReflectionManager.EditBlockFailureReason reason) { }
+
     /**
      * Parse the LLM response for SEARCH/REPLACE blocks (or shell blocks, etc.) and apply them.
      */
-    public static List<ReflectionManager.FailedBlock> applyEditBlocks(IContextManager contextManager, IConsoleIO io, Collection<SearchReplaceBlock> blocks) {
+    public static List<FailedBlock> applyEditBlocks(IContextManager contextManager, IConsoleIO io, Collection<SearchReplaceBlock> blocks) {
         assert !blocks.isEmpty();
 
         // Track which blocks succeed or fail during application
-        List<ReflectionManager.FailedBlock> failed = new ArrayList<>();
+        List<FailedBlock> failed = new ArrayList<>();
         List<SearchReplaceBlock> succeeded = new ArrayList<>();
 
         for (SearchReplaceBlock block : blocks) {
@@ -62,7 +66,7 @@ public class EditBlock {
 
             // if we still haven't found a matching file, we have to give up
             if (file == null) {
-                failed.add(new ReflectionManager.FailedBlock(block, ReflectionManager.EditBlockFailureReason.NO_MATCH));
+                failed.add(new FailedBlock(block, ReflectionManager.EditBlockFailureReason.NO_MATCH));
                 continue;
             }
 
@@ -73,25 +77,14 @@ public class EditBlock {
                     fileContent = file.read();
                 } catch (IOException e) {
                     io.toolError("Could not read files: " + e.getMessage());
-                    failed.add(new ReflectionManager.FailedBlock(block, ReflectionManager.EditBlockFailureReason.IO_ERROR
+                    failed.add(new FailedBlock(block, ReflectionManager.EditBlockFailureReason.IO_ERROR
                     ));
                     continue;
                 }
 
-                String snippet = findSimilarLines(block.beforeText(), fileContent, 0.6);
-                StringBuilder suggestion = new StringBuilder();
-                if (!snippet.isEmpty()) {
-                    suggestion.append("Did you mean:\n").append(snippet).append("\n");
-                }
-                if (fileContent.contains(block.afterText().trim())) {
-                    suggestion.append("Note: The replacement text is already present in the file.\n");
-                }
-
-                failed.add(new ReflectionManager.FailedBlock(
-                        block,
-                        ReflectionManager.EditBlockFailureReason.NO_MATCH,
-                        suggestion.toString()
-                ));
+                // Build suggestions
+                var failedBlock = new FailedBlock(block, ReflectionManager.EditBlockFailureReason.NO_MATCH);
+                failed.add(failedBlock);
             } else {
                 // Actually write the file if it changed
                 var error = false;
@@ -99,7 +92,7 @@ public class EditBlock {
                     file.write(finalUpdated);
                 } catch (IOException e) {
                     io.toolError("Failed writing " + file + ": " + e.getMessage());
-                    failed.add(new ReflectionManager.FailedBlock(block, ReflectionManager.EditBlockFailureReason.IO_ERROR));
+                    failed.add(new FailedBlock(block, ReflectionManager.EditBlockFailureReason.IO_ERROR));
                     error = true;
                 }
                 if (!error) {
@@ -751,13 +744,31 @@ public class EditBlock {
     }
 
     /**
-     * Checks if the next line is a HEAD pattern (<<<< SEARCH). This helps to skip
-     * incorrectly grouping shell fences that happen to appear right before a HEAD block.
+     * Collects suggestions for failed blocks by examining file contents
      */
-    private static boolean isNextLineHead(String[] lines, int idx) {
-        if (idx < 0 || idx >= lines.length) {
-            return false;
+    public static Map<FailedBlock, String> collectSuggestions(List<FailedBlock> failedBlocks, IContextManager cm) {
+        Map<FailedBlock, String> suggestions = new HashMap<>();
+        
+        for (var failedBlock : failedBlocks) {
+            if (failedBlock.block().filename() == null) continue;
+            
+            try {
+                String fileContent = cm.toFile(failedBlock.block().filename()).read();
+                String snippet = findSimilarLines(failedBlock.block().beforeText(), fileContent, 0.6);
+                StringBuilder suggestion = new StringBuilder();
+                if (!snippet.isEmpty()) {
+                    suggestion.append("Did you mean:\n").append(snippet).append("\n");
+                }
+                if (fileContent.contains(failedBlock.block().afterText().trim())) {
+                    suggestion.append("Note: The replacement text is already present in the file.\n");
+                }
+                if (suggestion.length() > 0) {
+                    suggestions.put(failedBlock, suggestion.toString());
+                }
+            } catch (IOException ignored) {
+                // Skip suggestions if we can't read the file
+            }
         }
-        return HEAD.matcher(lines[idx].trim()).matches();
+        return suggestions;
     }
 }

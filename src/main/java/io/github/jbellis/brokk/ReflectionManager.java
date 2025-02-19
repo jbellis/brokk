@@ -6,6 +6,7 @@ import io.github.jbellis.brokk.prompts.BuildPrompts;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The ReflectionManager orchestrates whether a second "reflected" pass is required,
@@ -29,7 +30,7 @@ class ReflectionManager {
     /**
      * getReflectionMessage is responsible for displaying something to the user
      */
-    String getParseReflection(EditBlock.ParseResult parseResult, List<FailedBlock> failedBlocks, List<EditBlock.SearchReplaceBlock> blocks) {
+    String getParseReflection(EditBlock.ParseResult parseResult, List<EditBlock.FailedBlock> failedBlocks, List<EditBlock.SearchReplaceBlock> blocks, IContextManager contextManager) {
         assert !blocks.isEmpty();
 
         if (parseResult.parseError() == null && failedBlocks.isEmpty()) {
@@ -45,7 +46,8 @@ class ReflectionManager {
             reflectionMsg.append(parseResult.parseError()).append("\n");
         }
         if (!failedBlocks.isEmpty()) {
-            var failedApplyMessage = handleFailedBlocks(failedBlocks, blocks.size() - failedBlocks.size());
+            var suggestions = EditBlock.collectSuggestions(failedBlocks, contextManager);
+            var failedApplyMessage = handleFailedBlocks(suggestions, blocks.size() - failedBlocks.size());
             io.toolErrorRaw(failedApplyMessage);
             reflectionMsg.append(failedApplyMessage);
         }
@@ -131,16 +133,10 @@ class ReflectionManager {
         IO_ERROR
     }
 
-    public record FailedBlock(EditBlock.SearchReplaceBlock block, EditBlockFailureReason reason, String suggestions) {
-        public FailedBlock(EditBlock.SearchReplaceBlock block, EditBlockFailureReason reason) {
-            this(block, reason, null);
-        }
-    }
-
     /**
      * Generates a reflection message for failed edit blocks using the same format as before
      */
-    public String handleFailedBlocks(List<FailedBlock> failed, int succeededCount) {
+    public String handleFailedBlocks(Map<EditBlock.FailedBlock, String> failed, int succeededCount) {
         if (failed.isEmpty()) {
             return "";
         }
@@ -153,16 +149,16 @@ class ReflectionManager {
           .append(singular ? " " : "s ")
           .append("failed to match!\n");
 
-        for (var f : failed) {
+        for (var entry : failed.entrySet()) {
+            var f = entry.getKey();
             String fname = (f.block().filename() == null ? "(none)" : f.block().filename());
             sb.append("## Failed to match in file: ").append(fname).append("\n");
             sb.append("<<<<<<< SEARCH\n").append(f.block().beforeText())
               .append("=======\n").append(f.block().afterText())
               .append(">>>>>>> REPLACE\n\n");
-            
-            if (f.suggestions() != null) {
-                sb.append(f.suggestions()).append("\n");
-            }
+
+            String suggestion = entry.getValue();
+            sb.append(suggestion).append("\n");
         }
 
         sb.append("The SEARCH text must match exactly the lines in the file.\n");
