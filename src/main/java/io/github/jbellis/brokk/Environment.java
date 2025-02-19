@@ -69,8 +69,9 @@ public class Environment {
             return ContextManager.OperationResult.error("Error executing command: " + e.getMessage());
         }
 
-        var stdout = result.stdout().trim();
-        var stderr = result.stderr().trim();
+        var ANSI_ESCAPE_PATTERN = "\\x1B(?:\\[[;\\d]*[ -/]*[@-~]|\\]\\d+;[^\\x07]*\\x07)";
+        var stdout = result.stdout().trim().replaceAll(ANSI_ESCAPE_PATTERN, "");
+        var stderr = result.stderr().trim().replaceAll(ANSI_ESCAPE_PATTERN, "");
         var combinedOut = new StringBuilder();
         if (!stdout.isEmpty()) {
             if (!stderr.isEmpty()) {
