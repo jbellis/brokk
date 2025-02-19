@@ -1,4 +1,4 @@
-# 0.2
+# 0.1.1
 
 ## Features
 - Enhanced `/undo` to revert changes to file contents as well as context
