@@ -1184,7 +1184,8 @@ public class ContextManager implements IContextManager {
 
     @Override
     public void addToHistory(List<ChatMessage> messages) {
-        currentContext.addHistory(messages);
+        pushContext();
+        currentContext = currentContext.addHistory(messages);
     }
 
     private void pushContext() {

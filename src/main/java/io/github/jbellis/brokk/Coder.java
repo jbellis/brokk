@@ -57,6 +57,7 @@ public class Coder {
      * @param userInput The original user message you want to send.
      */
     public void runSession(String userInput) {
+        List<ChatMessage> pendingHistory = new ArrayList<>();
         if (!isLlmAvailable()) {
             io.toolError("No LLM available (missing API keys)");
             return;
@@ -79,7 +80,7 @@ public class Coder {
             logger.debug("response:\n{}", llmResponse);
             if (llmResponse == null) {
                 // Interrupted or error.  sendMessage is responsible for giving feedback to user
-                return;
+                break;
             }
 
             if (llmResponse.isEmpty()) {
@@ -87,8 +88,8 @@ public class Coder {
                 continue;
             }
 
-            // Add the request/response to history
-            contextManager.addToHistory(List.of(requestMsg, new AiMessage(llmResponse)));
+            // Add the request/response to pending history
+            pendingHistory.addAll(List.of(requestMsg, new AiMessage(llmResponse)));
 
             // Gather all edit blocks in the reply
             var parseResult = EditBlock.findOriginalUpdateBlocks(llmResponse, contextManager.getEditableFiles());
@@ -155,6 +156,11 @@ public class Coder {
 
         // Reset mode back to what the user had it set to
         mode = beginMode;
+
+        // Add all pending messages to history in one batch
+        if (!pendingHistory.isEmpty()) {
+            contextManager.addToHistory(pendingHistory);
+        }
     }
 
     public boolean isLlmAvailable() {
