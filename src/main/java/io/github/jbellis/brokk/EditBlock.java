@@ -13,19 +13,22 @@ import java.util.regex.Pattern;
  * Utility for extracting and applying before/after search-replace blocks in content
  */
 public class EditBlock {
-    public record EditResult(Map<RepoFile, String> changedFiles, List<FailedBlock> blocks) { }
+    public record EditResult(Map<RepoFile, String> originalContents, List<FailedBlock> blocks) { }
 
     public record FailedBlock(SearchReplaceBlock block, ReflectionManager.EditBlockFailureReason reason) { }
 
     /**
      * Parse the LLM response for SEARCH/REPLACE blocks (or shell blocks, etc.) and apply them.
      */
-    public static List<FailedBlock> applyEditBlocks(IContextManager contextManager, IConsoleIO io, Collection<SearchReplaceBlock> blocks) {
+    public static EditResult applyEditBlocks(IContextManager contextManager, IConsoleIO io, Collection<SearchReplaceBlock> blocks) {
         assert !blocks.isEmpty();
 
         // Track which blocks succeed or fail during application
         List<FailedBlock> failed = new ArrayList<>();
         List<SearchReplaceBlock> succeeded = new ArrayList<>();
+        
+        // Track original file contents before any changes
+        Map<RepoFile, String> changedFiles = new HashMap<>();
 
         for (SearchReplaceBlock block : blocks) {
             // Shell commands remain unchanged
@@ -42,6 +45,10 @@ public class EditBlock {
             if (file != null) {
                 // if the user gave a valid file name, try to apply it there first
                 try {
+                    // Save original content before first change
+                    if (!changedFiles.containsKey(file)) {
+                        changedFiles.put(file, file.exists() ? file.read() : "");
+                    }
                     finalUpdated = doReplace(file, block.beforeText(), block.afterText());
                 } catch (IOException e) {
                     io.toolError("Failed reading/writing " + file + ": " + e.getMessage());
@@ -112,7 +119,7 @@ public class EditBlock {
         if (!succeeded.isEmpty()) {
             io.toolOutput(succeeded.size() + " SEARCH/REPLACE blocks applied.");
         }
-        return failed;
+        return new EditResult(changedFiles, failed);
     }
 
     /**

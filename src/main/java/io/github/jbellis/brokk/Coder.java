@@ -1,6 +1,5 @@
 package io.github.jbellis.brokk;
 
-import com.google.common.collect.Streams;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -19,12 +18,12 @@ import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
-import java.util.stream.Stream;
 
 public class Coder {
     private final Logger logger = LogManager.getLogger(Coder.class);
@@ -57,6 +56,8 @@ public class Coder {
      * @param userInput The original user message you want to send.
      */
     public void runSession(String userInput) {
+        // Track original contents of files before any changes
+        var originalContents = new HashMap<RepoFile, String>(); 
         List<ChatMessage> pendingHistory = new ArrayList<>();
         if (!isLlmAvailable()) {
             io.toolError("No LLM available (missing API keys)");
@@ -125,11 +126,12 @@ public class Coder {
             }
 
             // Attempt to apply any code edits from the LLM
-            var failedBlocks = EditBlock.applyEditBlocks(contextManager, io, blocks);
-            logger.debug("Failed blocks: {}", failedBlocks);
-            
-            // Check for parse/match failures first
-            var parseReflection = reflectionManager.getParseReflection(parseResult, failedBlocks, blocks, contextManager);
+            var editResult = EditBlock.applyEditBlocks(contextManager, io, blocks);
+            editResult.originalContents().forEach(originalContents::putIfAbsent);
+            logger.debug("Failed blocks: {}", editResult.blocks());
+
+            // Check for parse/match failures first 
+            var parseReflection = reflectionManager.getParseReflection(parseResult, editResult.blocks(), blocks, contextManager);
             if (!parseReflection.isEmpty()) {
                 io.toolOutput("Attempting to fix parse/match errors...");
                 mode = Mode.APPLY; // faster
@@ -159,7 +161,7 @@ public class Coder {
 
         // Add all pending messages to history in one batch
         if (!pendingHistory.isEmpty()) {
-            contextManager.addToHistory(pendingHistory);
+            contextManager.addToHistory(pendingHistory, originalContents);
         }
     }
 

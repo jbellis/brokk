@@ -5,13 +5,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EditBlockTest {
     static class TestContextManager implements IContextManager {
@@ -39,7 +43,7 @@ class EditBlockTest {
         }
 
         @Override
-        public void addToHistory(List<ChatMessage> messages) {
+        public void addToHistory(List<ChatMessage> messages, Map<RepoFile, String> originalContents) {
             throw new UnsupportedOperationException();
         }
 
@@ -320,7 +324,7 @@ class EditBlockTest {
 
         TestContextManager ctx = new TestContextManager(tempDir, Set.of("fileA.txt"));
         var blocks = EditBlock.findOriginalUpdateBlocks(response, ctx.getEditableFiles()).blocks();
-        EditBlock.applyEditBlocks(ctx, io, blocks);
+        var result = EditBlock.applyEditBlocks(ctx, io, blocks);
 
         // existing filename
         String actualA = Files.readString(existingFile);
@@ -353,9 +357,9 @@ class EditBlockTest {
 
         TestContextManager ctx = new TestContextManager(tempDir, Set.of("fileA.txt"));
         var blocks = EditBlock.findOriginalUpdateBlocks(response, ctx.getEditableFiles()).blocks();
-        var failed = EditBlock.applyEditBlocks(ctx, io, blocks);
+        var result = EditBlock.applyEditBlocks(ctx, io, blocks);
 
-        assertNotEquals(List.of(), failed);
+        assertNotEquals(List.of(), result.blocks());
     }
 
 
@@ -473,8 +477,8 @@ class EditBlockTest {
         TestConsoleIO io = new TestConsoleIO();
         TestContextManager ctx = new TestContextManager(tempDir, Set.of());
         var blocks = EditBlock.findOriginalUpdateBlocks(edit, ctx.getEditableFiles()).blocks();
-        var failed = EditBlock.applyEditBlocks(ctx, io, blocks);;
-        assertNotEquals(List.of(), failed);
+        var result = EditBlock.applyEditBlocks(ctx, io, blocks);
+        assertNotEquals(List.of(), result.blocks());
     }
 
     /**
@@ -541,14 +545,39 @@ class EditBlockTest {
 
         TestContextManager ctx = new TestContextManager(tempDir, Set.of("fileA.txt"));
         var blocks = EditBlock.findOriginalUpdateBlocks(response, ctx.getEditableFiles()).blocks();
-        var failed = EditBlock.applyEditBlocks(ctx, io, blocks);;
-        assertNotEquals(List.of(), failed);
+        var result = EditBlock.applyEditBlocks(ctx, io, blocks);
+        assertNotEquals(List.of(), result.blocks());
     }
 
-    /**
-     * Test that if "beforeText" is empty and the filename also is empty,
-     * we handle it gracefully (like "create a new filename or append").
-     */
+    @Test
+    void testEditResultContainsOriginalContents(@TempDir Path tempDir) throws IOException {
+        TestConsoleIO io = new TestConsoleIO();
+        Path existingFile = tempDir.resolve("fileA.txt");
+        String originalContent = "Original text\n";
+        Files.writeString(existingFile, originalContent);
+
+        String response = """
+        fileA.txt
+        <<<<<<< SEARCH
+        Original text
+        =======
+        Updated text
+        >>>>>>> REPLACE
+        """;
+
+        TestContextManager ctx = new TestContextManager(tempDir, Set.of("fileA.txt"));
+        var blocks = EditBlock.findOriginalUpdateBlocks(response, ctx.getEditableFiles()).blocks();
+        var result = EditBlock.applyEditBlocks(ctx, io, blocks);
+
+        // Verify original content is preserved
+        var fileA = new RepoFile(tempDir, Path.of("fileA.txt"));
+        assertEquals(originalContent, result.originalContents().get(fileA));
+
+        // Verify file was actually changed
+        String actualContent = Files.readString(existingFile);
+        assertEquals("Updated text\n", actualContent);
+    }
+
     @Test
     void testEmptySearchOnEmptyFile() {
         String original = "";

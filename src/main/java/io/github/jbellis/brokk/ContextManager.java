@@ -22,6 +22,7 @@ import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -29,9 +30,9 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -660,7 +661,20 @@ public class ContextManager implements IContextManager {
     }
 
     private OperationResult cmdUndo() {
-        loadPreviousContext();
+        if (previousContexts.isEmpty()) {
+            return OperationResult.error(" no undo state available");
+        }
+
+        // undo changes made in the most recent context
+        currentContext.originalContents.forEach((key, value) -> {
+            try {
+                Files.writeString(key.absPath(), value);
+            } catch (IOException e) {
+                io.toolError("Failed to restore original contents of " + key + ": " + e.getMessage());
+            }
+        });
+
+        currentContext = previousContexts.removeLast();
         return OperationResult.success();
     }
 
@@ -1183,9 +1197,13 @@ public class ContextManager implements IContextManager {
     }
 
     @Override
-    public void addToHistory(List<ChatMessage> messages) {
+    public void addToHistory(List<ChatMessage> messages, Map<RepoFile, String> originalContents) {
         pushContext();
-        currentContext = currentContext.addHistory(messages);
+        currentContext = currentContext.addHistory(messages, originalContents);
+    }
+
+    public void addToHistory(List<ChatMessage> messages) {
+        addToHistory(messages, Map.of());
     }
 
     private void pushContext() {
@@ -1193,14 +1211,6 @@ public class ContextManager implements IContextManager {
         if (previousContexts.size() > MAX_UNDO_DEPTH) {
             previousContexts.removeFirst();
         }
-    }
-
-    public void loadPreviousContext() {
-        if (previousContexts.isEmpty()) {
-            io.toolErrorRaw("No undo state available");
-            return;
-        }
-        currentContext = previousContexts.removeLast();
     }
 
     public boolean isEmpty() {

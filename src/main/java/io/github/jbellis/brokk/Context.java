@@ -1,5 +1,7 @@
 package io.github.jbellis.brokk;
 
+import java.util.Map;
+
 import com.google.common.collect.Streams;
 import dev.langchain4j.data.message.ChatMessage;
 import io.github.jbellis.brokk.ContextFragment.AutoContext;
@@ -20,21 +22,24 @@ import java.util.stream.Stream;
 public class Context {
     public static final int MAX_AUTO_CONTEXT_FILES = 100;
 
-    private final AnalyzerWrapper analyzer;
-    private final List<ContextFragment.RepoPathFragment> editableFiles;
-    private final List<ContextFragment.PathFragment> readonlyFiles;
-    private final List<ContextFragment.VirtualFragment> virtualFragments;
+    final AnalyzerWrapper analyzer;
+    final List<ContextFragment.RepoPathFragment> editableFiles;
+    final List<ContextFragment.PathFragment> readonlyFiles;
+    final List<ContextFragment.VirtualFragment> virtualFragments;
 
-    private final AutoContext autoContext;
-    private final int autoContextFileCount;
+    final AutoContext autoContext;
+    final int autoContextFileCount;
     /** history messages are unusual because they are updated in place.  See comments to addHistory and clearHistory */
-    private final List<ChatMessage> historyMessages;
+    final List<ChatMessage> historyMessages;
+
+    /** backup of original contents for /undo, does not carry forward to Context children */
+    final Map<RepoFile, String> originalContents;
 
     /**
      * Default constructor, with empty files/fragments and autoContext on, and a default of 5 files.
      */
     public Context(AnalyzerWrapper analyzer, int autoContextFileCount) {
-        this(analyzer, List.of(), List.of(), List.of(), AutoContext.EMPTY, autoContextFileCount, new ArrayList<>());
+        this(analyzer, List.of(), List.of(), List.of(), AutoContext.EMPTY, autoContextFileCount, new ArrayList<>(), Map.of());
     }
 
     public Context(
@@ -44,7 +49,8 @@ public class Context {
             List<ContextFragment.VirtualFragment> virtualFragments,
             AutoContext autoContext,
             int autoContextFileCount,
-            List<ChatMessage> historyMessages
+            List<ChatMessage> historyMessages,
+            Map<RepoFile, String> originalContents
     ) {
         assert analyzer != null;
         assert autoContext != null;
@@ -56,6 +62,7 @@ public class Context {
         this.autoContext = autoContext;
         this.autoContextFileCount = autoContextFileCount;
         this.historyMessages = historyMessages;
+        this.originalContents = originalContents;
     }
 
     /**
@@ -263,19 +270,19 @@ public class Context {
     }
 
     private Context withEditableFiles(List<ContextFragment.RepoPathFragment> newEditableFiles) {
-        return new Context(analyzer, newEditableFiles, readonlyFiles, virtualFragments, autoContext, autoContextFileCount, historyMessages);
+        return new Context(analyzer, newEditableFiles, readonlyFiles, virtualFragments, autoContext, autoContextFileCount, historyMessages, Map.of());
     }
 
     private Context withReadonlyFiles(List<ContextFragment.PathFragment> newReadonlyFiles) {
-        return new Context(analyzer, editableFiles, newReadonlyFiles, virtualFragments, autoContext, autoContextFileCount, historyMessages);
+        return new Context(analyzer, editableFiles, newReadonlyFiles, virtualFragments, autoContext, autoContextFileCount, historyMessages, Map.of());
     }
 
     private Context withVirtualFragments(List<ContextFragment.VirtualFragment> newVirtualFragments) {
-        return new Context(analyzer, editableFiles, readonlyFiles, newVirtualFragments, autoContext, autoContextFileCount, historyMessages);
+        return new Context(analyzer, editableFiles, readonlyFiles, newVirtualFragments, autoContext, autoContextFileCount, historyMessages, Map.of());
     }
 
     private Context withAutoContextFileCount(int newAutoContextFileCount) {
-        return new Context(analyzer, editableFiles, readonlyFiles, virtualFragments, autoContext, newAutoContextFileCount, historyMessages);
+        return new Context(analyzer, editableFiles, readonlyFiles, virtualFragments, autoContext, newAutoContextFileCount, historyMessages, Map.of());
     }
 
     public Context removeAll() {
@@ -290,7 +297,7 @@ public class Context {
      */
     public Context refresh() {
         AutoContext newAutoContext = isAutoContextEnabled() ? buildAutoContext() : AutoContext.DISABLED;
-        return new Context(analyzer, editableFiles, readonlyFiles, virtualFragments, newAutoContext, autoContextFileCount, historyMessages);
+        return new Context(analyzer, editableFiles, readonlyFiles, virtualFragments, newAutoContext, autoContextFileCount, historyMessages, Map.of());
     }
 
     /**
@@ -332,9 +339,19 @@ public class Context {
      * Otherwise popping context off with /undo
      * would clear out the most recent conversation round trip which is not what we want.
      */
-    public Context addHistory(List<ChatMessage> newMessages) {
-        historyMessages.addAll(newMessages);
-        return this;
+    public Context addHistory(List<ChatMessage> newMessages, Map<RepoFile, String> originalContents) {
+        var newHistory = new ArrayList<>(historyMessages);
+        newHistory.addAll(newMessages);
+        return new Context(
+            analyzer,
+            editableFiles,
+            readonlyFiles,
+            virtualFragments,
+            autoContext,
+            autoContextFileCount,
+            List.copyOf(newHistory),
+            originalContents
+        );
     }
 
     /**
@@ -351,7 +368,8 @@ public class Context {
             virtualFragments,
             autoContext,
             autoContextFileCount,
-            new ArrayList<>()
+            List.of(),
+            Map.of()
         );
     }
 
