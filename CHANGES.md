@@ -1,3 +1,12 @@
+# 0.2.0
+
+## Features
+- Significantly better ranking of classes for Auto context
+
+## Fixes
+- Multiple improvements to CPG creation at startup
+
+
 # 0.1.1
 
 ## Features
