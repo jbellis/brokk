@@ -854,12 +854,7 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
   }
 
   def writeCpg(path: java.nio.file.Path): Unit = {
-    val langSuffix = language match {
-      case Language.Java => "java"
-      case Language.Python => "python"
-    }
-    val finalPath = path.resolveSibling(s"joern-${langSuffix}.cpg")
-    Serialization.writeGraph(cpg.graph, finalPath)
+    Serialization.writeGraph(cpg.graph, path)
   }
   
   override def close(): Unit = {

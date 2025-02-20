@@ -253,6 +253,7 @@ public class AnalyzerWrapper {
                     // If another rebuild got requested while we were busy, immediately start a new one.
                     if (rebuildPending) {
                         rebuildPending = false;
+                        logger.debug("rebuilding immediately");
                         rebuild();
                     } else {
                         externalRebuildRequested = false;
