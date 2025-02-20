@@ -64,33 +64,39 @@ object Language {
   case object Python extends Language
 }
 
-class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnalyzer, Closeable {
+class Analyzer private (sourcePath: java.nio.file.Path, language: Language, cpgInit: Cpg) extends IAnalyzer, Closeable {
   // Convert to absolute filename immediately and verify it's a directory
   private val absolutePath = {
     val path = sourcePath.toAbsolutePath.toRealPath()
     require(path.toFile.isDirectory, s"Source path must be a directory: $path")
     path
   }
+  // implicits at the top, you will regret it otherwise
   private implicit val ec: ExecutionContext = ExecutionContext.global
+  private implicit val callResolver: ICallResolver = NoResolve
 
   // Adjacency maps for pagerank
   private var adjacency: Map[String, Map[String, Int]] = Map.empty
   private var reverseAdjacency: Map[String, Map[String, Int]] = Map.empty
   private var classesForPagerank: Set[String] = Set.empty
 
-  private[brokk] var cpg: Cpg = _
-  private implicit val callResolver: ICallResolver = NoResolve
-
-  // Primary constructor path - initialize with new CPG
-  initializeAnalyzer(createNewCpg())
+  private[brokk] var cpg: Cpg = cpgInit
+  initializeAnalyzer(cpg)
 
   def this(sourcePath: java.nio.file.Path, preloadedPath: java.nio.file.Path, language: Language) = {
-    this(sourcePath, language)
-    val startTime = System.nanoTime()
-    cpg = CpgBasedTool.loadFromFile(preloadedPath.toString)
-    val duration = (System.nanoTime() - startTime) / 1e6 // convert to milliseconds
-    println(s"Time taken to load CPG from file: $duration ms")
-    initializeAnalyzer(cpg)
+    this(sourcePath, language, CpgBasedTool.loadFromFile(preloadedPath.toString))
+  }
+
+  def this(sourcePath: java.nio.file.Path, language: Language) = {
+    this(sourcePath, language, Analyzer.createNewCpgFor(sourcePath, language))
+  }
+
+  def this(sourcePath: java.nio.file.Path) = {
+    this(sourcePath, Language.Java)
+  }
+
+  def this(sourcePath: java.nio.file.Path, preloadedPath: java.nio.file.Path) = {
+    this(sourcePath, preloadedPath, Language.Java)
   }
 
   private def initializeAnalyzer(initialCpg: Cpg): Unit = {
@@ -103,11 +109,8 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
       throw new IllegalStateException("CPG root not found for " + absolutePath)
     }
 
-    // Initialize adjacency maps
-    val startTime = System.nanoTime()
+    // Initialize adjacency map
     adjacency = buildWeightedAdjacency()
-    val duration = (System.nanoTime() - startTime) / 1e6 // convert to milliseconds
-    println(s"Time taken to build weighted adjacency: $duration ms")
 
     // Build reverse adjacency from the forward adjacency
     val reverseMap = TrieMap[String, TrieMap[String, Int]]()
@@ -120,64 +123,6 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
     reverseAdjacency = reverseMap.map { case (src, tgtMap) => src -> tgtMap.toMap }.toMap
 
     classesForPagerank = (adjacency.keys ++ adjacency.values.flatMap(_.keys)).toSet
-  }
-
-  def this(sourcePath: java.nio.file.Path) = {
-    this(sourcePath, Language.Java)
-  }
-
-  def this(sourcePath: java.nio.file.Path, preloadedPath: java.nio.file.Path) = {
-    this(sourcePath, preloadedPath, Language.Java) 
-  }
-
-  private def createNewCpg(): Cpg = {
-    val newCpg = language match {
-      case Language.Java =>
-        val config = JavaConfig()
-          .withInputPath(absolutePath.toString)
-          .withEnableTypeRecovery(true)
-        // unnecessary?
-        //  .withDisableFileContent(false)
-        // https://github.com/joernio/joern/issues/5297
-        //  .withKeepTypeArguments(true)
-        JavaSrc2Cpg().createCpg(config).get
-      case Language.Python =>
-        val cpg = Cpg.empty
-        
-        // Create list of all .py files in directory recursively, as relative paths
-        val pythonFiles = {
-          import scala.collection.JavaConverters._
-          val files = java.nio.file.Files.walk(absolutePath).iterator().asScala.toList
-          files
-            .filter(f => f.toString.endsWith(".py") && f.toFile.isFile)
-            .map(absolutePath.relativize(_))
-        }
-
-        // Create input providers for each Python file
-        val inputProviders = pythonFiles.map { relPath =>
-          val absPath = absolutePath.resolve(relPath)
-          () => Py2Cpg.InputPair(
-            Source.fromFile(absPath.toFile).mkString,
-            relPath.toString
-          )
-        }
-
-        new Py2Cpg(
-          inputProviders,
-          cpg,
-          absolutePath.toString,
-          "requirements.txt",
-          ValidationMode.Enabled,
-          false
-        ).buildCpg()
-        cpg
-    }
-    X2Cpg.applyDefaultOverlays(newCpg)
-
-    // Add dataflow overlay
-    val context = new LayerCreatorContext(newCpg)
-    new OssDataFlow(OssDataFlow.defaultOpts).create(context)
-    newCpg
   }
 
   /**
@@ -202,7 +147,7 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
     s"$modString$returnType ${m.name}($paramList)"
   }
 
-  def methodsFromName(resolvedMethodName: String): List[Method] = {
+  private def methodsFromName(resolvedMethodName: String): List[Method] = {
     // Joern's method names look like this
     //   org.apache.cassandra.db.DeletionPurger.shouldPurge:boolean(org.apache.cassandra.db.DeletionTime)
     // constructor of a nested class:
@@ -210,7 +155,7 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
     cpg.method.fullName(resolvedMethodName + ":.*").l
   }
 
-  def resolveMethodName(methodName: String): String = {
+  private def resolveMethodName(methodName: String): String = {
     val javaLambdaPattern = """(.*)\.lambda\$(.*)\$.*""".r
     methodName match {
       case javaLambdaPattern(parent, method) => s"$parent.$method"
@@ -337,7 +282,7 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
     sb.toString
   }
 
-  def indentStr(level: Int) = "  " * level
+  private def indentStr(level: Int) = "  " * level
 
   /**
    * Builds a structural skeleton for a given class by name (simple or FQCN),
@@ -867,5 +812,40 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
   
   override def close(): Unit = {
     cpg.close()
+  }
+}
+object Analyzer {
+  private def createNewCpgFor(sourcePath: java.nio.file.Path, language: Language): Cpg = {
+    val absPath = sourcePath.toAbsolutePath.toRealPath()
+    require(absPath.toFile.isDirectory, s"Source path must be a directory: $absPath")
+    val newCpg = language match {
+      case Language.Java =>
+        val config = JavaConfig()
+          .withInputPath(absPath.toString)
+          .withEnableTypeRecovery(true)
+        JavaSrc2Cpg().createCpg(config).get
+      case Language.Python =>
+        val cpg = Cpg.empty
+        import scala.collection.JavaConverters._
+        val files = java.nio.file.Files.walk(absPath).iterator().asScala.toList
+        val pythonFiles = files.filter(f => f.toString.endsWith(".py") && f.toFile.isFile).map(absPath.relativize(_))
+        val inputProviders = pythonFiles.map { relPath =>
+          val absFile = absPath.resolve(relPath)
+          () => Py2Cpg.InputPair(scala.io.Source.fromFile(absFile.toFile).mkString, relPath.toString)
+        }
+        new Py2Cpg(
+          inputProviders,
+          cpg,
+          absPath.toString,
+          "requirements.txt",
+          ValidationMode.Enabled,
+          false
+        ).buildCpg()
+        cpg
+    }
+    X2Cpg.applyDefaultOverlays(newCpg)
+    val context = new LayerCreatorContext(newCpg)
+    new OssDataFlow(OssDataFlow.defaultOpts).create(context)
+    newCpg
   }
 }
