@@ -172,7 +172,7 @@ class AnalyzerTest {
     val analyzer = getAnalyzer
     import scala.jdk.javaapi._
     
-    val seeds = asJava(List("D"))
+    val seeds = CollectionConverters.asJava(Map("D" -> (1.0: java.lang.Double)))
     val ranked = analyzer.getPagerank(seeds, 3)
     
     // A and B should rank highly as they are both called by D

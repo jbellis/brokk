@@ -406,24 +406,16 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
    * If validSeeds are present, seed scores and random jumps are weighted
    * by lines of code (LOC). Otherwise, use uniform seeds.
    */
-  def getPagerank(seedClasses: util.Collection[String], k: Int): java.util.List[(String, Double)] = {
-    val seedSeq = CollectionConverters.asScala(seedClasses).toSeq
+  def getPagerank(seedClassWeights: java.util.Map[String, java.lang.Double], k: Int): java.util.List[(String, java.lang.Double)] = {
+    import scala.jdk.CollectionConverters._
+    val seedWeights = seedClassWeights.asScala.view.mapValues(_.doubleValue()).toMap
+    val seedSeq = seedWeights.keys.toSeq
 
     // restrict to classes that are in the graph
     var validSeeds = seedSeq.filter(classesForPagerank.contains)
     // if we ended up with no seeds, fall back to standard pagerank
     if (validSeeds.isEmpty) {
       validSeeds = classesForPagerank.l
-    }
-
-    // Initialize locMap based on skeleton lengths
-    // (Full source length would be fine but we have a convenient way to get skeleton length)
-    val locMap = if (validSeeds.nonEmpty) {
-      validSeeds.flatMap { cls =>
-        getSkeleton(cls).map(skeleton => cls -> skeleton.split("\n").length)
-      }.toMap
-    } else {
-      Map.empty[String, Int]
     }
 
     // Identify dangling nodes (nodes without outgoing edges)
@@ -438,17 +430,12 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
     val scores = TrieMap[String, Double](classesForPagerank.toSeq.map(_ -> 0.0)*)
     val nextScores = TrieMap[String, Double](classesForPagerank.toSeq.map(_ -> 0.0)*)
 
-    // -- Compute total LOC across valid seeds; if none have LOC, fallback to uniform seeds
-    val totalSeedLoc = validSeeds.map(c => locMap.getOrElse(c, 0)).sum
-    val useLocWeights = validSeeds.nonEmpty && totalSeedLoc > 0
-
-    // If using LOC-based weighting, the initial score for seed c is loc(c)/totalSeedLoc.
-    // Otherwise, uniform 1.0 / validSeeds.size
-    val uniformScore = if (validSeeds.nonEmpty) 1.0 / validSeeds.size else 0.0
+    // Calculate total weight for normalization
+    val totalWeight = seedWeights.values.sum
+    
+    // Use provided weights directly, normalized
     validSeeds.foreach { c =>
-      scores(c) =
-        if (useLocWeights) locMap.getOrElse(c, 0).toDouble / totalSeedLoc
-        else               uniformScore
+      scores(c) = seedWeights.getOrElse(c, 0.0) / totalWeight
     }
 
     var iteration = 0
@@ -474,14 +461,9 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
         // Damping
         var newScore = damping * inboundSum
 
-        // Random jump to seeds, weighted by LOC if desired
+        // Random jump to seeds with normalized weights
         if (validSeeds.contains(node)) {
-          if (useLocWeights) {
-            val locRatio = locMap.getOrElse(node, 0).toDouble / totalSeedLoc
-            newScore += (1.0 - damping) * locRatio
-          } else {
-            newScore += (1.0 - damping) * uniformScore
-          }
+          newScore += (1.0 - damping) * (seedWeights.getOrElse(node, 0.0) / totalWeight)
         }
 
         nextScores(node) = newScore
@@ -491,16 +473,9 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
       // Handle dangling nodes: push their entire score to seeds
       val danglingScore = danglingNodes.par.map(scores).sum
       if (danglingScore > 0.0 && validSeeds.nonEmpty) {
-        if (useLocWeights) {
-          validSeeds.par.foreach { seed =>
-            val locRatio = locMap.getOrElse(seed, 0).toDouble / totalSeedLoc
-            nextScores(seed) += damping * danglingScore * locRatio
-          }
-        } else {
-          val share = danglingScore / validSeeds.size
-          validSeeds.par.foreach { seed =>
-            nextScores(seed) += damping * share
-          }
+        validSeeds.par.foreach { seed =>
+          val weight = seedWeights.getOrElse(seed, 0.0) / totalWeight
+          nextScores(seed) += damping * danglingScore * weight
         }
         // Zero out dangling
         danglingNodes.par.foreach { dn =>
@@ -558,7 +533,7 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
       results
     }
 
-    CollectionConverters.asJava(coalesceInnerClasses(filteredSortedAll, k))
+    CollectionConverters.asJava(coalesceInnerClasses(filteredSortedAll, k).map { case (s, d) => (s, java.lang.Double.valueOf(d)) })
   }
 
   /**

@@ -1,6 +1,7 @@
 package io.github.jbellis.brokk;
 
 import java.util.Map;
+import java.util.HashMap;
 
 import com.google.common.collect.Streams;
 import dev.langchain4j.data.message.ChatMessage;
@@ -193,16 +194,57 @@ public class Context {
                 .flatMap(f -> f.sources(analyzer.get()).stream())
                 .collect(Collectors.toSet());
 
-        var seeds = Streams.concat(editableFiles.stream(), readonlyFiles.stream(), virtualFragments.stream())
+        // Collect initial seeds
+        var weightedSeeds = new HashMap<String, Double>();
+        // editable files have a weight of 1.0, each
+        editableFiles.stream().flatMap(f -> f.sources(analyzer.get()).stream()).forEach(unit -> {
+            weightedSeeds.put(unit.reference(), 1.0);
+        });
+        // everything else splits a weight of 1.0
+        Streams.concat(readonlyFiles.stream(), virtualFragments.stream())
                 .flatMap(f -> f.sources(analyzer.get()).stream())
-                .collect(Collectors.toSet());
+                .forEach(unit ->
+        {
+            weightedSeeds.merge(unit.reference(), 1.0 / (readonlyFiles.size() + virtualFragments.size()), Double::sum);
+        });
 
-        if (seeds.isEmpty()) {
+        // If no seeds, we can't compute pagerank
+        if (weightedSeeds.isEmpty()) {
             return AutoContext.EMPTY;
         }
 
+        // for each seed, find its users and distribute its weight
+        var weightedUses = new HashMap<String, Double>();
+        weightedSeeds.forEach((fqcn, seedWeight) -> {
+            var uses = analyzer.get().getUses(fqcn);
+            if (uses.isEmpty()) {
+                return;
+            }
+            
+            // Calculate total usage weight
+            Map<String, Integer> usageCount = new HashMap<>();
+            for (CodeUnit user : uses) {
+                usageCount.merge(user.reference(), 1, Integer::sum);
+            }
+            
+            // Get the original seed's weight to distribute
+            double totalUsages = usageCount.values().stream().mapToInt(Integer::intValue).sum();
+            
+            // Distribute proportionally to each user
+            usageCount.forEach((key, value) -> {
+                double proportion = value / totalUsages;
+                double additionalWeight = seedWeight * proportion;
+                weightedUses.merge(key, additionalWeight, Double::sum);
+            });
+        });
+
+        // Combine seeds and uses
+        weightedUses.forEach((fqcn, seedWeight) -> {
+            weightedSeeds.merge(fqcn, seedWeight, Double::sum);
+        });
+
         // request 3*autoContextFileCount from pagerank to account for out-of-project filtering
-        var pagerankResults = analyzer.get().getPagerank(seeds.stream().map(CodeUnit::reference).toList(), 3 * MAX_AUTO_CONTEXT_FILES);
+        var pagerankResults = analyzer.get().getPagerank(weightedSeeds, 3 * MAX_AUTO_CONTEXT_FILES);
 
         // build skeleton lines
         var skeletons = new ArrayList<SkeletonFragment>();
