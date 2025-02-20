@@ -406,7 +406,7 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
    * If validSeeds are present, seed scores and random jumps are weighted
    * by lines of code (LOC). Otherwise, use uniform seeds.
    */
-  def getPagerank(seedClassWeights: java.util.Map[String, java.lang.Double], k: Int): java.util.List[(String, java.lang.Double)] = {
+  def getPagerank(seedClassWeights: java.util.Map[String, java.lang.Double], k: Int, reversed: Boolean = false): java.util.List[(String, java.lang.Double)] = {
     import scala.jdk.CollectionConverters._
     val seedWeights = seedClassWeights.asScala.view.mapValues(_.doubleValue()).toMap
     val seedSeq = seedWeights.keys.toSeq
@@ -446,13 +446,14 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
       // Zero nextScores in parallel
       classesForPagerank.par.foreach { c => nextScores(c) = 0.0 }
 
-      // Handle inbound edges using reverseAdjacency
+      // Handle graph edges, using either forward or reverse direction
       val localDiffs = classesForPagerank.par.map { node =>
-        val inboundSum = reverseAdjacency
+        val (inMap, outMap) = if (reversed) (adjacency, reverseAdjacency) else (reverseAdjacency, adjacency)
+        val inboundSum = inMap
           .get(node)
           .map { inboundMap =>
             inboundMap.foldLeft(0.0) { case (acc, (u, weight)) =>
-              val outLinks = adjacency(u)
+              val outLinks = outMap(u)
               val outWeight = outLinks.values.sum.max(1)
               acc + (scores(u) * weight / outWeight)
             }

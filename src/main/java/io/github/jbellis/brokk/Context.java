@@ -213,38 +213,21 @@ public class Context {
             return AutoContext.EMPTY;
         }
 
-        // for each seed, find its users and distribute its weight
-        var weightedUses = new HashMap<String, Double>();
-        weightedSeeds.forEach((fqcn, seedWeight) -> {
-            var uses = analyzer.get().getUses(fqcn);
-            if (uses.isEmpty()) {
-                return;
-            }
-            
-            // Calculate total usage weight
-            Map<String, Integer> usageCount = new HashMap<>();
-            for (CodeUnit user : uses) {
-                usageCount.merge(user.reference(), 1, Integer::sum);
-            }
-            
-            // Get the original seed's weight to distribute
-            double totalUsages = usageCount.values().stream().mapToInt(Integer::intValue).sum();
-            
-            // Distribute proportionally to each user
-            usageCount.forEach((key, value) -> {
-                double proportion = value / totalUsages;
-                double additionalWeight = seedWeight * proportion;
-                weightedUses.merge(key, additionalWeight, Double::sum);
-            });
-        });
 
-        // Combine seeds and uses
-        weightedUses.forEach((fqcn, seedWeight) -> {
-            weightedSeeds.merge(fqcn, seedWeight, Double::sum);
-        });
-
-        // request 3*autoContextFileCount from pagerank to account for out-of-project filtering
-        var pagerankResults = analyzer.get().getPagerank(weightedSeeds, 3 * MAX_AUTO_CONTEXT_FILES);
+        // do forward and reverse pagerank passes
+        var forwardResults = analyzer.get().getPagerank(weightedSeeds, 3 * MAX_AUTO_CONTEXT_FILES, false);
+        var reverseResults = analyzer.get().getPagerank(weightedSeeds, 3 * MAX_AUTO_CONTEXT_FILES, true);
+        
+        // combine results by summing scores
+        var combinedScores = new HashMap<String, Double>();
+        forwardResults.forEach(pair -> combinedScores.put(pair._1, pair._2));
+        reverseResults.forEach(pair -> combinedScores.merge(pair._1, pair._2, Double::sum));
+        
+        // sort by combined score
+        var pagerankResults = combinedScores.entrySet().stream()
+            .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+            .map(e -> new scala.Tuple2<>(e.getKey(), e.getValue()))
+            .toList();
 
         // build skeleton lines
         var skeletons = new ArrayList<SkeletonFragment>();
