@@ -78,19 +78,24 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
   private var reverseAdjacency: Map[String, Map[String, Int]] = Map.empty
   private var classesForPagerank: Set[String] = Set.empty
 
-  // A single queue for all writeGraph calls
-  // i.e., each new writeGraph job enqueues behind this Future.
-
-  private[brokk] var cpg: Cpg = createNewCpg()
-
+  private[brokk] var cpg: Cpg = _
   private implicit val callResolver: ICallResolver = NoResolve
-  
-  // Initialize pagerank data structures 
-  initializePageRank()
+
+  // Primary constructor path - initialize with new CPG
+  initializeAnalyzer(createNewCpg())
 
   def this(sourcePath: java.nio.file.Path, preloadedPath: java.nio.file.Path, language: Language) = {
     this(sourcePath, language)
-    this.cpg = CpgBasedTool.loadFromFile(preloadedPath.toString)
+    val startTime = System.nanoTime()
+    cpg = CpgBasedTool.loadFromFile(preloadedPath.toString)
+    val duration = (System.nanoTime() - startTime) / 1e6 // convert to milliseconds
+    println(s"Time taken to load CPG from file: $duration ms")
+    initializeAnalyzer(cpg)
+  }
+
+  private def initializeAnalyzer(initialCpg: Cpg): Unit = {
+    cpg = initialCpg
+    initializePageRank()
   }
 
   private def initializePageRank(): Unit = {
@@ -99,7 +104,10 @@ class Analyzer(sourcePath: java.nio.file.Path, language: Language) extends IAnal
     }
 
     // Initialize adjacency maps
+    val startTime = System.nanoTime()
     adjacency = buildWeightedAdjacency()
+    val duration = (System.nanoTime() - startTime) / 1e6 // convert to milliseconds
+    println(s"Time taken to build weighted adjacency: $duration ms")
 
     // Build reverse adjacency from the forward adjacency
     val reverseMap = TrieMap[String, TrieMap[String, Int]]()
