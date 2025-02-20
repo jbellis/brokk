@@ -696,13 +696,18 @@ public class ContextManager implements IContextManager {
         });
 
         // undo changes made in the most recent context
+        var changedFiles = new ArrayList<RepoFile>();
         original.originalContents.forEach((key, value) -> {
             try {
                 Files.writeString(key.absPath(), value);
+                changedFiles.add(key);
             } catch (IOException e) {
                 io.toolError("Failed to restore original contents of " + key + ": " + e.getMessage());
             }
         });
+        if (!changedFiles.isEmpty()) {
+            io.toolOutput("Modified " + changedFiles);
+        }
 
         return original.withOriginalContents(redoContents);
     }
@@ -1332,7 +1337,9 @@ public class ContextManager implements IContextManager {
             showHeader("No context! Use /add to add files or /help to list all commands");
             return;
         }
-        showHeader("%s mode".formatted(coder.mode.name()));
+        var humanContextSize = contextHistory.size() - 1; // since first entry is a sentinel
+        showHeader("%s mode. %d %s in context history".formatted(
+                coder.mode.name(), humanContextSize, humanContextSize > 1 ? "entries" : "entry"));
 
         int termWidth = io.getTerminalWidth();
 
