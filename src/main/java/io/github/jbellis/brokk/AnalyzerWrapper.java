@@ -1,5 +1,6 @@
 package io.github.jbellis.brokk;
 
+import io.github.jbellis.brokk.Project.CpgRefresh;
 import io.methvin.watcher.DirectoryChangeEvent;
 import io.methvin.watcher.DirectoryWatcher;
 import org.apache.logging.log4j.LogManager;
@@ -8,7 +9,6 @@ import org.apache.logging.log4j.Logger;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.FileTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -25,10 +25,11 @@ public class AnalyzerWrapper {
 
     private static final long DEBOUNCE_DELAY_MS = 500;
 
-    private final IConsoleIO consoleIO;
+    private final IConsoleIO io;
     private final Path root;
     private final ExecutorService analyzerExecutor;   // where analyzer rebuilds run
     private final BlockingQueue<DirectoryChangeEvent> eventQueue = new LinkedBlockingQueue<>();
+    private final Project project;
 
     private volatile boolean running = true;
 
@@ -40,16 +41,14 @@ public class AnalyzerWrapper {
     /**
      * Create a new orchestrator. (We assume the analyzer executor is provided externally.)
      */
-    public AnalyzerWrapper(IConsoleIO consoleIO, Path root, ExecutorService analyzerExecutor) {
-        this.consoleIO = consoleIO;
-        this.root = root;
+    public AnalyzerWrapper(Project project, ExecutorService analyzerExecutor) {
+        this.project = project;
         this.analyzerExecutor = analyzerExecutor;
+        this.io = project.getIo();
+        this.root = project.getRoot();
 
         // build the initial Analyzer
         future = analyzerExecutor.submit(this::loadOrCreateAnalyzer);
-
-        var watcherThread = new Thread(() -> beginWatching(root), "DirectoryWatcher");
-        watcherThread.start();
     }
 
     private void beginWatching(Path root) {
@@ -182,45 +181,39 @@ public class AnalyzerWrapper {
     private Analyzer loadOrCreateAnalyzer() {
         logger.debug("Loading/creating analyzer");
         Path analyzerPath = root.resolve(".brokk").resolve("joern.cpg");
-        Set<String> newerFiles = new HashSet<>();
-        
-        if (!Files.exists(analyzerPath)) {
-            logger.debug("Rebuilding code intelligence data (cache unavailable)");
-            return createAndSaveAnalyzer();
-        }
-
-        long cpgMTime;
-        try {
-            cpgMTime = Files.getLastModifiedTime(analyzerPath).toMillis();
-        } catch (IOException e) {
-            throw new RuntimeException("Error reading analyzer file timestamp", e);
-        }
-
-        List<RepoFile> trackedFiles = ContextManager.getTrackedFiles();
-        long maxTrackedMTime = 0L;
-        try {
-            for (RepoFile rf : trackedFiles) {
-                Path p = rf.absPath();
-                FileTime fTime = Files.getLastModifiedTime(p);
-                long fileMTime = fTime.toMillis();
-                if (fileMTime > cpgMTime) {
-                    newerFiles.add(p.toString());
-                }
-                maxTrackedMTime = Math.max(maxTrackedMTime, fileMTime);
+        if (project.getCpgRefresh() == CpgRefresh.UNSET) {
+            logger.debug("First startup: timing CPG creation");
+            long start = System.currentTimeMillis();
+            var analyzer = createAndSaveAnalyzer();
+            long duration = System.currentTimeMillis() - start;
+            if (duration > 5000) {
+                project.setCpgRefresh(CpgRefresh.MANUAL);
+                var msg = """
+                CPG creation was slow (%,d ms); code intelligence will only refresh when explicitly requested via /refresh.
+                (Code intelligence will still refresh once automatically at startup.)
+                You can change this with the cpg_refresh parameter in .brokk/project.properties.
+                """.stripIndent().formatted(duration);
+                io.toolOutput(msg);
+            } else {
+                project.setCpgRefresh(CpgRefresh.AUTO);
+                var msg = """
+                CPG creation was fast (%,d ms); code intelligence will refresh automatically when changes are made to tracked files.
+                You can change this with the cpg_refresh parameter in .brokk/project.properties.
+                """.stripIndent().formatted(duration);
+                io.toolOutput(msg);
+                startWatcher();
             }
-        } catch (IOException e) {
-            throw new RuntimeException("Error reading file timestamp", e);
+            return analyzer;
         }
 
-        if (cpgMTime > maxTrackedMTime) {
-            logger.debug("Using cached code intelligence data ({} > {})", cpgMTime, maxTrackedMTime);
-            return new Analyzer(root, analyzerPath);
+        var analyzer = loadCachedAnalyzer(analyzerPath);
+        if (analyzer == null) {
+            analyzer = createAndSaveAnalyzer();
         }
-
-        assert !newerFiles.isEmpty();
-        logger.debug("Rebuilding code intelligence data. Files newer than cache: {}",
-                   String.join(", ", newerFiles));
-        return createAndSaveAnalyzer();
+        if (project.getCpgRefresh() == CpgRefresh.AUTO) {
+            startWatcher();
+        }
+        return analyzer;
     }
 
     private Analyzer createAndSaveAnalyzer() {
@@ -229,6 +222,35 @@ public class AnalyzerWrapper {
         newAnalyzer.writeCpg(analyzerPath);
         logger.debug("Analyzer (re)build completed");
         return newAnalyzer;
+    }
+
+    /** Load a cached analyzer if it is up to date; otherwise return null. */
+    private Analyzer loadCachedAnalyzer(Path analyzerPath) {
+        if (!Files.exists(analyzerPath)) {
+            return null;
+        }
+
+        List<RepoFile> trackedFiles = ContextManager.getTrackedFiles();
+        long cpgMTime;
+        try {
+            cpgMTime = Files.getLastModifiedTime(analyzerPath).toMillis();
+        } catch (IOException e) {
+            throw new RuntimeException("Error reading analyzer file timestamp", e);
+        }
+        long maxTrackedMTime = 0L;
+        for (RepoFile rf : trackedFiles) {
+            try {
+                long fileMTime = Files.getLastModifiedTime(rf.absPath()).toMillis();
+                maxTrackedMTime = Math.max(maxTrackedMTime, fileMTime);
+            } catch (IOException e) {
+                throw new RuntimeException("Error reading file timestamp", e);
+            }
+        }
+        if (cpgMTime > maxTrackedMTime) {
+            logger.debug("Using cached code intelligence data ({} > {})", cpgMTime, maxTrackedMTime);
+            return new Analyzer(root, analyzerPath);
+        }
+        return null;
     }
 
     /**
@@ -265,7 +287,7 @@ public class AnalyzerWrapper {
 
     public Analyzer get() {
         if (!future.isDone()) {
-            consoleIO.toolOutput("Analyzer is being created; blocking until it is ready...");
+            io.toolOutput("Analyzer is being created; blocking until it is ready...");
         }
         try {
             return future.get();
@@ -279,5 +301,9 @@ public class AnalyzerWrapper {
     
     public void requestRebuild() {
         externalRebuildRequested = true;
+    }
+    private void startWatcher() {
+        Thread watcherThread = new Thread(() -> beginWatching(root), "DirectoryWatcher");
+        watcherThread.start();
     }
 }

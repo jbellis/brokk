@@ -7,12 +7,14 @@ import java.util.Properties;
 
 public class Project {
     private final Path propertiesFile;
+    private final Path root;
     private final IConsoleIO io;
     private final Properties props;
     
     private static final int DEFAULT_AUTO_CONTEXT_FILE_COUNT = 10;
 
     public Project(Path root, IConsoleIO io) {
+        this.root = root;
         this.propertiesFile = root.resolve(".brokk").resolve("project.properties");
         this.io = io;
         this.props = new Properties();
@@ -61,5 +63,37 @@ public class Project {
         } catch (IOException e) {
             io.toolErrorRaw("Error saving project properties: " + e.getMessage());
         }
+    }
+
+    public IConsoleIO getIo() {
+        return io;
+    }
+
+    public Path getRoot() {
+        return root;
+    }
+
+    public enum CpgRefresh {
+        AUTO,
+        MANUAL,
+        UNSET;
+    }
+
+    public CpgRefresh getCpgRefresh() {
+        String value = props.getProperty("cpg_refresh");
+        if (value == null) {
+            return CpgRefresh.UNSET;
+        }
+        try {
+            return CpgRefresh.valueOf(value.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return CpgRefresh.UNSET;
+        }
+    }
+
+    public void setCpgRefresh(CpgRefresh value) {
+        assert value != null;
+        props.setProperty("cpg_refresh", value.name());
+        saveProperties();
     }
 }

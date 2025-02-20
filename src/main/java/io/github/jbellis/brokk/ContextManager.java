@@ -902,7 +902,7 @@ public class ContextManager implements IContextManager {
         this.io = io;
         this.coder = coder;
         this.project = new Project(root, io);
-        this.analyzerWrapper = new AnalyzerWrapper(io, this.root, backgroundTasks);
+        this.analyzerWrapper = new AnalyzerWrapper(project, backgroundTasks);
         var newContext = new Context(this.analyzerWrapper, project.getAutoContextFileCount());
         contextHistory.add(newContext);
 
