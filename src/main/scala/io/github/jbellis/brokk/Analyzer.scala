@@ -10,61 +10,20 @@ import io.joern.x2cpg.X2Cpg
 import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.language.*
 import io.shiftleft.codepropertygraph.generated.nodes.{Method, TypeDecl}
-import io.shiftleft.semanticcpg.language.{ICallResolver, NoResolve, *}
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.layers.LayerCreatorContext
 
 import java.io.Closeable
-import java.nio.file.Path
-import java.util
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
 import scala.collection.parallel.CollectionConverters.IterableIsParallelizable
 import scala.concurrent.ExecutionContext
 import scala.io.Source
 import scala.jdk.javaapi.CollectionConverters
-import scala.util.Using
 import scala.util.matching.Regex
 
-sealed trait CodeUnit extends Comparable[CodeUnit] {
-  def reference: String
 
-  def isClass: Boolean = this match {
-    case _: CodeUnit.ClassType => true
-    case _ => false
-  }
-
-  def isFunction: Boolean = this match {
-    case _: CodeUnit.FunctionType => true
-    case _ => false
-  }
-
-  override def toString: String = this match {
-    case CodeUnit.ClassType(ref) => s"CLASS[$ref]"
-    case CodeUnit.FunctionType(ref) => s"FUNCTION[$ref]"
-  }
-
-  override def hashCode(): Int = reference.hashCode()
-  override def equals(obj: Any): Boolean = obj.isInstanceOf[CodeUnit] && this.reference == obj.asInstanceOf[CodeUnit].reference
-  override def compareTo(other: CodeUnit): Int = this.reference.compareTo(other.reference)
-}
-
-object CodeUnit {
-  case class ClassType(reference: String) extends CodeUnit
-  case class FunctionType(reference: String) extends CodeUnit
-  case class FieldType(reference: String) extends CodeUnit
-
-  def cls(reference: String): CodeUnit = ClassType(reference)
-  def fn(reference: String): CodeUnit = FunctionType(reference)
-  def field(reference: String): CodeUnit = FieldType(reference)
-}
-
-sealed trait Language
-object Language {
-  case object Java extends Language
-  case object Python extends Language
-}
-
-class Analyzer private (sourcePath: java.nio.file.Path, language: Language, cpgInit: Cpg) extends IAnalyzer, Closeable {
+class Analyzer private (sourcePath: java.nio.file.Path, language: Language, cpgInit: Cpg) extends IAnalyzer with Closeable {
   // Convert to absolute filename immediately and verify it's a directory
   private val absolutePath = {
     val path = sourcePath.toAbsolutePath.toRealPath()
