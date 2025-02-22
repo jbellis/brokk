@@ -127,7 +127,7 @@ public interface ContextFragment {
 
         @Override
         public Set<CodeUnit> sources(Analyzer analyzer) {
-            return ContextManager.getTrackedFiles().stream().parallel()
+            return GitRepo.instance.getTrackedFiles().stream().parallel()
                     .filter(f -> text().contains(f.toString()))
                     .flatMap(f -> analyzer.getClassesInFile(f).stream())
                     .collect(java.util.stream.Collectors.toSet());

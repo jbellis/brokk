@@ -53,11 +53,6 @@ class EditBlockTest {
         }
 
         @Override
-        public Set<RepoFile> confirmAddRequestedFiles(Set<RepoFile> mentioned) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
         public ContextManager.OperationResult runBuild() {
             throw new UnsupportedOperationException();
         }

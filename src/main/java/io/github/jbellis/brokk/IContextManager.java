@@ -18,7 +18,5 @@ public interface IContextManager {
 
     Set<RepoFile> findMissingFileMentions(String text);
 
-    Set<RepoFile> confirmAddRequestedFiles(Set<RepoFile> mentioned);
-
     ContextManager.OperationResult runBuild();
 }

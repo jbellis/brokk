@@ -1,8 +1,5 @@
 package io.github.jbellis.brokk;
 
-import java.util.Map;
-import java.util.HashMap;
-
 import com.google.common.collect.Streams;
 import dev.langchain4j.data.message.ChatMessage;
 import io.github.jbellis.brokk.ContextFragment.AutoContext;
@@ -11,7 +8,9 @@ import io.github.jbellis.brokk.ContextFragment.StacktraceFragment;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;

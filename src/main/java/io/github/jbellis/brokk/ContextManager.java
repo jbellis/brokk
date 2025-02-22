@@ -6,21 +6,11 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import io.github.jbellis.brokk.ContextFragment.PathFragment;
-import io.github.jbellis.brokk.ContextFragment.SkeletonFragment;
 import io.github.jbellis.brokk.ContextFragment.VirtualFragment;
-import io.github.jbellis.brokk.prompts.ArchitectPrompts;
-import io.github.jbellis.brokk.prompts.AskPrompts;
-import io.github.jbellis.brokk.prompts.CommitPrompts;
-import io.github.jbellis.brokk.prompts.PreparePrompts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
-import org.jline.reader.Candidate;
-import org.msgpack.core.annotations.VisibleForTesting;
-import java.util.function.Function;
 
-import java.awt.*;
-import java.awt.datatransfer.StringSelection;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -28,7 +18,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -42,6 +31,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -50,659 +40,220 @@ import java.util.stream.Stream;
  */
 public class ContextManager implements IContextManager {
     private final Logger logger = LogManager.getLogger(ContextManager.class);
+
     private AnalyzerWrapper analyzerWrapper;
-    final Path root;
     private ConsoleIO io;
     private Coder coder;
     private final ExecutorService backgroundTasks = Executors.newFixedThreadPool(2);
+
+    // build command inference stored here
     private Future<BuildCommand> buildCommand;
 
-    private String lastShellOutput;       // hidden storage of last $ command output
-    private String constructedMessage;    // content to feed into runSession, if /send is used
+    // Shell output that might be used by /send
+    private String lastShellOutput;
+
+    // If we have a constructed user message waiting to be sent via runSession:
+    private String constructedMessage;
 
     private Project project;
-
     private static final int MAX_UNDO_DEPTH = 100;
+
+    // We keep a history of contexts; each context has references to files, messages, etc.
     private final List<Context> contextHistory = new ArrayList<>();
     private final List<Context> redoHistory = new ArrayList<>();
-    private Context currentContext() {
-        if (contextHistory.isEmpty()) {
-            throw new IllegalStateException("No context available");
-        }
-        return contextHistory.getLast();
-    }
 
-    /**
-     * List of commands; typically constructed in Brokk.buildCommands(...) and passed in.
-     * We store them here so we can execute them in handleCommand(...) below.
-     */
-    private final List<Command> commands;
+    private final Path root;
 
-    // minimal constructor to create the commands list, which will be passed to ConsoleIO,
-    // after which resolveCircularReferences finishes ContextManager construction
+    // Minimal constructor called from Brokk before calling resolveCircularReferences(...)
     public ContextManager(Path root) {
         this.root = root.toAbsolutePath();
-        this.commands = buildCommands();
-    }
-
-    public static List<RepoFile> getTrackedFiles() {
-        return GitRepo.instance.getTrackedFiles();
     }
 
     /**
-     * Command construction.
+     * Called from Brokk to finish wiring up references to ConsoleIO and Coder
      */
-    private List<Command> buildCommands() {
-        return List.of(
-                new Command(
-                        "add",
-                        "Add editable files by name or by fragment references",
-                        this::cmdAdd,
-                        "<files|fragment>",
-                        this::completeAdd
-                ),
-                new Command(
-                        "ask",
-                        "Ask a question about the session context",
-                        this::cmdAsk,
-                        "<question>",
-                        args -> List.of()
-                ),
-                new Command(
-                        "autosummaries",
-                        "Number of related classes to summarize (0 to disable)",
-                        this::cmdAutoContext,
-                        "<count>",
-                        args -> List.of()
-                ),
-                new Command(
-                        "clear",
-                        "Clear chat history",
-                        args -> cmdClear()
-                ),
-                new Command(
-                        "commit",
-                        "Generate commit message and commit changes",
-                        args -> cmdCommit()
-                ),
-                new Command(
-                        "mode",
-                        "Set LLM request mode",
-                        this::cmdMode,
-                        "<EDIT|APPLY>",
-                        this::completeApply
-                ),
-                new Command(
-                        "copy",
-                        "Copy current context to clipboard (or specific fragment if given)",
-                        this::cmdCopy,
-                        "[fragment]",
-                        this::completeDrop
-                ),
-                new Command(
-                        "drop",
-                        "Drop files from chat (all if no args)",
-                        this::cmdDrop,
-                        "[files|fragment]",
-                        this::completeDrop
-                ),
-                new Command(
-                        "help",
-                        "Show this help",
-                        args -> cmdHelp()
-                ),
-                new Command(
-                        "read",
-                        "Add read-only files by name or by fragment references",
-                        this::cmdReadOnly,
-                        "<files|fragment>",
-                        this::completeRead
-                ),
-                new Command(
-                        "refresh",
-                        "Refresh code intelligence data (should not be necessary, file a bug report if it is)",
-                        args -> cmdRefresh()
-                ),
-                new Command(
-                        "undo",
-                        "Undo last context changes (/add, /read, /drop, /clear)",
-                        args -> cmdUndo()
-                ),
-                new Command(
-                        "redo",
-                        "Redo last undone changes",
-                        args -> cmdRedo()
-                ),
-                new Command(
-                        "paste",
-                        "Paste content as read-only snippet",
-                        args -> cmdPaste()
-                ),
-                new Command(
-                        "usage",
-                        "Capture the source code of usages of the target class, method, or field",
-                        this::cmdUsage,
-                        "<class|member>",
-                        input -> completeUsage(input, getAnalyzer())
-                ),
-                new Command(
-                        "stacktrace",
-                        "Parse Java stacktrace and extract relevant methods",
-                        args -> cmdStacktrace()
-                ),
-                new Command(
-                        "summarize",
-                        "Generate a skeleton summary of the named class or fragment",
-                        this::cmdSummarize,
-                        "<class|fragment>",
-                        this::completeSummarize
-                ),
-                new Command(
-                        "prepare",
-                        "Evaluate context for the given request",
-                        this::cmdPrepare,
-                        "<request>",
-                        args -> List.of()
-                ),
-                new Command(
-                        "send",
-                        "Send last shell output to LLM as constructed request",
-                        this::cmdSend,
-                        "[instructions]",
-                        args -> List.of()
-                )
-        );
+    public void resolveCircularReferences(ConsoleIO io, Coder coder) {
+        this.io = io;
+        this.coder = coder;
+        this.project = new Project(root, io);
+        this.analyzerWrapper = new AnalyzerWrapper(project, backgroundTasks);
+
+        // Start with a blank context
+        Context newContext = new Context(this.analyzerWrapper, project.getAutoContextFileCount());
+        contextHistory.add(newContext);
+
+        // For build command inference
+        String loadedCommand = project.getBuildCommand();
+        if (loadedCommand != null) {
+            buildCommand = CompletableFuture.completedFuture(BuildCommand.success(loadedCommand));
+            io.toolOutput("Using saved build command: " + loadedCommand);
+        } else {
+            // do background inference
+            List<String> filenames = GitRepo.instance.getTrackedFiles().stream()
+                    .map(RepoFile::toString)
+                    .filter(string -> !string.contains(File.separator))
+                    .collect(Collectors.toList());
+            if (filenames.isEmpty()) {
+                filenames = GitRepo.instance.getTrackedFiles().stream().map(RepoFile::toString).toList();
+            }
+
+            List<ChatMessage> messages = List.of(
+                    new SystemMessage("You are a build assistant that suggests a single command to do a quick compile check."),
+                    new UserMessage(
+                            "We have these files:\n\n" + filenames
+                                    + "\n\nSuggest a minimal single-line shell command to compile them incrementally, not a full build. "
+                                    + "Respond with JUST the command, no commentary and no markup."
+                    )
+            );
+
+            buildCommand = backgroundTasks.submit(() -> {
+                String response;
+                try {
+                    response = coder.sendMessage(messages);
+                } catch (Throwable th) {
+                    return BuildCommand.failure(th.getMessage());
+                }
+                if (response.equals(Models.UNAVAILABLE)) {
+                    return BuildCommand.failure(Models.UNAVAILABLE);
+                }
+                String inferred = response.trim();
+                project.setBuildCommand(inferred);
+                io.toolOutput("Inferred build command: " + inferred);
+                return BuildCommand.success(inferred);
+            });
+        }
     }
 
-    /**
-     * always an absolute path
+    /** create a RepoFile object corresponding to a relative path String
      */
-    public Path getRoot() {
-        return root;
-    }
-
-    @VisibleForTesting
-    static List<Candidate> completeUsage(String input, IAnalyzer analyzer) {
-        return Completions.completeClassesAndMembers(input, analyzer, true);
-    }
-
-    private List<Candidate> completeSummarize(String input) {
-        List<Candidate> candidates = new ArrayList<>();
-        candidates.addAll(completeDrop(input)); // Add fragment completion
-        candidates.addAll(completePaths(input, getTrackedFiles())); // Add path completion
-        return candidates;
-    }
-
-    private OperationResult cmdSummarize(String input) {
-        var trimmed = input.trim();
-        if (trimmed.isBlank()) {
-            return OperationResult.error("Please provide a file path or fragment reference");
-        }
-
-        // First check if it's a virtual fragment reference
-        try {
-            var fragment = currentContext().toFragment(input);
-            if (fragment instanceof ContextFragment.AutoContext) {
-                return OperationResult.error("Autocontext is already summarized");
-            }
-            if (fragment != null) {
-                return summarizeClasses(fragment.sources(getAnalyzer()));
-            }
-            // else fragment == null, so it's not a fragment reference
-        } catch (IllegalArgumentException e) {
-            return OperationResult.error(e.getMessage());
-        }
-
-        // If not a fragment reference, try as file path(s)
-        var sources = new HashSet<CodeUnit>();
-        for (var rawName : Completions.parseQuotedFilenames(trimmed)) {
-            var matches = Completions.expandPath(root, rawName);
-            if (matches.isEmpty()) {
-                io.toolError("no files matched '%s'".formatted(rawName));
-                continue;
-            }
-
-            for (var file : matches) {
-                if (file instanceof ExternalFile) {
-                    io.toolError("Cannot summarize external file: " + rawName);
-                    continue;
-                }
-                getAnalyzer().getClassesInFile((RepoFile)file).stream()
-                        .filter(cu -> !cu.reference().contains("$"))
-                        .forEach(sources::add);
-            }
-        }
-        return summarizeClasses(sources);
-    }
-
-    @NotNull
-    private OperationResult summarizeClasses(Set<CodeUnit> classesInFile) {
-        // coalesce inner classes when a parent class is present
-        // {A, A$B} -> {A}
-        var coalescedUnits = classesInFile.stream()
-                .filter(cu -> {
-                    // Keep this class if:
-                    // 1. It has no $ (not an inner class)
-                    // 2. OR its parent class is not in the set
-                    var name = cu.reference();
-                    if (!name.contains("$")) {
-                        return true;
-                    }
-                    String parentClass = name.substring(0, name.indexOf('$'));
-                    return !classesInFile.stream().map(CodeUnit::reference).collect(Collectors.toSet()).contains(parentClass);
-                })
-                .collect(Collectors.toSet());
-
-        // Build combined skeleton of all classes
-        List<String> shortClassnames = new ArrayList<>();
-        StringBuilder combinedSkeleton = new StringBuilder();
-        for (var cu : coalescedUnits) {
-            var skeleton = getAnalyzer().getSkeleton(cu.reference());
-            if (skeleton.isDefined()) {
-                shortClassnames.add(Completions.getShortClassName(cu.reference()));
-                if (!combinedSkeleton.isEmpty()) {
-                    combinedSkeleton.append("\n\n");
-                }
-                combinedSkeleton.append(skeleton.get());
-            }
-        }
-
-        if (combinedSkeleton.isEmpty()) {
-            return OperationResult.error("Unable to read source to summarize");
-        }
-
-        pushContext(context -> context.addSkeletonFragment(shortClassnames, coalescedUnits, combinedSkeleton.toString()));
-        return OperationResult.success();
-    }
-
-    /**
-     * Processes a command argument as a virtual fragment position and returns any associated files.
-     * @return The files referenced by the fragment, or null if the argument wasn't a valid position.
-     */
-    private Set<RepoFile> getFilesFromVirtualFragment(String args) {
-        if (!args.trim().matches("\\d+")) {
-            return null;
-        }
-
-        int position = Integer.parseInt(args.trim()) - 1; // UI shows 1-based positions
-        var fragment = currentContext().virtualFragments()
-                .filter(f -> f.position() == position)
-                .findFirst();
-        if (fragment.isEmpty()) {
-            throw new IllegalArgumentException("No virtual fragment found at position " + (position + 1));
-        }
-
-        // Get classnames from fragment and convert to files
-        var classnames = fragment.get().sources(getAnalyzer());
-        var files = classnames.stream()
-                .map(cu -> getAnalyzer().pathOf(cu.reference()))
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-
-        if (files.isEmpty()) {
-            throw new IllegalArgumentException("No files found for fragment at position " + (position + 1));
-        }
-
-        return files;
-    }
-
-    private OperationResult cmdAdd(String args) {
-        if (args.isBlank()) {
-            return OperationResult.error("Please provide filename(s) or a git commit");
-        }
-
-        try {
-            var fragmentFiles = getFilesFromVirtualFragment(args);
-            if (fragmentFiles != null) {
-                addFiles(fragmentFiles);
-                return OperationResult.success();
-            }
-        } catch (IllegalArgumentException e) {
-            return OperationResult.error(e.getMessage());
-        }
-
-        var filenames = Completions.parseQuotedFilenames(args);
-        var aggregateFiles = new ArrayList<RepoFile>();
-        for (String token : filenames) {
-            var matches = Completions.expandPath(root, token);
-            if (matches.isEmpty()) {
-                if (io.confirmAsk("No files matched '%s'. Create?".formatted(token))) {
-                    try {
-                        var newFile = createFile(token);
-                        GitRepo.instance.add(newFile.toString());
-                        aggregateFiles.add(newFile);
-                    } catch (Exception e) {
-                        return OperationResult.error(
-                                "Error creating filename %s: %s".formatted(token, e.getMessage()));
-                    }
-                }
-            } else {
-                for (var file : matches) {
-                    if (file instanceof ExternalFile) {
-                        io.toolError("Cannot add external file: " + token);
-                        continue;
-                    }
-                    aggregateFiles.add((RepoFile)file);
-                }
-            }
-        }
-        if (!aggregateFiles.isEmpty()) {
-            addFiles(aggregateFiles);
-        }
-        return OperationResult.success();
-    }
-
-    private RepoFile createFile(String relName) throws IOException {
-        var file = toFile(relName);
-        file.create();
-        return file;
-    }
-
     @Override
     public RepoFile toFile(String relName) {
         return new RepoFile(root, relName);
     }
 
     /**
-     * /read: same logic as /add, but any matched or created files become read-only.
-     * If the user provides a commit ref, it fetches those changed files and adds them read-only.
+     * Return the RepoFiles associated with the given Fragmen index. Throws IllegalArgumentException if no such fragment
      */
-    private OperationResult cmdReadOnly(String args) {
-        if (args.isBlank()) {
-            convertAllToReadOnly();
-            return OperationResult.success();
+    public Set<RepoFile> getFilesFromVirtualFragmentIndex(int index) {
+        // numeric indexes are shown as 1-based in /show
+        int position = index - 1;
+        var fragment = currentContext().virtualFragments()
+                .filter(f -> f.position() == position)
+                .findFirst();
+        if (fragment.isEmpty()) {
+            throw new IllegalArgumentException("No virtual fragment found at position " + index);
         }
 
-        try {
-            var fragmentFiles = getFilesFromVirtualFragment(args);
-            if (fragmentFiles != null) {
-                addReadOnlyFiles(fragmentFiles);
-                return OperationResult.success();
-            }
-        } catch (IllegalArgumentException e) {
-            return OperationResult.error(e.getMessage());
+        var classnames = fragment.get().sources(getAnalyzer());
+        var files = classnames.stream()
+                .map(cu -> getAnalyzer().pathOf(cu.reference()))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (files.isEmpty()) {
+            throw new IllegalArgumentException("No files found for fragment at position " + index);
         }
+        return files;
+    }
 
-        var filenames = Completions.parseQuotedFilenames(args);
-        List<BrokkFile> aggregateFiles = new ArrayList<>();
-        for (String token : filenames) {
-            var matches = Completions.expandPath(root, token);
-            if (matches.isEmpty()) {
-                return OperationResult.error("No matches found for: " + token);
-            } else {
-                aggregateFiles.addAll(matches);
-            }
-        }
-        if (!aggregateFiles.isEmpty()) {
-            addReadOnlyFiles(aggregateFiles);
-        }
-        return OperationResult.success();
+    // ------------------------------------------------------------------
+    // "Business logic" methods called from Commands or elsewhere
+    // ------------------------------------------------------------------
+
+    /** Add the given files to the editable set. */
+    @Override
+    public void addFiles(Collection<RepoFile> files) {
+        assert !files.isEmpty();
+        var fragments = files.stream().map(ContextFragment.RepoPathFragment::new).toList();
+        pushContext(ctx -> ctx.removeReadonlyFiles(fragments).addEditableFiles(fragments));
     }
 
     /**
-     * /add autocompleter:
-     *   1. filename candidates
-     *   2. short commit hashes
+     * Convert all current context to read-only.
      */
-    private List<Candidate> completeAdd(String partial) {
-        List<Candidate> pathCandidates = completePaths(partial, getTrackedFiles());
-        List<Candidate> commitCandidates = completeCommits(partial);
-
-        List<Candidate> all = new ArrayList<>(pathCandidates.size() + commitCandidates.size());
-        all.addAll(pathCandidates);
-        all.addAll(commitCandidates);
-        return all;
-    }
-
-    /**
-     * /read autocompleter: same logic as completeAdd.
-     */
-    private List<Candidate> completeRead(String partial) {
-        List<Candidate> pathCandidates = completePaths(partial, getTrackedFiles());
-        List<Candidate> commitCandidates = completeCommits(partial);
-
-        List<Candidate> all = new ArrayList<>(pathCandidates.size() + commitCandidates.size());
-        all.addAll(pathCandidates);
-        all.addAll(commitCandidates);
-        return all;
-    }
-
-    /**
-     * Re-usable method for short-hash commit autocompletion.
-     */
-    private List<Candidate> completeCommits(String partial) {
-        List<String> lines = GitRepo.instance.logShort(); // e.g. short commits
-        return lines.stream()
-                .filter(line -> line.startsWith(partial))
-                .map(Candidate::new)
-                .collect(Collectors.toList());
-    }
-
-    private OperationResult cmdDrop(String args) {
-        if (args.isBlank()) {
-            dropAll();
-            return OperationResult.success();
-        }
-
-        var filenames = Completions.parseQuotedFilenames(args);
-        var fragments = new ArrayList<>();
-        for (String filename : filenames) {
-            var fragment = currentContext().toFragment(filename);
-            if (fragment instanceof ContextFragment.AutoContext) {
-                return cmdAutoContext("0");
-            }
-            if (fragment != null) {
-                fragments.add(fragment);
-            }
-        }
-        var paths = fragments.stream().filter(f -> f instanceof PathFragment).map(f -> (PathFragment) f).toList();
-        var virtual = fragments.stream().filter(f -> f instanceof VirtualFragment).map(f -> (VirtualFragment) f).toList();
-
-        Context before = currentContext();
-        pushContext(context -> context.removeEditableFiles(paths).removeReadonlyFiles(paths).removeVirtualFragments(virtual));
-        return currentContext() == before
-                ? OperationResult.error("No matching content to drop")
-                : OperationResult.success();
-    }
-
-    private OperationResult cmdPrepare(String msg) {
-        if (msg.isBlank()) {
-            return OperationResult.error("Please provide a message");
-        }
-
-        var messages = PreparePrompts.instance.collectMessages(this);
-        var st = """
-                <task>
-                %s
-                </task>
-                <goal>
-                Evaluate whether you have the right summaries and files available to complete the task.
-                DO NOT write code yet, just summarize the task and list any additional files you need.
-                </goal>
-                """.formatted(msg.trim()).stripIndent();
-        messages.add(new UserMessage(st.formatted(msg)));
-        String response = coder.sendStreaming(messages);
-        if (response != null) {
-            addToHistory(List.of(messages.getLast(), new AiMessage(response)));
-            var mentioned = findMissingFileMentions(response);
-            confirmAddRequestedFiles(mentioned);
-        }
-
+    public OperationResult convertAllToReadOnly() {
+        pushContext(Context::convertAllToReadOnly);
         return OperationResult.success();
     }
 
-    public OperationResult cmdCopy(String args) {
-        try {
-            String content;
-            if (args == null || args.trim().isEmpty()) {
-                // Original behavior - copy everything
-                var msgs = ArchitectPrompts.instance.collectMessages(this);
-                content = Streams.concat(msgs.stream(), Stream.of(new UserMessage("<goal>\n\n</goal>")))
-                        .filter(m -> !(m instanceof AiMessage))
-                        .map(ContextManager::getText)
-                        .collect(Collectors.joining("\n\n"));
-            } else {
-                // Try to find matching fragment
-                var fragment = currentContext().toFragment(args.trim());
-                if (fragment == null) {
-                    return OperationResult.error("No matching fragment found for: " + args);
-                }
-                content = fragment.text();
-            }
-
-            var sel = new StringSelection(content);
-            var cb = Toolkit.getDefaultToolkit().getSystemClipboard();
-            cb.setContents(sel, sel);
-            io.toolOutput("Content copied to clipboard");
-        } catch (Exception e) {
-            return OperationResult.error("Failed to copy to clipboard: " + e.getMessage());
-        }
-
-        if (args.isBlank() && coder.mode != Coder.Mode.APPLY) {
-            coder.mode = Coder.Mode.APPLY;
-            io.toolOutput("/mode set to APPLY by /copy");
-        }
-        return OperationResult.skipShow();
+    /** Add the given files as read-only. */
+    public void addReadOnlyFiles(Collection<? extends BrokkFile> files) {
+        assert !files.isEmpty();
+        var fragments = files.stream().map(ContextFragment::toPathFragment).toList();
+        pushContext(context -> context.removeEditableFiles(fragments).addReadonlyFiles(fragments));
     }
 
-
-    private OperationResult cmdHelp() {
-        String cmdText = commands.stream()
-                .sorted(Comparator.comparing(Command::name))
-                .map(cmd -> {
-                    var cmdName = "/" + cmd.name();
-                    return formatCmdHelpTwoLines(cmdName, cmd.args(), cmd.description);
-                })
-                .collect(Collectors.joining("\n"));
-        io.toolOutput("Available commands:");
-        io.toolOutput("<> denotes a required parameter, [] denotes optional");
-        io.toolOutput(formatCmdHelpTwoLines("$", "<cmd>", "Execute cmd in a shell and show its output"));
-        io.toolOutput(formatCmdHelpTwoLines("$$", "<cmd>", "Execute cmd in a shell and capture its output as context"));
-        io.toolOutput(cmdText);
-        io.toolOutput("TAB or Ctrl-space autocompletes");
-        return OperationResult.skipShow();
+    /** Drop all context */
+    public OperationResult dropAll() {
+        pushContext(Context::removeAll);
+        return OperationResult.success();
+    }
+    
+    public void drop(List<PathFragment> pathFragsToRemove, List<VirtualFragment> virtualToRemove) {
+        pushContext(ctx -> ctx
+                .removeEditableFiles(pathFragsToRemove)
+                .removeReadonlyFiles(pathFragsToRemove)
+                .removeVirtualFragments(virtualToRemove));
     }
 
-    private static String formatCmdHelpTwoLines(String cmdName, String cmdArgs, String cmdDescription) {
-        if (cmdArgs.isEmpty()) {
-            cmdArgs = "[no parameters]";
-        }
-        String firstLine = String.format("%-16s %s", cmdName, cmdArgs);
-        String secondLine = String.format("%16s - %s", "", cmdDescription);
-        return firstLine + "\n" + secondLine;
-    }
-
-    private OperationResult cmdAsk(String input) {
-        if (input.isBlank()) {
-            return OperationResult.error("Please provide a question");
-        }
-
-        var messages = AskPrompts.instance.collectMessages(this);
-        messages.add(new UserMessage("<question>\n%s\n</question>".formatted(input.trim())));
-
-        String response = coder.sendStreaming(messages);
-        if (response != null) {
-            addToHistory(List.of(messages.getLast(), new AiMessage(response)));
-        }
-
+    /** Clear conversation history */
+    public OperationResult clearHistory() {
+        pushContext(Context::clearHistory);
         return OperationResult.success();
     }
 
-    private OperationResult cmdAutoContext(String args) {
-        int fileCount;
-        try {
-            fileCount = Integer.parseInt(args);
-        } catch (NumberFormatException e) {
-            return OperationResult.error("/autocontext requires an integer parameter");
-        }
-        if (fileCount < 0) {
-            return OperationResult.error("/autocontext requires a non-negative integer parameter");
-        }
-        if (fileCount > Context.MAX_AUTO_CONTEXT_FILES) {
-            return OperationResult.error("/autocontext cannot be more than " + Context.MAX_AUTO_CONTEXT_FILES);
-        }
-        setAutoContextFiles(fileCount);
-        return OperationResult.success("Autocontext size set to " + fileCount);
-    }
-
-    private OperationResult cmdClear() {
-        pushContext(context -> context.clearHistory());
-        return OperationResult.success();
-    }
-
-    private OperationResult cmdCommit() {
-        var messages = CommitPrompts.instance.collectMessages((ContextManager) coder.contextManager);
-        if (messages.isEmpty()) {
-            return OperationResult.error("nothing to commit");
-        }
-
-        String commitMsg = coder.sendMessage("Inferring commit suggestion", messages);
-        if (commitMsg.isEmpty()) {
-            return OperationResult.error("LLM did not provide a commit message");
-        }
-
-        return OperationResult.prefill("$git commit -a -m \"%s\"".formatted(commitMsg));
-    }
-
-    private List<Candidate> completeApply(String partial) {
-        return Stream.of("EDIT", "APPLY")
-                .map(Candidate::new)
-                .toList();
-    }
-
-    private OperationResult cmdMode(String args) {
-        String modeArg = args.trim().toUpperCase();
-        if ("EDIT".equals(modeArg)) {
-            coder.mode = Coder.Mode.EDIT;
-            return OperationResult.success("Mode set to EDIT");
-        } else if ("APPLY".equals(modeArg)) {
-            coder.mode = Coder.Mode.APPLY;
-            return OperationResult.success("Mode set to APPLY");
-        } else {
-            return OperationResult.error("Invalid mode. Valid modes are EDIT and APPLY.");
-        }
-    }
-
-    private OperationResult cmdRefresh() {
+    /** trigger a code intelligence rebuild in background. */
+    public void requestRebuild() {
         GitRepo.instance.refresh();
         analyzerWrapper.requestRebuild();
-        io.toolOutput("Code intelligence will refresh in the background");
-        return OperationResult.skipShow();
     }
 
-    private OperationResult cmdUndo() {
-        assert !contextHistory.isEmpty();
-        if (contextHistory.size() == 1) {
+    /** For /undo */
+    public OperationResult undoContext() {
+        if (contextHistory.size() <= 1) {
             return OperationResult.error("no undo state available");
         }
-
         var popped = contextHistory.removeLast();
         var redoContext = undoAndInvertChanges(popped);
         redoHistory.add(redoContext);
-
         return OperationResult.success();
     }
 
+    /** For /redo */
+    public OperationResult redoContext() {
+        if (redoHistory.isEmpty()) {
+            return OperationResult.error("no redo state available");
+        }
+        var popped = redoHistory.removeLast();
+        var undoContext = undoAndInvertChanges(popped);
+        contextHistory.add(undoContext);
+        return OperationResult.success();
+    }
+
+    /**
+     * Inverts changes from a popped context to revert to prior state,
+     * and returns a new context that allows re-inversion (redo).
+     */
     @NotNull
     private Context undoAndInvertChanges(Context original) {
+        // gather new "originalContents" for a future redo
         Map<RepoFile, String> redoContents = new HashMap<>();
-        original.originalContents.forEach((key, value) -> {
+        original.originalContents.forEach((file, oldText) -> {
             try {
-                String currentContent = Files.readString(key.absPath());
-                redoContents.put(key, currentContent);
+                String current = Files.readString(file.absPath());
+                redoContents.put(file, current);
             } catch (IOException e) {
-                io.toolError("Failed to read current contents of " + key + ": " + e.getMessage());
+                io.toolError("Failed to read current contents of " + file + ": " + e.getMessage());
             }
         });
 
-        // undo changes made in the most recent context
+        // restore the popped context's original contents
         var changedFiles = new ArrayList<RepoFile>();
-        original.originalContents.forEach((key, value) -> {
+        original.originalContents.forEach((file, oldText) -> {
             try {
-                Files.writeString(key.absPath(), value);
-                changedFiles.add(key);
+                Files.writeString(file.absPath(), oldText);
+                changedFiles.add(file);
             } catch (IOException e) {
-                io.toolError("Failed to restore original contents of " + key + ": " + e.getMessage());
+                io.toolError("Failed to restore file " + file + ": " + e.getMessage());
             }
         });
         if (!changedFiles.isEmpty()) {
@@ -712,45 +263,50 @@ public class ContextManager implements IContextManager {
         return original.withOriginalContents(redoContents);
     }
 
-    private OperationResult cmdRedo() {
-        if (redoHistory.isEmpty()) {
-            return OperationResult.error("no redo state available");
-        }
-
-        var popped = redoHistory.removeLast();
-        var undoContext = undoAndInvertChanges(popped);
-        contextHistory.add(undoContext);
-
-        return OperationResult.success();
+    /** Store the pasted content as a read-only snippet */
+    public OperationResult addPasteFragment(String pastedContent, Future<String> summaryFuture) {
+        pushContext(ctx -> ctx.addPasteFragment(pastedContent, summaryFuture));
+        return OperationResult.success("Added pasted content");
     }
 
-    private OperationResult cmdUsage(String identifier) {
-        identifier = identifier.trim();
-        if (identifier.isBlank()) {
-            return OperationResult.error("Please provide a symbol name to search for");
-        }
+    /** Submits a background summarization for pasted content */
+    public Future<String> submitSummarizeTaskForPaste(Coder coder, String pastedContent) {
+        return backgroundTasks.submit(() -> {
+            // Summarize these changes in a single line:
+            var msgs = List.of(
+                    new UserMessage("Please summarize these changes in a single line:"),
+                    new AiMessage("Ok, let's see them."),
+                    new UserMessage(pastedContent)
+            );
+            return coder.sendMessage(msgs);
+        });
+    }
 
+    /** Find usage references of the user-provided symbol and store them in context. */
+    public OperationResult usageForIdentifier(String identifier) {
         List<CodeUnit> uses;
         try {
             uses = getAnalyzer().getUses(identifier);
         } catch (IllegalArgumentException e) {
             return OperationResult.error(e.getMessage());
         }
-        logger.debug("Uses of {} are {}", identifier, uses);
         if (uses.isEmpty()) {
             return OperationResult.success("No uses found for " + identifier);
         }
 
         StringBuilder code = new StringBuilder();
         Set<CodeUnit> sources = new HashSet<>();
+
+        // method uses
         var methodUses = uses.stream()
-            .filter(CodeUnit::isFunction)
-            .sorted()
-            .toList();
+                .filter(CodeUnit::isFunction)
+                .sorted()
+                .toList();
+        // type uses
         var typeUses = uses.stream()
-            .filter(CodeUnit::isClass)
-            .sorted()
-            .toList();
+                .filter(CodeUnit::isClass)
+                .sorted()
+                .toList();
 
         if (!methodUses.isEmpty()) {
             Map<String, List<String>> groupedMethods = new LinkedHashMap<>();
@@ -765,25 +321,22 @@ public class ContextManager implements IContextManager {
             if (!groupedMethods.isEmpty()) {
                 code.append("Method uses:\n\n");
                 for (var entry : groupedMethods.entrySet()) {
-                    List<String> methods = entry.getValue();
+                    var methods = entry.getValue();
                     if (!methods.isEmpty()) {
                         code.append("In ").append(entry.getKey()).append(":\n\n");
-                        for (String methodSource : methods) {
-                            code.append(methodSource).append("\n\n");
+                        for (String ms : methods) {
+                            code.append(ms).append("\n\n");
                         }
                     }
                 }
             }
         }
 
-        // Type uses
         if (!typeUses.isEmpty()) {
             code.append("Type uses:\n\n");
             for (var cu : typeUses) {
                 var skeletonHeader = getAnalyzer().getSkeletonHeader(cu.reference());
                 if (skeletonHeader.isEmpty()) {
-                    // TODO can we do better than just skipping anonymous classes that Analyzer doesn't know how to skeletonize?
-                    // io.github.jbellis.brokk.Coder.sendMessage.StreamingResponseHandler$0.<init>' not found
                     continue;
                 }
                 code.append(skeletonHeader.get()).append("\n");
@@ -791,28 +344,27 @@ public class ContextManager implements IContextManager {
             }
         }
 
-        String finalIdentifier = identifier;
-        pushContext(context -> context.addUsageFragment(finalIdentifier, sources, code.toString()));
+        if (code.isEmpty()) {
+            return OperationResult.success("No relevant uses found for " + identifier);
+        }
+
+        String combined = code.toString();
+        pushContext(ctx -> ctx.addUsageFragment(identifier, sources, combined));
         return OperationResult.success();
     }
 
-    private OperationResult cmdStacktrace() {
-        io.toolOutput("Paste your stacktrace below and press Enter when done:");
-        String stacktraceText = io.getRawInput();
-        if (stacktraceText == null || stacktraceText.isBlank()) {
-            return OperationResult.error("no stacktrace pasted");
-        }
-
+    /** Parse the stacktrace and add the source of in-project methods to context */
+    public OperationResult parseStacktrace(String stacktraceText) {
         try {
             var stacktrace = StackTrace.parse(stacktraceText);
             if (stacktrace == null) {
                 return OperationResult.error("unable to parse stacktrace");
             }
+
             String exception = stacktrace.getExceptionType();
-
             StringBuilder content = new StringBuilder();
-            var sources = new HashSet<CodeUnit>();
 
+            var sources = new HashSet<CodeUnit>();
             for (var element : stacktrace.getFrames()) {
                 String methodFullName = element.getClassName() + "." + element.getMethodName();
                 var methodSource = getAnalyzer().getMethodSource(methodFullName);
@@ -827,408 +379,72 @@ public class ContextManager implements IContextManager {
                 return OperationResult.error("no relevant methods found in stacktrace");
             }
 
-            pushContext(context -> context.addStacktraceFragment(sources, stacktraceText, exception, content.toString()));
+            pushContext(ctx -> ctx.addStacktraceFragment(sources, stacktraceText, exception, content.toString()));
             return OperationResult.success();
         } catch (Exception e) {
             return OperationResult.error("Failed to parse stacktrace: " + e.getMessage());
         }
     }
 
-    private OperationResult cmdPaste() {
-        io.toolOutput("Paste your content below and press Enter when done:");
-        String pastedContent = io.getRawInput();
-        if (pastedContent == null || pastedContent.isBlank()) {
-            return OperationResult.error("No content pasted");
-        }
-
-        // Submit summarization task
-        var summaryFuture = backgroundTasks.submit(() -> {
-            var messages = List.of(
-                    new UserMessage("Please summarize these changes in a single line:"),
-                    new AiMessage("Ok, let's see them."),
-                    new UserMessage(pastedContent)
-            );
-            return coder.sendMessage(messages);
-        });
-
-        pushContext(context -> context.addPasteFragment(pastedContent, summaryFuture));
-        return OperationResult.success("Added pasted content");
-    }
-
-    private List<Candidate> completeDrop(String partial) {
-        return Streams.concat(currentContext().editableFiles(),
-                              currentContext().readonlyFiles(),
-                              currentContext().virtualFragments())
-                .map(f -> new Candidate(f.source()))
-                .collect(Collectors.toList());
-    }
-
-    private List<Candidate> completePaths(String partial, Collection<RepoFile> paths) {
-        String partialLower = partial.toLowerCase();
-        Map<String, RepoFile> baseToFullPath = new HashMap<>();
-        List<Candidate> completions = new ArrayList<>();
-
-        paths.forEach(p -> baseToFullPath.put(p.getFileName(), p));
-
-        // Matching base filenames
-        baseToFullPath.forEach((base, path) -> {
-            if (base.toLowerCase().startsWith(partialLower)) {
-                completions.add(fileCandidate(path));
-            }
-        });
-
-        // Camel-case completions
-        baseToFullPath.forEach((base, path) -> {
-            var capitals = Completions.extractCapitals(base);
-            if (capitals.toLowerCase().startsWith(partialLower)) {
-                completions.add(fileCandidate(path));
-            }
-        });
-
-        // Matching full paths
-        paths.forEach(p -> {
-            if (p.toString().toLowerCase().startsWith(partialLower)) {
-                completions.add(fileCandidate(p));
-            }
-        });
-
-        return completions;
-    }
-
-    private Candidate fileCandidate(RepoFile file) {
-        return new Candidate(file.toString(), file.getFileName(), null, file.toString(), null, null, true);
-    }
-
-    public List<Command> getCommands() {
-        return commands;
-    }
-
-    public void resolveCircularReferences(ConsoleIO io, Coder coder) {
-        this.io = io;
-        this.coder = coder;
-        this.project = new Project(root, io);
-        this.analyzerWrapper = new AnalyzerWrapper(project, backgroundTasks);
-        var newContext = new Context(this.analyzerWrapper, project.getAutoContextFileCount());
-        contextHistory.add(newContext);
-
-        // infer build command from properties
-        String loadedCommand = project.getBuildCommand();
-        if (loadedCommand != null) {
-            buildCommand = CompletableFuture.completedFuture(BuildCommand.success(loadedCommand));
-            io.toolOutput("Using saved build command: " + loadedCommand);
-            return;
-        }
-
-        List<String> filenames = getTrackedFiles().stream()
-                .map(RepoFile::toString)
-                .filter(string -> !string.contains(File.separator))
-                .collect(Collectors.toList());
-
-        // corner case: if no top-level files identified
-        if (filenames.isEmpty()) {
-            filenames = getTrackedFiles().stream().map(RepoFile::toString).toList();
-        }
-
-        // prepare LLM prompt with the file list
-        List<ChatMessage> messages = List.of(
-                new SystemMessage("You are a build assistant that suggests a single command to perform a quick compile check."),
-                new UserMessage(
-                        "We have these files:\n\n" + filenames
-                                + "\n\nSuggest a minimal single-line shell command to compile them incrementally, not a full build."
-                                + "\n Respond with JUST the command, no commentary and no markup (no headings, no backticks, just the raw command)."
-                )
-        );
-
-        // Submit the build-command inference task to our background executor
-        buildCommand = backgroundTasks.submit(() -> {
-            String response;
-            try {
-                response = coder.sendMessage(messages);
-            } catch (Throwable th) {
-                return BuildCommand.failure(th.getMessage());
-            }
-            if (response.equals(Models.UNAVAILABLE)) {
-                return BuildCommand.failure(Models.UNAVAILABLE);
-            }
-
-            String inferredCommand = response.trim();
-            project.setBuildCommand(inferredCommand);
-
-            io.toolOutput("Inferred build command: " + response.trim());
-            return BuildCommand.success(inferredCommand);
-        });
-    }
-
-
-    @FunctionalInterface
-    public interface CommandHandler {
-        OperationResult handle(String args);
-    }
-
-    @FunctionalInterface
-    public interface ArgumentCompleter {
-        List<Candidate> complete(String partial);
-    }
-
-    public record Command(String name,
-                          String description,
-                          CommandHandler handler,
-                          String args,
-                          ArgumentCompleter argumentCompleter) {
-        public Command(String name, String description, CommandHandler handler) {
-            this(name, description, handler, "", (partial) -> List.of());
-        }
-    }
-
-    public enum OperationStatus {
-        SUCCESS,
-        SKIP_SHOW,
-        PREFILL,
-        ERROR
-    }
-
-    public record OperationResult(OperationStatus status, String message) {
-        public static OperationResult prefill(String msg) {
-            return new OperationResult(OperationStatus.PREFILL, msg);
-        }
-
-        public static OperationResult success() {
-            return new OperationResult(OperationStatus.SUCCESS, null);
-        }
-
-        public static OperationResult skipShow() {
-            return new OperationResult(OperationStatus.SKIP_SHOW, null);
-        }
-
-        public static OperationResult error(String msg) {
-            return new OperationResult(OperationStatus.ERROR, msg);
-        }
-
-        public static OperationResult success(String msg) {
-            return new OperationResult(OperationStatus.SUCCESS, msg);
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Commands / Shell logic
-    // ------------------------------------------------------------------
-
-
-    @Override
-    public OperationResult runBuild() {
-        try {
-            if (buildCommand.get().command == null || buildCommand.get().command.isBlank()) {
-                io.toolOutput("No build command configured");
-                return OperationResult.success();
-            }
-
-            BuildCommand cmd = buildCommand.get();
-            io.toolOutput("Running " + cmd.command);
-            return Environment.instance.captureShellCommand(cmd.command);
-        } catch (InterruptedException | ExecutionException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    /**
-     * Determines if the given input is a "command" (including $ / $$ shell calls).
-     */
-    public boolean isCommand(String input) {
-        return input.startsWith("/") || input.startsWith("$");
-    }
-
-    /**
-     * Handles the input if it is recognized as a command or shell invocation.
-     */
-    public OperationResult handleCommand(String input) {
-        // $$ => run shell command (stdout only), then store output as read-only snippet
-        if (input.startsWith("$$")) {
-            var command = input.substring(2).trim();
-            OperationResult result = Environment.instance.captureShellCommand(command);
-            if (result.status() == OperationStatus.SUCCESS) {
-                // Add result to read-only snippet with the command as description
-                if (result.message() != null) {
-                    addStringFragment(command, result.message());
-                }
-            } else {
-                assert result.status() == OperationStatus.ERROR;
-                io.toolError(result.message());
-            }
-            return OperationResult.success();
-        }
-        // $ => run shell command + show output
-        else if (input.startsWith("$")) {
-            var command = input.substring(1).trim();
-            OperationResult result = Environment.instance.captureShellCommand(command);
-            // Store the shell output invisibly
-            lastShellOutput = result.message.isBlank() ? null : result.message();
-            // If it succeeded, show the output in yellow
-            if (result.status() == OperationStatus.SUCCESS) {
-                if (result.message() != null) {
-                    io.shellOutput(result.message());
-                }
-            } else {
-                assert result.status() == OperationStatus.ERROR;
-                io.toolError(result.message());
-            }
-            return OperationResult.success(); // don't show output a second time
-        }
-        // /command => handle built-in commands
-        else if (input.startsWith("/")) {
-            return dispatchSlashCommand(input);
-        }
-        // If it's not one of those, skip
-        return OperationResult.skipShow();
-    }
-
-    /**
-     * Dispatch /command by matching against known commands.
-     */
-    private OperationResult dispatchSlashCommand(String input) {
-        // Remove the leading '/'
-        String noSlash = input.substring(1);
-        String[] parts = noSlash.split("\\s+", 2);
-        String typedCmd = parts[0];
-        String args = (parts.length > 1) ? parts[1] : "";
-
-        // Find all commands whose names start with typedCmd
-        var matching = commands.stream()
-                .filter(c -> c.name().startsWith(typedCmd))
-                .toList();
-
-        if (matching.isEmpty()) {
-            return OperationResult.error("Unknown command: " + typedCmd);
-        }
-        if (matching.size() > 1) {
-            String possible = matching.stream()
-                    .map(Command::name)
-                    .collect(Collectors.joining(", "));
-            return OperationResult.error("Ambiguous command '%s' (matches: %s)".formatted(typedCmd, possible));
-        }
-
-        Command cmd = matching.getFirst();
-        return cmd.handler().handle(args);
-    }
-
-    /**
-     * Find filename references in user text, e.g. "fileName.java" etc.
-     */
-    @Override
-    public Set<RepoFile> findMissingFileMentions(String text) {
-        var byFilename = getTrackedFiles().stream().parallel()
-                .filter(f -> currentContext().editableFiles().noneMatch(p -> f.equals(p.file())))
-                .filter(f -> currentContext().readonlyFiles().noneMatch(p -> f.equals(p.file())))
-                .filter(f -> text.contains(f.getFileName()));
-        var byClassname = getAnalyzer().getAllClasses().stream()
-                .filter(cu -> text.contains(List.of(cu.reference().split("\\.")).getLast())) // simple classname in text
-                .filter(cu -> currentContext().allFragments().noneMatch(fragment ->  {
-                    // not already in context
-                    return fragment.sources(getAnalyzer()).contains(cu);
-                }))
-                .map(cu -> getAnalyzer().pathOf(cu.reference()))
-                .filter(Objects::nonNull);
-
-        return Streams.concat(byFilename, byClassname)
+    public boolean summarizeClasses(Set<CodeUnit> classes) {
+        // coalesce inner classes
+        var coalescedUnits = classes.stream()
+                .filter(cu -> {
+                    var name = cu.reference();
+                    if (!name.contains("$")) {
+                        return true;
+                    }
+                    String parent = name.substring(0, name.indexOf('$'));
+                    return !classes.stream().map(CodeUnit::reference).collect(Collectors.toSet()).contains(parent);
+                })
                 .collect(Collectors.toSet());
-    }
 
-    /**
-     * Optionally parse the LLM response for new filename references not already in context,
-     * then add them, returning a reflection query.
-     */
-    @Override
-    public Set<RepoFile> confirmAddRequestedFiles(Set<RepoFile> mentioned) {
-        if (mentioned.isEmpty()) {
-            return Set.of();
-        }
-
-        // remind user what current state is
-        show();
-
-        var toAdd = new HashSet<RepoFile>();
-        var toRead = new HashSet<RepoFile>();
-        var toSummarize = new HashSet<RepoFile>();
-
-        boolean continueProcessing = true;
-        for (var file : mentioned) {
-            if (!continueProcessing) break;
-
-            char choice = io.askOptions("Action for %s?".formatted(file),
-                                        "(A)dd, (R)ead, (S)ummarize, (I)gnore, ig(N)ore all remaining");
-            switch (choice) {
-                case 'a' -> toAdd.add(file);
-                case 'r' -> toRead.add(file);
-                case 's' -> toSummarize.add(file);
-                case 'n' -> continueProcessing = false;
-                default -> {
-                } // ignore
+        StringBuilder combined = new StringBuilder();
+        List<String> shortNames = new ArrayList<>();
+        for (var cu : coalescedUnits) {
+            var skeleton = getAnalyzer().getSkeleton(cu.reference());
+            if (skeleton.isDefined()) {
+                shortNames.add(Completions.getShortClassName(cu.reference()));
+                if (!combined.isEmpty()) {
+                    combined.append("\n\n");
+                }
+                combined.append(skeleton.get());
             }
         }
 
-        // Process add and read in bulk
-        if (!toAdd.isEmpty()) {
-            addFiles(toAdd);
+        if (combined.isEmpty()) {
+            return false;
         }
-        if (!toRead.isEmpty()) {
-            addReadOnlyFiles(toRead);
-        }
-
-        // Process summarize one by one
-        for (var file : toSummarize) {
-            cmdSummarize(file.toString());
-        }
-
-        // Return all files that were processed in some way
-        var allProcessed = new HashSet<RepoFile>();
-        allProcessed.addAll(toAdd);
-        allProcessed.addAll(toRead);
-        allProcessed.addAll(toSummarize);
-        return allProcessed;
+        pushContext(ctx -> ctx.addSkeletonFragment(shortNames, coalescedUnits, toString()));
+        return true;
     }
 
-    @NotNull
-    public String getReadOnlySummary() {
-        return Streams.concat(currentContext().readonlyFiles().map(f -> f.file().toString()),
-                              currentContext().virtualFragments().map(vf -> "'" + vf.description() + "'"),
-                              currentContext().getAutoContext().getSkeletons().stream().map(SkeletonFragment::description))
-                .collect(Collectors.joining(", "));
+    /** Set the auto context size */
+    public OperationResult setAutoContextFiles(int fileCount) {
+        pushContext(ctx -> ctx.setAutoContextFiles(fileCount));
+        project.setAutoContextFileCount(fileCount);
+        return OperationResult.success("Autocontext size set to " + fileCount);
     }
 
-    @NotNull
-    public String getEditableSummary() {
-        return currentContext().editableFiles()
-                .map(p -> p.file().toString())
-                .collect(Collectors.joining(", "));
+    /**
+     * Add to the history of user/AI messages in the current context.
+     */
+    public void addToHistory(List<ChatMessage> messages, Map<RepoFile, String> originalContents) {
+        pushContext(ctx -> ctx.addHistory(messages, originalContents));
     }
-
-    public void dropAll() {
-        pushContext(context -> context.removeAll());
-    }
-
-    public void convertAllToReadOnly() {
-        pushContext(context -> context.convertAllToReadOnly());
-    }
-
-    @Override
-    public void addFiles(Collection<RepoFile> files) {
-        var fragments = files.stream().map(ContextFragment.RepoPathFragment::new).toList();
-        pushContext(context -> context.removeReadonlyFiles(fragments).addEditableFiles(fragments));
-    }
-
-    public void addReadOnlyFiles(Collection<? extends BrokkFile> files) {
-        var fragments = files.stream().map(ContextFragment::toPathFragment).toList();
-        pushContext(context -> context.removeEditableFiles(fragments).addReadonlyFiles(fragments));
+    public void addToHistory(List<ChatMessage> messages) {
+        addToHistory(messages, Map.of());
     }
 
     public void addStringFragment(String description, String content) {
         pushContext(context -> context.addStringFragment(description, content));
     }
 
-    public List<ChatMessage> getHistoryMessages() {
-        return currentContext().getHistory();
-    }
-
-    public String getConstructedMessage() {
+    /**
+     * Returns the current "constructedMessage" if set, then clears it. This is used in the main REPL loop to
+     * immediately feed that message to the LLM instead of prompting the user again.
+     */
+    public String getAndResetConstructedMessage() {
         try {
             return constructedMessage;
         } finally {
@@ -1236,150 +452,68 @@ public class ContextManager implements IContextManager {
         }
     }
 
-    @Override
-    public void addToHistory(List<ChatMessage> messages, Map<RepoFile, String> originalContents) {
-        pushContext(context -> context.addHistory(messages, originalContents));
+    public void setConstructedMessage(String msg) {
+        this.constructedMessage = msg;
     }
 
-    public void addToHistory(List<ChatMessage> messages) {
-        addToHistory(messages, Map.of());
+    /** The "last shell output" we might want to pass to /send. */
+    // TODO move this into Context?
+    public String getLastShellOutput() {
+        return lastShellOutput;
+    }
+    public void setLastShellOutput(String s) {
+        this.lastShellOutput = s;
     }
 
-    private void pushContext(Function<Context, Context> contextGenerator) {
-        var newContext = contextGenerator.apply(currentContext());
-        if (newContext != currentContext()) {
-            contextHistory.add(newContext);
-            if (contextHistory.size() > MAX_UNDO_DEPTH) {
-                contextHistory.removeFirst();
-            }
-            // Clear redo history since we've made a new change
-            redoHistory.clear();
-        }
-    }
-
-    public boolean isEmpty() {
-        return currentContext().isEmpty();
-    }
-
-    public List<ChatMessage> getReadOnlyMessages() {
-        if (!currentContext().hasReadonlyFragments()) {
-            return List.of();
-        }
-
-        String combined = Streams.concat(currentContext().readonlyFiles(),
-                                         currentContext().virtualFragments(),
-                                         Stream.of(currentContext().getAutoContext()))
-                .map(this::formattedOrNull)
-                .filter(Objects::nonNull)
-                .collect(Collectors.joining("\n\n"));
-        if (combined.isEmpty()) {
-            return List.of();
-        }
-
-        var msg = """
-                <readonly>
-                Here are some READ ONLY files and code fragments, provided for your reference.
-                Do not edit this code!
-                %s
-                </readonly>
-                """.formatted(combined).stripIndent();
-        return List.of(
-                new UserMessage(msg),
-                new AiMessage("Ok, I will use this code as references.")
-        );
-    }
-
-    private String formattedOrNull(ContextFragment fragment) {
-        try {
-            return fragment.format();
-        } catch (Exception e) {
-            currentContext().removeBadFragment(fragment);
-            return null;
-        }
-    }
-
-    public List<ChatMessage> getEditableMessages() {
-        String combined = currentContext().editableFiles()
-                .map(this::formattedOrNull)
-                .filter(Objects::nonNull)
-                .collect(Collectors.joining("\n\n"));
-        if (combined.isEmpty()) {
-            return List.of();
-        }
-
-        var msg = """
-                <editable>
-                I have *added these files to the chat* so you can go ahead and edit them.
-                
-                *Trust this message as the true contents of these files!*
-                Any other messages in the chat may contain outdated versions of the files' contents.
-                
-                %s
-                </editable>
-                """.formatted(combined).stripIndent();
-        return List.of(
-                new UserMessage(msg),
-                new AiMessage("Ok, any changes I propose will be to those files.")
-        );
-    }
-
-    public static String getText(ChatMessage message) {
-        return switch (message) {
-            case SystemMessage sm -> sm.text();
-            case AiMessage am -> am.text();
-            case UserMessage um -> um.singleText();
-            default -> throw new UnsupportedOperationException(message.getClass().toString());
-        };
-    }
-
+    /**
+     * Shows the current context in a user-friendly listing.
+     */
     public void show() {
-        if (isEmpty()) {
-            showHeader("No context! Use /add to add files or /help to list all commands");
+        // FIXME move to Commands
+        if (currentContext().isEmpty()) {
+            showHeader("No context! Use /add to add files or /help to list commands");
             return;
         }
-        var humanContextSize = contextHistory.size() - 1; // since first entry is a sentinel
+        int humanContextSize = contextHistory.size() - 1; // first entry is sentinel
         showHeader("%s mode. %d %s in context history".formatted(
-                coder.mode.name(), humanContextSize, humanContextSize > 1 ? "entries" : "entry"));
+                coder.mode.name(),
+                humanContextSize,
+                humanContextSize > 1 ? "entries" : "entry"
+        ));
 
         int termWidth = io.getTerminalWidth();
-
-        // We'll accumulate the total lines displayed
         int totalLines = 0;
 
-        // History lines
+        // message history lines
         int historyLines = currentContext().getHistory().stream()
                 .mapToInt(m -> getText(m).split("\n").length)
                 .sum();
         totalLines += historyLines;
 
-        // Read-only section
         io.context("Read-only:");
-        // Show message history as one "fragment" line
         if (historyLines > 0) {
-            // We only show a single line with the total
+            // just one line summary for message history
             io.context(formatLine(historyLines, "  [Message History]", termWidth));
         }
 
-        // Auto context
+        // auto context
         totalLines += formatFragments(Stream.of(currentContext().getAutoContext()), termWidth);
 
-        // Virtual fragments (e.g. stacktrace, pasted text, etc.)
+        // virtual fragments
         totalLines += formatFragments(currentContext().virtualFragments(), termWidth);
 
-        // Read-only filename fragments
+        // read-only filenames
         totalLines += formatFragments(currentContext().readonlyFiles(), termWidth);
 
-        // Editable fragments
+        // editable
         if (currentContext().hasEditableFiles()) {
             io.context("\nEditable:");
             totalLines += formatFragments(currentContext().editableFiles(), termWidth);
         }
 
-        // Finally, show the total lines and approximate tokens (if available)
         io.context("\nTotal:");
         Integer approxTokens = coder.approximateTokens(totalLines);
         if (approxTokens == null) {
-            // No token approximation available
             io.context(formatLoc(totalLines) + " lines");
         } else {
             io.context(String.format("%s lines, about %,dk tokens",
@@ -1407,11 +541,11 @@ public class ContextManager implements IContextManager {
      * Returns the sum of lines across all fragments printed.
      */
     private int formatFragments(Stream<? extends ContextFragment> fragments, int termWidth) {
-        AtomicInteger sum = new AtomicInteger(0);
+        final AtomicInteger sum = new AtomicInteger();
         fragments.forEach(f -> {
             try {
-                String content = f.text();
-                int lines = content.isEmpty() ? 0 : content.split("\n").length;
+                String text = f.text();
+                int lines = text.isEmpty() ? 0 : text.split("\n").length;
                 sum.addAndGet(lines);
 
                 // The "source", i.e. the filename or virtual fragment position
@@ -1433,19 +567,23 @@ public class ContextManager implements IContextManager {
                     }
                 }
             } catch (IOException e) {
-                logger.warn("Removing unreadable fragment %s".formatted(f.source()), e);
-                io.toolErrorRaw("Removing unreadable fragment %s".formatted(f.source()));
-                currentContext().removeBadFragment(f);
+                removeBadFragment(f, e);
             }
         });
         return sum.get();
     }
 
+    public void removeBadFragment(ContextFragment f, IOException e) {
+        logger.warn("Removing unreadable fragment %s".formatted(f.source()), e);
+        io.toolErrorRaw("Removing unreadable fragment %s".formatted(f.source()));
+        pushContext(c -> c.removeBadFragment(f));
+    }
+
+    private static final int LOC_FIELD_WIDTH = 9;
+
     /**
      * Prints a single line with the integer 'loc' (if > 0) on the left, right-justified to LOC_FIELD_WIDTH, then 'text'.
      */
-    private static final int LOC_FIELD_WIDTH = 9;
-
     private static String formatLine(int loc, String text, int width) {
         var locStr = formatLoc(loc);
 
@@ -1468,8 +606,7 @@ public class ContextManager implements IContextManager {
 
         int width = LOC_FIELD_WIDTH - 2; // 2 padding spaces
         String locStr = String.format("%,d", loc);
-        var formatStr = "%" + width + "s";
-        return String.format(formatStr, locStr);
+        return String.format("%" + width + "s", locStr);
     }
 
     /**
@@ -1486,7 +623,6 @@ public class ContextManager implements IContextManager {
         List<String> lines = new ArrayList<>();
         String[] tokens = text.split("\\s+");
         StringBuilder current = new StringBuilder();
-
         for (String token : tokens) {
             if (current.isEmpty()) {
                 current.append(token);
@@ -1504,9 +640,107 @@ public class ContextManager implements IContextManager {
         return lines;
     }
 
-    public void setAutoContextFiles(int fileCount) {
-        pushContext(context -> context.setAutoContextFiles(fileCount));
-        project.setAutoContextFileCount(fileCount);
+    public Context currentContext() {
+        assert !contextHistory.isEmpty();
+        return contextHistory.getLast();
+    }
+
+    public List<ChatMessage> getHistoryMessages() {
+        return currentContext().getHistory();
+    }
+
+    /**
+     * Return a merged list of read-only code (or even auto-context) as a single user message.
+     */
+    public List<ChatMessage> getReadOnlyMessages() {
+        if (!currentContext().hasReadonlyFragments()) {
+            return List.of();
+        }
+
+        String combined = Streams.concat(
+                        currentContext().readonlyFiles(),
+                        currentContext().virtualFragments(),
+                        Stream.of(currentContext().getAutoContext())
+                )
+                .map(this::formattedOrNull)
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining("\n\n"));
+        if (combined.isEmpty()) {
+            return List.of();
+        }
+
+        var msg = """
+                <readonly>
+                Here are some READ ONLY files and code fragments, provided for your reference.
+                Do not edit this code!
+                %s
+                </readonly>
+                """.formatted(combined).stripIndent();
+        return List.of(
+                new UserMessage(msg),
+                new AiMessage("Ok, I will use this code as references.")
+        );
+    }
+
+    private String formattedOrNull(ContextFragment fragment) {
+        try {
+            return fragment.format();
+        } catch (IOException e) {
+            removeBadFragment(fragment, e);
+            return null;
+        }
+    }
+
+    /**
+     * Return a merged user message with all editable code.
+     */
+    public List<ChatMessage> getEditableMessages() {
+        String combined = currentContext().editableFiles()
+                .map(this::formattedOrNull)
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining("\n\n"));
+        if (combined.isEmpty()) {
+            return List.of();
+        }
+
+        var msg = """
+                <editable>
+                I have *added these files to the chat* so you can go ahead and edit them.
+
+                *Trust this message as the true contents of these files!*
+                Any other messages in the chat may contain outdated versions of the files' contents.
+
+                %s
+                </editable>
+                """.formatted(combined).stripIndent();
+        return List.of(
+                new UserMessage(msg),
+                new AiMessage("Ok, any changes I propose will be to those files.")
+        );
+    }
+
+    public String getReadOnlySummary() {
+        var c = currentContext();
+        return Streams.concat(c.readonlyFiles().map(f -> f.file().toString()),
+                              c.virtualFragments().map(vf -> "'" + vf.description() + "'"),
+                              c.getAutoContext().getSkeletons().stream().map(ContextFragment.SkeletonFragment::description))
+                .collect(Collectors.joining(", "));
+    }
+
+    public String getEditableSummary() {
+        return currentContext().editableFiles()
+                .map(p -> p.file().toString())
+                .collect(Collectors.joining(", "));
+    }
+
+
+    public static String getText(ChatMessage message) {
+        return switch (message) {
+            case SystemMessage sm -> sm.text();
+            case AiMessage am -> am.text();
+            case UserMessage um -> um.singleText();
+            default -> throw new UnsupportedOperationException(message.getClass().toString());
+        };
     }
 
     public Set<RepoFile> getEditableFiles() {
@@ -1515,33 +749,115 @@ public class ContextManager implements IContextManager {
                 .collect(Collectors.toSet());
     }
 
+    /**
+     * Finds filenames or class references not in the current context but mentioned in text.
+     */
+    @Override
+    public Set<RepoFile> findMissingFileMentions(String text) {
+        var missingByFilename = GitRepo.instance.getTrackedFiles().stream().parallel()
+                .filter(f -> currentContext().editableFiles().noneMatch(p -> f.equals(p.file())))
+                .filter(f -> currentContext().readonlyFiles().noneMatch(p -> f.equals(p.file())))
+                .filter(f -> text.contains(f.getFileName()));
+
+        var missingByClassname = getAnalyzer().getAllClasses().stream()
+                .filter(cu -> text.contains(List.of(cu.reference().split("\\."))
+                                                    .getLast())) // simple classname
+                .filter(cu -> currentContext().allFragments().noneMatch(fragment ->
+                                                                                fragment.sources(getAnalyzer()).contains(cu)))
+                .map(cu -> getAnalyzer().pathOf(cu.reference()))
+                .filter(Objects::nonNull);
+
+        return Streams.concat(missingByFilename, missingByClassname)
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * Return a combined list of all fragment "sources" (filenames or numeric indices)
+     * used for autocompletion (for /drop, /copy, etc.).
+     */
+    public List<String> getAllFragmentSources() {
+        return Streams.concat(
+                currentContext().editableFiles(),
+                currentContext().readonlyFiles(),
+                currentContext().virtualFragments()
+        ).map(ContextFragment::source).toList();
+    }
+
+    /**
+     * Returns the main analyzer, building it if needed.
+     */
+    public Analyzer getAnalyzer() {
+        return analyzerWrapper.get();
+    }
+
+    public Path getRoot() {
+        return root;
+    }
+
+    /** Internal push context logic */
+    private void pushContext(Function<Context, Context> contextGenerator) {
+        var newContext = contextGenerator.apply(currentContext());
+        if (newContext != currentContext()) {
+            contextHistory.add(newContext);
+            if (contextHistory.size() > MAX_UNDO_DEPTH) {
+                contextHistory.removeFirst();
+            }
+            // Clear redo history
+            redoHistory.clear();
+        }
+    }
+
+    /** Builds the code with the inferred or user-supplied build command, if any. */
+    @Override
+    public OperationResult runBuild() {
+        try {
+            BuildCommand cmd = buildCommand.get();
+            if (cmd.command == null || cmd.command.isBlank()) {
+                io.toolOutput("No build command configured");
+                return OperationResult.success();
+            }
+            io.toolOutput("Running " + cmd.command);
+            return Environment.instance.captureShellCommand(cmd.command);
+        } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private record BuildCommand(String command, String message) {
-        public static BuildCommand success(String cmd) {
+        static BuildCommand success(String cmd) {
             return new BuildCommand(cmd, cmd);
         }
 
-        public static BuildCommand failure(String message) {
+        static BuildCommand failure(String message) {
             return new BuildCommand(null, message);
         }
     }
 
-    private OperationResult cmdSend(String args) {
-        if (lastShellOutput == null) {
-            return OperationResult.error("No shell output to send.");
-        }
-        assert !lastShellOutput.isBlank();
-        if (!args.isBlank()) {
-            constructedMessage = args.trim() + "\n\n" + lastShellOutput;
-        } else {
-            constructedMessage = lastShellOutput;
-        }
-        return OperationResult.skipShow();
+    // ------------------------------------------------------------------
+    // OperationResult used by all commands
+    // ------------------------------------------------------------------
+    public enum OperationStatus {
+        SUCCESS,
+        SKIP_SHOW,
+        PREFILL,
+        ERROR
     }
 
-    /**
-     * Retrieve the Analyzer, blocking if the Future is not yet complete.
-     */
-    public Analyzer getAnalyzer() {
-        return analyzerWrapper.get();
+    public record OperationResult(OperationStatus status, String message) {
+        public static OperationResult prefill(String msg) {
+            return new OperationResult(OperationStatus.PREFILL, msg);
+        }
+        public static OperationResult success() {
+            return new OperationResult(OperationStatus.SUCCESS, null);
+        }
+        public static OperationResult success(String msg) {
+            return new OperationResult(OperationStatus.SUCCESS, msg);
+        }
+        public static OperationResult skipShow() {
+            return new OperationResult(OperationStatus.SKIP_SHOW, null);
+        }
+        public static OperationResult error(String msg) {
+            return new OperationResult(OperationStatus.ERROR, msg);
+        }
     }
 }

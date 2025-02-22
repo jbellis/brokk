@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Properties;
 
 /**
@@ -16,6 +15,7 @@ public class Brokk {
     private static ConsoleIO io;
     private static ContextManager contextManager;
     private static Coder coder;
+    private static Commands commands;
 
     public static void main(String[] args) {
         // Find the repository root
@@ -36,11 +36,10 @@ public class Brokk {
         // Create the ContextManager (holds chat context, code references, etc.)
         contextManager = new ContextManager(sourceRoot);
 
-        // Create the console with references to commands (we'll build them below)
-        var commands = new ArrayList<>(contextManager.getCommands());
-        // Dummy command to wire up completion for within-chat identifiers
-        commands.add(new ContextManager.Command("chat", null, null, null, (s -> Completions.completeClassesAndMembers(s, contextManager.getAnalyzer(), false))));
-        io = new ConsoleIO(sourceRoot, commands);
+        // Create Commands object and build command list
+        commands = new Commands(contextManager);
+        var commandList = commands.buildCommands();
+        io = new ConsoleIO(sourceRoot, commandList, (s -> Completions.completeClassesAndMembers(s, contextManager.getAnalyzer(), false)));
         // Output header as soon as `io` is available
         String version;
         try {
@@ -64,12 +63,13 @@ public class Brokk {
         coder = new Coder(models, io, sourceRoot, contextManager);
         
         contextManager.resolveCircularReferences(io, coder);
+        commands.resolveCircularReferences(io, coder);
 
         // MOTD
         io.toolOutput("Editor model: " + models.editModelName());
         io.toolOutput("Apply model: " + models.applyModelName());
         io.toolOutput("Quick model: " + models.quickModelName());
-        io.toolOutput("Git repo found at %s with %d files".formatted(sourceRoot, ContextManager.getTrackedFiles().size()));
+        io.toolOutput("Git repo found at %s with %d files".formatted(sourceRoot, GitRepo.instance.getTrackedFiles().size()));
         maybeShowMotd();
 
         // kick off repl
@@ -105,7 +105,7 @@ public class Brokk {
         while (true) {
             // If we have a constructed user message, send it to the LLM immediately.
             // Otherwise, prompt for user input as usual
-            String constructed = contextManager.getConstructedMessage();
+            String constructed = contextManager.getAndResetConstructedMessage();
             String input = constructed == null ? io.getInput(prefill) : constructed;
             prefill = "";
             if (input == null || input.isEmpty()) {
@@ -113,8 +113,8 @@ public class Brokk {
             }
 
             OperationResult result;
-            if (contextManager.isCommand(input)) {
-                result = contextManager.handleCommand(input);
+            if (commands.isCommand(input)) {
+                result = commands.handleCommand(input);
             } else {
                 coder.runSession(input);
                 // coder handles its own feedback

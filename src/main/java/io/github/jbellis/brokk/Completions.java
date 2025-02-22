@@ -232,7 +232,7 @@ public class Completions {
 
         // If not a glob and doesn't exist directly, look for matches in git tracked files
         var filename = Path.of(pattern).getFileName().toString();
-        var matches = ContextManager.getTrackedFiles().stream()
+        var matches = GitRepo.instance.getTrackedFiles().stream()
                 .filter(p -> p.getFileName().equals(filename))
                 .toList();
         if (matches.size() != 1) {

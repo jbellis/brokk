@@ -90,7 +90,7 @@ public class Environment {
         if (result.status() > 0) {
             return ContextManager.OperationResult.error("`%s` returned code %d\n%s".formatted(command, result.status(), output));
         }
-        return ContextManager.OperationResult.success(output.isEmpty() ? "[command completed successfully with no output]" : output);
+        return ContextManager.OperationResult.success(output);
     }
 
     public static void createDirIfNotExists(Path path) throws IOException {

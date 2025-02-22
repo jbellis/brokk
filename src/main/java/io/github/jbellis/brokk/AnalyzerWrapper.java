@@ -153,7 +153,7 @@ public class AnalyzerWrapper {
         }
 
         // 2) Check if any *tracked* files changed
-        Set<Path> trackedPaths = ContextManager.getTrackedFiles().stream()
+        Set<Path> trackedPaths = GitRepo.instance.getTrackedFiles().stream()
                 .map(RepoFile::absPath)
                 .collect(Collectors.toSet());
 
@@ -230,7 +230,7 @@ public class AnalyzerWrapper {
             return null;
         }
 
-        List<RepoFile> trackedFiles = ContextManager.getTrackedFiles();
+        List<RepoFile> trackedFiles = GitRepo.instance.getTrackedFiles();
         long cpgMTime;
         try {
             cpgMTime = Files.getLastModifiedTime(analyzerPath).toMillis();

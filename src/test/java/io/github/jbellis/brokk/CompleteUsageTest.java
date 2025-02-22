@@ -2,6 +2,7 @@ package io.github.jbellis.brokk;
 
 import org.jline.reader.Candidate;
 import org.junit.jupiter.api.Test;
+import org.msgpack.core.annotations.VisibleForTesting;
 
 import java.util.HashSet;
 import java.util.List;
@@ -16,6 +17,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class CompleteUsageTest {
+
+    @VisibleForTesting
+    static List<Candidate> completeUsage(String input, IAnalyzer analyzer) {
+        return Completions.completeClassesAndMembers(input, analyzer, true);
+    }
 
     // A simple inline "mock" analyzer: no mocking library used.
     private static class MockAnalyzer implements IAnalyzer {
@@ -76,7 +82,7 @@ public class CompleteUsageTest {
 
         // Input "d" -> we want it to match "a.b.Do"
         // Because "Do" simple name starts with 'D'
-        var completions = ContextManager.completeUsage("d", mock);
+        var completions = completeUsage("d", mock);
 
         var values = toValues(completions);
         assertEquals(Set.of("a.b.Do", "a.b.Do$Re", "a.b.Do$Re$Sub"), values);
@@ -86,7 +92,7 @@ public class CompleteUsageTest {
     public void testUnqualifiedR() {
         var mock = new MockAnalyzer();
         // Input "r" -> user wants to find "a.b.Do$Re" by partial name "Re"
-        var completions = ContextManager.completeUsage("r", mock);
+        var completions = completeUsage("r", mock);
         var values = toValues(completions);
         assertEquals(Set.of("a.b.Do$Re"), values);
     }
@@ -94,7 +100,7 @@ public class CompleteUsageTest {
     @Test
     public void testQualifiedDo() {
         var mock = new MockAnalyzer();
-        var completions = ContextManager.completeUsage("a.b.Do", mock);
+        var completions = completeUsage("a.b.Do", mock);
         var values = toValues(completions);
         
         assertEquals(
@@ -106,7 +112,7 @@ public class CompleteUsageTest {
     @Test
     public void testNestedClassRe() {
         var mock = new MockAnalyzer();
-        var completions = ContextManager.completeUsage("a.b.Do$Re", mock);
+        var completions = completeUsage("a.b.Do$Re", mock);
         var values = toValues(completions);
 
         assertEquals(Set.of("a.b.Do$Re", "a.b.Do$Re$Sub"), values);
@@ -116,7 +122,7 @@ public class CompleteUsageTest {
     public void testCamelCaseCompletion() {
         var mock = new MockAnalyzer();
         // Input "CC" -> should match "test.CamelClass" due to camel case matching
-        var completions = ContextManager.completeUsage("CC", mock);
+        var completions = completeUsage("CC", mock);
         var values = toValues(completions);
         assertEquals(Set.of("test.CamelClass"), values);
     }
@@ -125,7 +131,7 @@ public class CompleteUsageTest {
     public void testEmptyInput() {
         var mock = new MockAnalyzer();
         // Input "" => propose everything
-        var completions = ContextManager.completeUsage("", mock);
+        var completions = completeUsage("", mock);
         var values = toValues(completions);
         
         assertEquals(
@@ -141,7 +147,7 @@ public class CompleteUsageTest {
         var matches = Completions.getClassnameMatches("Zz", mock.getAllClasses().stream().map(CodeUnit::reference).toList());
         assertEquals(Set.of("x.y.Zz", "w.u.Zz"), matches);
 
-        var completions = ContextManager.completeUsage("Zz", mock);
+        var completions = completeUsage("Zz", mock);
         var values = toValues(completions);
         assertEquals(Set.of("x.y.Zz", "w.u.Zz"), values);
     }

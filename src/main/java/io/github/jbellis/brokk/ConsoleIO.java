@@ -1,6 +1,6 @@
 package io.github.jbellis.brokk;
 
-import io.github.jbellis.brokk.ContextManager.Command;
+import io.github.jbellis.brokk.Commands.Command;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jline.keymap.KeyMap;
@@ -24,7 +24,7 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
     private final Terminal terminal;
     private final LineReader reader;
 
-    public ConsoleIO(Path sourceRoot, Collection<Command> commands) {
+    public ConsoleIO(Path sourceRoot, Collection<Command> commands, Commands.ArgumentCompleter chatCompleter) {
         try {
             var historyFile = sourceRoot.resolve(".brokk/linereader.txt");
             this.terminal = TerminalBuilder.terminal();
@@ -44,7 +44,7 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
                     // Our custom Completer will parse input lines
                     // and return a list of possible completions.
                     .completer((rdr, parsedLine, candidates) -> {
-                        autocomplete(commands, parsedLine, candidates);
+                        autocomplete(commands, chatCompleter, parsedLine, candidates);
                     })
                     .build();
 
@@ -59,16 +59,16 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
     }
 
     private static void autocomplete(Collection<Command> commands,
+                                     Commands.ArgumentCompleter chatCompleter,
                                      ParsedLine parsedLine,
                                      List<Candidate> candidates)
     {
         String line = parsedLine.line();
-        // Non-command input: delegate to chat command completer.
+        // Non-command input: delegate to in-chat completer.
         if (!line.startsWith("/")) {
-            var chatCmd = commands.stream().filter(cmd -> "chat".equals(cmd.name())).findFirst().orElseThrow();
             // Only complete if we're in the middle of a word.
             if (!line.endsWith(" ")) {
-                candidates.addAll(chatCmd.argumentCompleter().complete(parsedLine.word()));
+                candidates.addAll(chatCompleter.complete(parsedLine.word()));
             }
             return;
         }
