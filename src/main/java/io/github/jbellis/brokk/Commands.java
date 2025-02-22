@@ -302,10 +302,8 @@ public class Commands {
             if (args.trim().matches("\\d+")) {
                 // numeric reference => might be a virtual fragment
                 resolved = cm.getFilesFromVirtualFragmentIndex(Integer.parseInt(args.trim()));
-                if (resolved != null) {
-                    cm.addFiles(resolved);
-                    return OperationResult.success();
-                }
+                cm.addFiles(resolved);
+                return OperationResult.success();
             }
         } catch (Exception e) {
             return OperationResult.error(e.getMessage());

@@ -116,7 +116,9 @@ public class Coder {
                     .map(contextManager::toFile)
                     .toList();
             logger.debug("files to add: {}", filesToAdd);
-            contextManager.addFiles(filesToAdd);
+            if (!filesToAdd.isEmpty()) {
+                contextManager.addFiles(filesToAdd);
+            }
             // Filter out blocks that the user declined adding
             blocks = blocks.stream()
                     .filter(block -> !blocksNotEditable.contains(block) || blocksToAdd.contains(block))
