@@ -19,7 +19,14 @@ public class Brokk {
 
     public static void main(String[] args) {
         // Find the repository root
-        Path sourceRoot = GitRepo.instance.getRoot();
+        Path sourceRoot;
+        try {
+            sourceRoot = GitRepo.instance.getRoot();
+        } catch (Throwable th) {
+            System.out.println("Please run Brokk from within a git repository");
+            System.exit(1);
+        }
+
 
         // Make sure we can create .brokk/
         var brokkDir = sourceRoot.resolve(".brokk");
