@@ -1,3 +1,6 @@
+import sbt._
+import sbt.Keys._
+
 scalaVersion := "3.5.2"
 version := "0.3-SNAPSHOT"
 organization := "org.example"
@@ -45,10 +48,19 @@ libraryDependencies ++= Seq(
   "org.junit.jupiter" % "junit-jupiter" % "5.10.2" % Test
 )
 
+lazy val updateVersionTask = taskKey[Unit]("Updates version in version.properties file")
+updateVersionTask := {
+  val versionFile = (Compile / resourceDirectory).value / "version.properties"
+  if (versionFile.exists()) {
+    val updatedProperties = IO.read(versionFile).replaceAll("version=.*", s"version=${version.value}")
+    IO.write(versionFile, updatedProperties)
+  }
+}
+Compile /compile := (Compile / compile).dependsOn(updateVersionTask).value
+
 assembly / assemblyMergeStrategy := {
   case PathList("META-INF", _*) => MergeStrategy.discard  // Discard all META-INF files
   case _ => MergeStrategy.first
 }
-
 assembly / mainClass := Some("io.github.jbellis.brokk.Brokk")
 
