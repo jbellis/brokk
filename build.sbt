@@ -2,8 +2,8 @@ import sbt._
 import sbt.Keys._
 
 scalaVersion := "3.5.2"
-version := "0.2.1"
-organization := "org.example"
+version := "0.3-SNAPSHOT"
+organization := "io.github.jbellis"
 name := "brokk"
 
 val javaVersion = "21"

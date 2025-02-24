@@ -1,3 +1,10 @@
+# 0.2.1
+
+## Features
+- Anthropic models default to sonnet 3.7
+- Brokk's build migrated to SBT
+
+
 # 0.2.0
 
 ## Features

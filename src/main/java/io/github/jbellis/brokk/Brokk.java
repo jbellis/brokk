@@ -27,7 +27,6 @@ public class Brokk {
             System.exit(1);
         }
 
-
         // Make sure we can create .brokk/
         var brokkDir = sourceRoot.resolve(".brokk");
         try {
