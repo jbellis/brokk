@@ -61,7 +61,7 @@ public record Models(StreamingChatLanguageModel editModel,
     edit_model:
       provider: anthropic
       key: ANTHROPIC_API_KEY
-      name: claude-3-5-sonnet-latest
+      name: claude-3-7-sonnet-latest
       maxTokens: 8192
 
     apply_model:
