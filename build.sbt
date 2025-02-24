@@ -48,18 +48,27 @@ libraryDependencies ++= Seq(
   "org.junit.jupiter" % "junit-jupiter" % "5.10.2" % Test
 )
 
-lazy val updateVersionTask = taskKey[Unit]("Updates version in version.properties file")
-updateVersionTask := {
-  val versionFile = (Compile / resourceDirectory).value / "version.properties"
-  if (versionFile.exists()) {
-    val updatedProperties = IO.read(versionFile).replaceAll("version=.*", s"version=${version.value}")
-    IO.write(versionFile, updatedProperties)
-  }
+Compile / unmanagedResources := {
+  val resources = (Compile / unmanagedResources).value
+  resources.filterNot(_.getName == "version.properties")
 }
-Compile /compile := (Compile / compile).dependsOn(updateVersionTask).value
+
+Compile / resourceGenerators += Def.task {
+  val sourceFile = (Compile / resourceDirectory).value / "version.properties"
+  val targetDir = (Compile / resourceManaged).value
+  val targetFile = targetDir / "version.properties"
+  val updatedProperties = IO.read(sourceFile).replaceAll("version=.*", s"version=${version.value}")
+  IO.write(targetFile, updatedProperties)
+  Seq(targetFile)
+}.taskValue
 
 assembly / assemblyMergeStrategy := {
-  case PathList("META-INF", _*) => MergeStrategy.discard  // Discard all META-INF files
+  case PathList("META-INF", xs @ _*) =>
+    xs.last match {
+      case x if x.endsWith(".SF") || x.endsWith(".DSA") || x.endsWith(".RSA") => MergeStrategy.discard
+      case "MANIFEST.MF" => MergeStrategy.discard 
+      case _ => MergeStrategy.first
+    }
   case _ => MergeStrategy.first
 }
 assembly / mainClass := Some("io.github.jbellis.brokk.Brokk")
