@@ -19,7 +19,7 @@ public class Brokk {
 
     public static void main(String[] args) {
         // Find the repository root
-        Path sourceRoot;
+        Path sourceRoot = null;
         try {
             sourceRoot = GitRepo.instance.getRoot();
         } catch (Throwable th) {
