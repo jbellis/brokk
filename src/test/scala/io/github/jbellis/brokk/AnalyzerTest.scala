@@ -31,7 +31,7 @@ class AnalyzerTest {
   }
   
   @Test
-  def extractsMethodSource(): Unit = {
+  def extractMethodSource(): Unit = {
     val analyzer = getAnalyzer
     val source = analyzer.getMethodSource("A.method2").get
 
@@ -44,6 +44,19 @@ class AnalyzerTest {
         |        // overload of method2
         |        return "prefix_" + input + " " + otherInput;
         |    }""".stripMargin
+
+    assertEquals(expected, source)
+  }
+
+  @Test
+  def extractMethodSourceNested(): Unit = {
+    val analyzer = getAnalyzer
+    val source = analyzer.getMethodSource("A$AInner$AInnerInner.method7").get
+
+    val expected =
+      """            public void method7() {
+        |                System.out.println("hello");
+        |            }""".stripMargin
 
     assertEquals(expected, source)
   }
@@ -123,7 +136,7 @@ class AnalyzerTest {
     val skeleton = getAnalyzer.getSkeletonHeader("D").get
     val expected =
       """class D {
-        |  private int field1;
+        |  public int field1;
         |  private String field2;
         |  [... methods not shown ...]
         |}""".stripMargin
@@ -222,9 +235,8 @@ class AnalyzerTest {
     val symbol = "D.field1" // fully qualified field name
     val usages = analyzer.getUses(symbol)
 
-    // We expect methodD2 references "field1 = 42"
     val actualRefs = asScala(usages).map(_.reference).toSet
-    assertEquals(Set("D.methodD2"), actualRefs)
+    assertEquals(Set("D.methodD2", "E.dMethod"), actualRefs)
   }
 
   @Test
@@ -263,6 +275,70 @@ class AnalyzerTest {
 
     val refs = asScala(usages).map(_.reference).toSet
     assertEquals(Set("UseE.some", "UseE.<init>", "UseE.moreM", "UseE.moreF", "UseE"), refs)
+  }
+
+  @Test
+  def resolveMethodNameTest(): Unit = {
+    val analyzer = getAnalyzer
+    
+    // Regular Methods
+    assertEquals("java.util.List.isEmpty", analyzer.resolveMethodName("java.util.List.isEmpty"))
+    assertEquals("java.lang.Math.max", analyzer.resolveMethodName("java.lang.Math.max"))
+    assertEquals("java.util.UUID.toString", analyzer.resolveMethodName("java.util.UUID.toString"))
+
+    // Static Methods
+    assertEquals("java.lang.Integer.valueOf", analyzer.resolveMethodName("java.lang.Integer.valueOf"))
+    assertEquals("java.nio.file.Files.createDirectories", analyzer.resolveMethodName("java.nio.file.Files.createDirectories"))
+    assertEquals("java.util.Collections.unmodifiableList", analyzer.resolveMethodName("java.util.Collections.unmodifiableList"))
+    assertEquals("org.apache.cassandra.utils.FBUtilities.waitOnFuture", analyzer.resolveMethodName("org.apache.cassandra.utils.FBUtilities.waitOnFuture"))
+
+    // Inner Class Methods
+    assertEquals("org.apache.cassandra.db.ClusteringPrefix$Kind.ordinal", analyzer.resolveMethodName("org.apache.cassandra.db.ClusteringPrefix$Kind.ordinal"))
+    assertEquals("org.apache.cassandra.io.sstable.format.big.BigTableWriter$IndexWriter.prepareToCommit", 
+      analyzer.resolveMethodName("org.apache.cassandra.io.sstable.format.big.BigTableWriter$IndexWriter.prepareToCommit"))
+    assertEquals("org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader$IteratorState.getMinLeafBlockFP", 
+      analyzer.resolveMethodName("org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader$IteratorState.getMinLeafBlockFP"))
+    assertEquals("org.apache.cassandra.repair.consistent.ConsistentSession$State.transitions", 
+      analyzer.resolveMethodName("org.apache.cassandra.repair.consistent.ConsistentSession$State.transitions"))
+    
+    // Anonymous Inner Classes used in a method
+    assertEquals("org.apache.cassandra.repair.RepairJob.run",
+      analyzer.resolveMethodName("org.apache.cassandra.repair.RepairJob.run.FutureCallback$0.set"))
+    assertEquals("org.apache.cassandra.db.lifecycle.View.updateCompacting",
+      analyzer.resolveMethodName("org.apache.cassandra.db.lifecycle.View.updateCompacting.Function$0.all"))
+    assertEquals("org.apache.cassandra.index.sai.plan.ReplicaPlans.writeNormal",
+      analyzer.resolveMethodName("org.apache.cassandra.index.sai.plan.ReplicaPlans.writeNormal.Selector$1.any"))
+
+    // Anonymous inner classes used in a field
+    //    assertEquals("org.apache.cassandra.cql3.functions.TimeFcts.minTimeuuidFct.NativeScalarFunction$0.<init>",
+    //      analyzer.resolveMethodName("org.apache.cassandra.cql3.functions.TimeFcts.minTimeuuidFct.NativeScalarFunction$0.<init>"))
+    //    assertEquals("org.apache.cassandra.db.Clustering.STATIC_CLUSTERING.BufferClustering$0.<init>",
+    //      analyzer.resolveMethodName("org.apache.cassandra.db.Clustering.STATIC_CLUSTERING.BufferClustering$0.<init>"))
+
+    // Constructors
+    assertEquals("java.util.HashMap.<init>", analyzer.resolveMethodName("java.util.HashMap.<init>"))
+    assertEquals("org.apache.cassandra.db.marshal.UserType.<init>", analyzer.resolveMethodName("org.apache.cassandra.db.marshal.UserType.<init>"))
+
+    // Enum-related Methods
+    assertEquals("org.apache.cassandra.db.ConsistencyLevel.valueOf", analyzer.resolveMethodName("org.apache.cassandra.db.ConsistencyLevel.valueOf"))
+    assertEquals("org.apache.cassandra.repair.consistent.ConsistentSession$State.ordinal", 
+      analyzer.resolveMethodName("org.apache.cassandra.repair.consistent.ConsistentSession$State.ordinal"))
+
+    // Interface Methods
+    assertEquals("org.apache.cassandra.io.IVersionedSerializer.deserialize", 
+      analyzer.resolveMethodName("org.apache.cassandra.io.IVersionedSerializer.deserialize"))
+    assertEquals("io.github.jbellis.jvector.graph.GraphIndex.ramBytesUsed", 
+      analyzer.resolveMethodName("io.github.jbellis.jvector.graph.GraphIndex.ramBytesUsed"))
+    assertEquals("java.util.Comparator.comparing", analyzer.resolveMethodName("java.util.Comparator.comparing"))
+    assertEquals("org.apache.cassandra.dht.RingPosition.compareTo", analyzer.resolveMethodName("org.apache.cassandra.dht.RingPosition.compareTo"))
+    assertEquals("com.google.common.collect.SortedSetMultimap.values", analyzer.resolveMethodName("com.google.common.collect.SortedSetMultimap.values"))
+    
+    // Operator-related Methods
+    assertEquals("<operator>.assignmentDivision", analyzer.resolveMethodName("<operator>.assignmentDivision"))
+    assertEquals("<operator>.not", analyzer.resolveMethodName("<operator>.not"))
+    assertEquals("<operator>.plus", analyzer.resolveMethodName("<operator>.plus"))
+    assertEquals("<operators>.assignmentModulo", analyzer.resolveMethodName("<operators>.assignmentModulo"))
+    assertEquals("<operators>.assignmentLogicalShiftRight", analyzer.resolveMethodName("<operators>.assignmentLogicalShiftRight"))
   }
 
   /** Helper to get a prebuilt analyzer */

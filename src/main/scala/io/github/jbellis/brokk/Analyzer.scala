@@ -111,18 +111,17 @@ class Analyzer private (sourcePath: java.nio.file.Path, language: Language, cpgI
     //   org.apache.cassandra.db.DeletionPurger.shouldPurge:boolean(org.apache.cassandra.db.DeletionTime)
     // constructor of a nested class:
     //   org.apache.cassandra.db.Directories$SSTableLister.<init>:void(org.apache.cassandra.io.util.File[])
-    cpg.method.fullName(resolvedMethodName + ":.*").l
+    val escapedMethodName = Regex.quote(resolvedMethodName)
+    cpg.method.fullName(escapedMethodName + ":.*").l
   }
 
-  private def resolveMethodName(methodName: String): String = {
-    val javaLambdaPattern = """(.*)\.lambda\$(.*)\$.*""".r
-    methodName match {
-      case javaLambdaPattern(parent, method) => s"$parent.$method"
-      case _ =>
-        val parts = methodName.split("\\.")
-        val index = parts.indexWhere(_.contains("$"))
-        if (index > 0) parts.take(index).mkString(".") else methodName
-    }
+  private[brokk] def resolveMethodName(methodName: String): String = {
+    val segments = methodName.split("\\.")
+    // Find the first occurrence of a segment with $ followed by digits, e.g. "FutureCallback$0"
+    val idx = segments.indexWhere(_.matches(".*\\$\\d+$"))
+    // Keep everything before that index (or all if none found)
+    val relevant = if (idx == -1) segments else segments.take(idx)
+    relevant.mkString(".")
   }
 
   def getMethodSource(methodName: String): Option[String] = {

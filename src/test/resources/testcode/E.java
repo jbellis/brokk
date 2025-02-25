@@ -9,4 +9,8 @@ public class E {
     public void iMethod() {
         System.out.println("Instance method in E");
     }
+
+    public int dMethod() {
+        return D.field1;
+    }
 }
