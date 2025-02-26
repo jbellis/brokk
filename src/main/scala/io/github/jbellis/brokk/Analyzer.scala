@@ -605,6 +605,44 @@ class Analyzer private (sourcePath: java.nio.file.Path, language: Language, cpgI
   import scala.util.matching.Regex
 
   /**
+   * Searches for classes, methods, and fields matching a given regular expression pattern.
+   * 
+   * @param pattern A regular expression to match against class, method, and field names
+   * @return A list of CodeUnit objects representing the matches
+   */
+  def find(pattern: String): java.util.List[CodeUnit] = {
+    // Compile the regex pattern
+    val ciPattern = "(?i)" + pattern // case-insensitive
+    
+    // Find matching classes (typeDecl)
+    val matchingClasses = cpg.typeDecl
+      .name(ciPattern)
+      .fullName
+      .map(CodeUnit.cls)
+      .l
+      
+    // Find matching methods (by name, not fullName)
+    val matchingMethods = cpg.method
+      .nameNot("<.*>") // Filter out constructors and special methods
+      .name(ciPattern)
+      .map(m => CodeUnit.fn(resolveMethodName(chopColon(m.fullName))))
+      .l
+      
+    // Find matching fields
+    val matchingFields = cpg.member
+      .name(ciPattern)
+      .map(f => {
+        val className = f.typeDecl.fullName.head
+        CodeUnit.field(s"$className.${f.name}")
+      })
+      .l
+      
+    // Combine all results
+    val combined = matchingClasses ++ matchingMethods ++ matchingFields
+    CollectionConverters.asJava(combined)
+  }
+  
+  /**
    * For a given method node `m`, returns the calling method .fullName (with the suffix after `:` chopped off).
    * If `excludeSelfRefs` is true, we skip callers whose TypeDecl matches `m.typeDecl`.
    */

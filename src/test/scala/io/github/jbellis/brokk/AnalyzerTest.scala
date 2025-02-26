@@ -268,6 +268,31 @@ class AnalyzerTest {
   }
 
   @Test
+  def findTest(): Unit = {
+    val analyzer = getAnalyzer
+
+    // bare regexp testing
+    assertTrue("E".matches("(?i)e"))
+    assertTrue("E".matches("(?i).*e"))
+    assertTrue("e".matches("(?i)E"))
+
+    // Find classes matching "*E"
+    val classMatches = analyzer.find(".*e")
+    val classRefs = asScala(classMatches).filter(_.isClass).map(_.reference).toSet
+    assertEquals(Set("E", "UseE", "AnonymousUsage", "double", "java.lang.Runnable"), classRefs)
+
+    // Find methods matching "method*"
+    val methodMatches = analyzer.find("method.*1")
+    val methodRefs = asScala(methodMatches).map(_.reference).toSet
+    assertEquals(Set("A.method1", "D.methodD1"), methodRefs)
+
+    // Find fields matching "field.*"
+    val fieldMatches = analyzer.find(".*field.*")
+    val fieldRefs = asScala(fieldMatches).map(_.reference).toSet
+    assertEquals(Set("D.field1", "D.field2", "E.iField", "E.sField", "<operator>.fieldAccess"), fieldRefs)
+  }
+
+  @Test
   def getUsesClassWithStaticMembersTest(): Unit = {
     val analyzer = getAnalyzer
     val symbol = "E"
