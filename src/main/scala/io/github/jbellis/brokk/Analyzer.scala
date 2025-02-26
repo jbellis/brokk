@@ -548,47 +548,6 @@ class Analyzer private (sourcePath: java.nio.file.Path, language: Language, cpgI
   }
 
   /**
-   * For a given fully qualified field name like "com.foo.Bar.fieldName",
-   * find all distinct methods that reference that field.
-   */
-  private[brokk] def getReferrersOfField(fullyQualifiedFieldName: String): List[String] = {
-    val lastDot = fullyQualifiedFieldName.lastIndexOf('.')
-    if (lastDot < 0) {
-      throw new IllegalArgumentException(
-        s"Expected fully qualified field name, found '$fullyQualifiedFieldName'"
-      )
-    }
-    val classFullName = fullyQualifiedFieldName.substring(0, lastDot)
-    val rawFieldName  = fullyQualifiedFieldName.substring(lastDot + 1)
-
-    if (cpg.typeDecl.fullNameExact(classFullName).isEmpty) {
-      throw new IllegalArgumentException(
-        s"'$classFullName' not found in code graph"
-      )
-    }
-    // Ensure the field is really declared there
-    val fieldDecls = cpg.typeDecl.fullNameExact(classFullName).member.nameExact(rawFieldName).l
-    if (fieldDecls.isEmpty) {
-      throw new IllegalArgumentException(
-        s"Field '$rawFieldName' not found on '$classFullName'"
-      )
-    }
-
-    // Field usage is typically <operator>.fieldAccess, with argument(1) = class, argument(2) = field name
-    val calls = cpg.call
-      .nameExact("<operator>.fieldAccess")
-      .where(_.argument(1).typ.fullNameExact(classFullName))
-      .where(_.argument(2).codeExact(rawFieldName))
-      .method
-      .fullName
-      .distinct
-      .l
-
-    calls.map(chopColon)
-  }
-
-
-  /**
    * For a given methodName, find all distinct methods that call it.
    */
   private[brokk] def getCallersOfMethod(methodName: String): List[String] = {

@@ -166,13 +166,6 @@ class AnalyzerTest {
   }
 
   @Test
-  def getReferrersOfFieldTest(): Unit = {
-    val analyzer = getAnalyzer
-    val referrers = analyzer.getReferrersOfField("D.field1")
-    assert(referrers.contains("D.methodD2"))
-  }
-
-  @Test
   def getCallersOfMethodTest(): Unit = {
     val analyzer = getAnalyzer
     val callers = analyzer.getCallersOfMethod("A.method1")
