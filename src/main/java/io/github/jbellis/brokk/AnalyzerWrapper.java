@@ -5,12 +5,17 @@ import io.methvin.watcher.DirectoryChangeEvent;
 import io.methvin.watcher.DirectoryWatcher;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
@@ -49,6 +54,78 @@ public class AnalyzerWrapper {
 
         // build the initial Analyzer
         future = analyzerExecutor.submit(this::loadOrCreateAnalyzer);
+    }
+
+    @NotNull
+    static CodeWithSource processUsages(Analyzer analyzer, List<CodeUnit> uses) {
+        StringBuilder code = new StringBuilder();
+        Set<CodeUnit> sources = new HashSet<>();
+
+        // method uses
+        var methodUses = uses.stream()
+                .filter(CodeUnit::isFunction)
+                .sorted()
+                .toList();
+        // type uses
+        var typeUses = uses.stream()
+                .filter(CodeUnit::isClass)
+                .sorted()
+                .toList();
+
+        if (!methodUses.isEmpty()) {
+            Map<String, List<String>> groupedMethods = new LinkedHashMap<>();
+            for (var cu : methodUses) {
+                var source = analyzer.getMethodSource(cu.reference());
+                if (source.isDefined()) {
+                    String classname = ContextFragment.toClassname(cu.reference());
+                    groupedMethods.computeIfAbsent(classname, k -> new ArrayList<>()).add(source.get());
+                    sources.add(cu);
+                }
+            }
+            if (!groupedMethods.isEmpty()) {
+                code.append("Method uses:\n\n");
+                for (var entry : groupedMethods.entrySet()) {
+                    var methods = entry.getValue();
+                    if (!methods.isEmpty()) {
+                        code.append("In ").append(entry.getKey()).append(":\n\n");
+                        for (String ms : methods) {
+                            code.append(ms).append("\n\n");
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!typeUses.isEmpty()) {
+            code.append("Type uses:\n\n");
+            for (var cu : typeUses) {
+                var skeletonHeader = analyzer.getSkeletonHeader(cu.reference());
+                if (skeletonHeader.isEmpty()) {
+                    continue;
+                }
+                code.append(skeletonHeader.get()).append("\n");
+                sources.add(cu);
+            }
+        }
+
+        return new CodeWithSource(code, sources);
+    }
+
+    public static List<String> combinedPageRankFor(Analyzer analyzer, HashMap<String, Double> weightedSeeds) {
+        // do forward and reverse pagerank passes
+        var forwardResults = analyzer.getPagerank(weightedSeeds, 3 * Context.MAX_AUTO_CONTEXT_FILES, false);
+        var reverseResults = analyzer.getPagerank(weightedSeeds, 3 * Context.MAX_AUTO_CONTEXT_FILES, true);
+
+        // combine results by summing scores
+        var combinedScores = new HashMap<String, Double>();
+        forwardResults.forEach(pair -> combinedScores.put(pair._1, pair._2));
+        reverseResults.forEach(pair -> combinedScores.merge(pair._1, pair._2, Double::sum));
+
+        // sort by combined score
+        return combinedScores.entrySet().stream()
+            .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+            .map(Map.Entry::getKey)
+            .toList();
     }
 
     private void beginWatching(Path root) {
@@ -305,5 +382,8 @@ public class AnalyzerWrapper {
     private void startWatcher() {
         Thread watcherThread = new Thread(() -> beginWatching(root), "DirectoryWatcher");
         watcherThread.start();
+    }
+
+    public record CodeWithSource(StringBuilder code, Set<CodeUnit> sources) {
     }
 }

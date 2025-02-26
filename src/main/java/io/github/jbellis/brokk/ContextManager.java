@@ -20,7 +20,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -295,62 +294,14 @@ public class ContextManager implements IContextManager {
             return OperationResult.success("No uses found for " + identifier);
         }
 
-        StringBuilder code = new StringBuilder();
-        Set<CodeUnit> sources = new HashSet<>();
+        var result = AnalyzerWrapper.processUsages(getAnalyzer(), uses);
 
-        // method uses
-        var methodUses = uses.stream()
-                .filter(CodeUnit::isFunction)
-                .sorted()
-                .toList();
-        // type uses
-        var typeUses = uses.stream()
-                .filter(CodeUnit::isClass)
-                .sorted()
-                .toList();
-
-        if (!methodUses.isEmpty()) {
-            Map<String, List<String>> groupedMethods = new LinkedHashMap<>();
-            for (var cu : methodUses) {
-                var source = getAnalyzer().getMethodSource(cu.reference());
-                if (source.isDefined()) {
-                    String classname = ContextFragment.toClassname(cu.reference());
-                    groupedMethods.computeIfAbsent(classname, k -> new ArrayList<>()).add(source.get());
-                    sources.add(cu);
-                }
-            }
-            if (!groupedMethods.isEmpty()) {
-                code.append("Method uses:\n\n");
-                for (var entry : groupedMethods.entrySet()) {
-                    var methods = entry.getValue();
-                    if (!methods.isEmpty()) {
-                        code.append("In ").append(entry.getKey()).append(":\n\n");
-                        for (String ms : methods) {
-                            code.append(ms).append("\n\n");
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!typeUses.isEmpty()) {
-            code.append("Type uses:\n\n");
-            for (var cu : typeUses) {
-                var skeletonHeader = getAnalyzer().getSkeletonHeader(cu.reference());
-                if (skeletonHeader.isEmpty()) {
-                    continue;
-                }
-                code.append(skeletonHeader.get()).append("\n");
-                sources.add(cu);
-            }
-        }
-
-        if (code.isEmpty()) {
+        if (result.code().isEmpty()) {
             return OperationResult.success("No relevant uses found for " + identifier);
         }
 
-        String combined = code.toString();
-        pushContext(ctx -> ctx.addUsageFragment(identifier, sources, combined));
+        String combined = result.code().toString();
+        pushContext(ctx -> ctx.addUsageFragment(identifier, result.sources(), combined));
         return OperationResult.success();
     }
 
@@ -389,16 +340,7 @@ public class ContextManager implements IContextManager {
 
     public boolean summarizeClasses(Set<CodeUnit> classes) {
         // coalesce inner classes
-        var coalescedUnits = classes.stream()
-                .filter(cu -> {
-                    var name = cu.reference();
-                    if (!name.contains("$")) {
-                        return true;
-                    }
-                    String parent = name.substring(0, name.indexOf('$'));
-                    return !classes.stream().map(CodeUnit::reference).collect(Collectors.toSet()).contains(parent);
-                })
-                .collect(Collectors.toSet());
+        var coalescedUnits = coalesceInnerClasses(classes);
 
         StringBuilder combined = new StringBuilder();
         List<String> shortNames = new ArrayList<>();
@@ -418,6 +360,20 @@ public class ContextManager implements IContextManager {
         }
         pushContext(ctx -> ctx.addSkeletonFragment(shortNames, coalescedUnits, combined.toString()));
         return true;
+    }
+
+    @NotNull
+    private static Set<CodeUnit> coalesceInnerClasses(Set<CodeUnit> classes) {
+        return classes.stream()
+                .filter(cu -> {
+                    var name = cu.reference();
+                    if (!name.contains("$")) {
+                        return true;
+                    }
+                    String parent = name.substring(0, name.indexOf('$'));
+                    return !classes.stream().map(CodeUnit::reference).collect(Collectors.toSet()).contains(parent);
+                })
+                .collect(Collectors.toSet());
     }
 
     /** Set the auto context size */

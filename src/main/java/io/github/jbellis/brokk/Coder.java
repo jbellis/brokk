@@ -4,6 +4,7 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.StreamingResponseHandler;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.output.Response;
 import io.github.jbellis.brokk.prompts.DefaultPrompts;
 import org.apache.logging.log4j.LogManager;
@@ -77,7 +78,7 @@ public class Coder {
 
             // Actually send the message to the LLM and get the response
             logger.debug("Sending to LLM [only last message shown]: {}", requestMsg);
-            String llmResponse = sendStreaming(messages);
+            String llmResponse = sendStreaming(messages, true);
             logger.debug("response:\n{}", llmResponse);
             if (llmResponse == null) {
                 // Interrupted or error.  sendMessage is responsible for giving feedback to user
@@ -173,7 +174,7 @@ public class Coder {
      * Actually sends a user query to the LLM (with streaming),
      * writes to conversation history, etc.
      */
-    public String sendStreaming(List<ChatMessage> messages) {
+    public String sendStreaming(List<ChatMessage> messages, boolean echo) {
         int userLineCount = messages.stream()
                 .mapToInt(m -> ContextManager.getText(m).split("\n", -1).length).sum();
 
@@ -205,14 +206,18 @@ public class Coder {
             public void onNext(String token) {
                 ifNotCancelled.accept(() -> {
                     currentResponse.append(token);
-                    io.llmOutput(token);
+                    if (echo) {
+                        io.llmOutput(token);
+                    }
                 });
             }
 
             @Override
             public void onComplete(Response<AiMessage> response) {
                 ifNotCancelled.accept(() -> {
-                    io.llmOutput("\n");
+                    if (echo) {
+                        io.llmOutput("\n");
+                    }
                     writeToHistory("Response", currentResponse.toString());
                     if (response.tokenUsage() != null) {
                         totalInputTokens += response.tokenUsage().inputTokenCount();

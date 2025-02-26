@@ -147,6 +147,13 @@ public class Commands {
                         args -> List.of()
                 ),
                 new Command(
+                        "search",
+                        "Perform agentic code search for a given query",
+                        this::cmdSearch,
+                        "<query>",
+                        args -> List.of()
+                ),
+                new Command(
                         "undo",
                         "Undo last context changes (/add, /read, /drop, /clear)",
                         args -> cmdUndo(),
@@ -203,6 +210,24 @@ public class Commands {
                         args -> List.of()
                 )
         ));
+    }
+
+    private OperationResult cmdSearch(String query) {
+        if (query.isBlank()) {
+            return OperationResult.error("Please provide a search query");
+        }
+
+        io.toolOutput("Starting agent-based code search...");
+
+        // Create and run the search agent
+        SearchAgent agent = new SearchAgent(query, cm, coder, io);
+        Set<CodeUnit> results = agent.execute();
+
+        if (results.isEmpty()) {
+            return OperationResult.error("No relevant code found for query: " + query);
+        }
+
+        return OperationResult.success("Search complete - " + results.size() + " relevant code units found");
     }
 
     /**
@@ -470,7 +495,7 @@ public class Commands {
         var messages = AskPrompts.instance.collectMessages(cm);
         messages.add(new UserMessage("<question>\n%s\n</question>".formatted(input.trim())));
 
-        String response = coder.sendStreaming(messages);
+        String response = coder.sendStreaming(messages, true);
         if (response != null) {
             cm.addToHistory(List.of(messages.getLast(), new AiMessage(response)));
         }
@@ -721,7 +746,7 @@ public class Commands {
                 """.formatted(msg.trim()).stripIndent();
         messages.add(new UserMessage(st));
 
-        String response = coder.sendStreaming(messages);
+        String response = coder.sendStreaming(messages, true);
         if (response != null) {
             cm.addToHistory(List.of(messages.getLast(), new AiMessage(response)));
             var missing = cm.findMissingFileMentions(response);

@@ -5,7 +5,6 @@ import dev.langchain4j.data.message.ChatMessage;
 import io.github.jbellis.brokk.ContextFragment.AutoContext;
 import io.github.jbellis.brokk.ContextFragment.SkeletonFragment;
 import io.github.jbellis.brokk.ContextFragment.StacktraceFragment;
-import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -210,7 +209,7 @@ public class Context {
             return AutoContext.EMPTY;
         }
 
-        var pagerankResults = combinedPageRankFor(analyzer, weightedSeeds);
+        var pagerankResults = AnalyzerWrapper.combinedPageRankFor(analyzer.get(), weightedSeeds);
 
         // build skeleton lines
         var skeletons = new ArrayList<SkeletonFragment>();
@@ -235,23 +234,6 @@ public class Context {
         }
 
         return new AutoContext(skeletons);
-    }
-
-    public static List<String> combinedPageRankFor(AnalyzerWrapper analyzer, HashMap<String, Double> weightedSeeds) {
-        // do forward and reverse pagerank passes
-        var forwardResults = analyzer.get().getPagerank(weightedSeeds, 3 * MAX_AUTO_CONTEXT_FILES, false);
-        var reverseResults = analyzer.get().getPagerank(weightedSeeds, 3 * MAX_AUTO_CONTEXT_FILES, true);
-
-        // combine results by summing scores
-        var combinedScores = new HashMap<String, Double>();
-        forwardResults.forEach(pair -> combinedScores.put(pair._1, pair._2));
-        reverseResults.forEach(pair -> combinedScores.merge(pair._1, pair._2, Double::sum));
-
-        // sort by combined score
-        return combinedScores.entrySet().stream()
-            .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
-            .map(Map.Entry::getKey)
-            .toList();
     }
 
     // ---------------------------------------------------------

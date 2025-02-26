@@ -1,0 +1,739 @@
+package io.github.jbellis.brokk;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.UserMessage;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+/**
+ * SearchAgent implements an iterative, agentic approach to code search.
+ * It uses multiple steps of searching and reasoning to find code elements relevant to a query.
+ */
+public class SearchAgent {
+    private final Logger logger = LogManager.getLogger(SearchAgent.class);
+    private static final int TOKEN_BUDGET = 64000; // 64K context window for models like R1
+    private static final int MAX_STEPS = 10;
+    private static final int MAX_SUB_QUERIES = 3;
+
+    private final Analyzer analyzer;
+    private final ContextManager contextManager;
+    private final Coder coder;
+    private final ConsoleIO io;
+
+    // Budget and action control state
+    private int badAttempts = 0;
+    private static final int MAX_BAD_ATTEMPTS = 3;
+    private boolean allowReflect = true;
+    private boolean allowSearch = true;
+    private boolean allowSkeleton = true;
+    private boolean allowMethod = true;
+    private boolean allowPagerank = true;
+    private boolean allowAnswer = true;
+    
+    /**
+     * Enum representing possible search actions.
+     */
+    public enum Action {
+        DEFINITIONS("definitions", SearchAgent::executeDefinitionsSearch),
+        USAGES("usages", SearchAgent::executeUsagesSearch),
+        PAGERANK("pagerank", SearchAgent::executePageRankSearch),
+        SKELETON("skeleton", SearchAgent::executeSkeletonSearch),
+        METHOD("method", SearchAgent::executeMethodSearch),
+        REFLECT("reflect", SearchAgent::executeReflect),
+        ANSWER("answer", SearchAgent::executeAnswer);
+
+        private final String value;
+        private final BiFunction<SearchAgent, BoundAction, String> executor;
+
+        Action(String value, BiFunction<SearchAgent, BoundAction, String> executor) {
+            this.value = value;
+            this.executor = executor;
+        }
+
+        public String getValue() {
+                return value;
+        }
+
+        public BiFunction<SearchAgent, BoundAction, String> getExecutor() {
+            return executor;
+        }
+
+        public static Action fromString(String text) {
+            for (Action action : Action.values()) {
+                if (action.value.equalsIgnoreCase(text)) {
+                return action;
+            }
+        }
+        return REFLECT; // Default to reflect if unknown
+    }
+}
+
+    // Search state
+    private final String originalQuery;
+    private final Deque<String> gapQueries = new ArrayDeque<>();
+    private final List<String> processedQueries = new ArrayList<>();
+    private final List<BoundAction> actionHistory = new ArrayList<>();
+    private final Map<String, String> answeredQueries = new HashMap<>();
+
+    private int currentTokenUsage = 0;
+    private int totalSteps = 0;
+
+    public SearchAgent(String query, ContextManager contextManager, Coder coder, ConsoleIO io) {
+        this.originalQuery = query;
+        this.contextManager = contextManager;
+        this.analyzer = contextManager.getAnalyzer();
+        this.coder = coder;
+        this.io = io;
+        this.gapQueries.add(query); // Start with the original query
+    }
+
+    private String currentQuery() {
+        return gapQueries.peek();
+    }
+
+    /**
+     * Execute the search process, iterating through queries until completion.
+     * @return The final set of discovered code units
+     */
+    public Set<CodeUnit> execute() {
+        io.toolOutput("Starting agentic code search for: " + originalQuery);
+        gapQueries.add(originalQuery); // Initialize with original query
+
+        while (totalSteps < MAX_STEPS && currentTokenUsage < TOKEN_BUDGET && !gapQueries.isEmpty()) {
+            totalSteps++;
+            processedQueries.add(currentQuery());
+
+            io.toolOutput("\nStep " + totalSteps + " | Exploring: " + currentQuery());
+            io.toolOutput("Current budget usage: " + String.format("%.1f%%", (currentTokenUsage * 100.0 / TOKEN_BUDGET)));
+
+            // Reset action controls for this step
+            resetActionControls();
+            
+            // Special handling based on previous steps
+            updateActionControlsBasedOnContext();
+
+            // Decide what action to take for this query
+            BoundAction step = determineNextAction();
+            io.toolOutput("Selected action: " + step);
+
+            // Execute the action
+            var actionWithResult = executeAction(step);
+            io.toolOutput("Result: " + actionWithResult.result());
+
+            // Track success/failure for action control
+            // TODO
+//            if (!success) {
+//                badAttempts++;
+//                io.toolOutput("Bad attempt #" + badAttempts + " - adjusting strategy");
+//
+//                // Disable the failed action for next step
+//                disableAction(step.action());
+//            } else {
+//                badAttempts = 0; // Reset on success
+//            }
+
+            // Debug output
+            io.toolOutput("Query queue: " + gapQueries);
+
+            // Check if we should terminate
+            if (gapQueries.isEmpty()) {
+                io.toolOutput("Search complete after answering original query");
+                break;
+            }
+
+            // Add the step to the history
+            actionHistory.add(actionWithResult);
+        }
+
+        return Set.of(); // TODO
+    }
+
+    /**
+     * Reset action controls for each search step.
+     */
+    private void resetActionControls() {
+        allowReflect = true;
+        allowSearch = true;
+        allowSkeleton = true;
+        allowMethod = true;
+        allowPagerank = true;
+        allowAnswer = true;
+    }
+
+    /**
+     * Update action controls based on current search context.
+     */
+    private void updateActionControlsBasedOnContext() {
+        // If we just started, encourage reflection
+        if (actionHistory.isEmpty() && currentQuery().equals(originalQuery)) {
+            allowAnswer = false; // Don't allow finishing immediately
+        }
+
+        allowReflect = actionHistory.isEmpty() || actionHistory.getLast().action() != Action.REFLECT;
+
+        // TODO more context-based control
+    }
+
+    /**
+     * Determine the next action to take for the current query.
+     */
+    private BoundAction determineNextAction() {
+        List<ChatMessage> messages = buildPrompt();
+
+        // Track token usage for the prompt
+        int promptTokens = estimateTokenCount(messages);
+        currentTokenUsage += promptTokens;
+
+        // Ask LLM for next action
+        io.toolOutput("Determining next action for: " + currentQuery());
+        String response = coder.sendStreaming(messages, false);
+        currentTokenUsage += estimateTokenCount(response);
+
+        // Parse response
+        return parseResponse(response);
+    }
+
+    /**
+     * Build the system prompt for determining the next action.
+     */
+    private List<ChatMessage> buildPrompt() {
+        List<ChatMessage> messages = new ArrayList<>();
+
+        // System prompt outlining capabilities
+        StringBuilder systemPrompt = new StringBuilder();
+        systemPrompt.append("""
+        You are a code search agent that helps find relevant code based on queries.
+        Even if not explicitly stated, the query should be understood to refer to the current codebase,
+        and not a general-knowledge question.
+        Your goal is to find code definitions, implementations, and usages that answer the user's query.
+        You have several ways to analyze code:
+        """.stripIndent());
+
+        systemPrompt.append("<actions>\n");
+
+        if (allowSearch) {
+            systemPrompt.append("""
+            <action-definitions>
+            Search for class/method/field definitions using a regular expression pattern.
+             - You can only search for one pattern at a time.
+             - You are searching for code symbols so you know that e.g. they never contain whitespace
+             - The pattern is implicitly surrounded by ^ and $ as bookends; do NOT include these in your pattern
+             - OTOH you *will* need to use explicit wildcarding to match substrings
+             - The pattern is also implicitly case-insensitive.
+            Examples:
+             - get.*Value // Matches methods like getValue, getStringValue, etc.
+             - [a-z]*DAO // Matches DAO classes like UserDAO, ProductDAO
+             - Abstract.* // Matches classes with Abstract prefix
+             - .*Exception // Matches all exception classes
+             - .*vec.* // Substring search for `vec`
+            </action-definitions>
+            """.stripIndent());
+            systemPrompt.append("""
+            <action-usages>
+            Find where a symbol is used in code
+             - Takes a fully-qualified symbol name (package name, class name, optional member name)
+            </action-usages>
+            """.stripIndent());
+        }
+        if (allowPagerank) {
+            // TODO
+            // systemPrompt.append("<action-pagerank>Find related code elements using PageRank</action-pagerank>\n");
+        }
+        if (allowSkeleton) {
+            systemPrompt.append("""
+            <action-skeleton>
+            Get an overview of a class's contents, including fields and method signatures.
+             - Takes a fully-qualified class name
+            </action-skeleton>
+            """.stripIndent());
+        }
+        if (allowMethod) {
+            systemPrompt.append("""
+            <action-method>
+            Get the source code of a method
+             - Takes a fully-qualified method name (package name, class name, method name)
+            </action-method>
+            """.stripIndent());
+        }
+        if (allowReflect) {
+            systemPrompt.append("<action-reflect>Break down the query into sub-questions</action-reflect>\n");
+        }
+        if (allowAnswer) {
+            systemPrompt.append("""
+            <action-answer>
+            Provide an answer to the current query and remove it from the queue.
+             - Takes the answer to the current query as a string.  Answers should include relevant source
+               code snippets as well as an explanation.
+            </action-answer>
+            """.stripIndent());
+        }
+
+        systemPrompt.append("""
+        The code you are analyzing is *stable*.  You will NOT get different results by re-running the same action.
+        If an action is in your history already, you do not need to repeat it unless you have new information.
+        """.stripIndent());
+        
+        systemPrompt.append("</actions>\n\n");
+
+        // Add beast mode if we're out of time or we've had too many bad attempts
+        if (currentTokenUsage > 0.9 * TOKEN_BUDGET || badAttempts >= MAX_BAD_ATTEMPTS) {
+            gapQueries.clear();
+            gapQueries.add(originalQuery);
+
+            systemPrompt.append("""
+            <beast-mode>
+            🔥 MAXIMUM PRIORITY OVERRIDE! 🔥
+            - YOU MUST FINALIZE RESULTS NOW WITH AVAILABLE INFORMATION
+            - USE DISCOVERED CODE UNITS TO PROVIDE BEST POSSIBLE ANSWER
+            - FAILURE IS NOT AN OPTION
+            </beast-mode>
+            """.stripIndent());
+            // Force finalize only
+            allowAnswer = true;
+            allowReflect = false;
+            allowSearch = false;
+            allowSkeleton = false;
+            allowMethod = false;
+        }
+
+        systemPrompt.append("""
+        Respond with only ONE action in JSON format like this. Remember that symbols, class names, and method names must be fully-qualified.
+        {
+          "action": "[one of: definitions, usages, pagerank, skeleton, method, reflect, answer]",
+          "pattern": "[pattern to search for, if applicable]",
+          "symbol": "[specific symbol to find, if applicable]",
+          "className": "[class name, if applicable]",
+          "methodName": "[method name, if applicable]",
+          "subQueries": ["[sub-query1]", "[sub-query2]", ...],
+          "reasoning": "[your thought process]"
+        }
+        """.stripIndent());
+
+        // Add information about current search state
+        if (!actionHistory.isEmpty()) {
+            systemPrompt.append("\n<action-history>\n");
+            for (int i = 0; i < actionHistory.size(); i++) {
+                var step = actionHistory.get(i);
+                systemPrompt.append(String.format("Step %d: %s\n", i + 1, step));
+            }
+            systemPrompt.append("</action-history>\n");
+        }
+
+        // Add knowledge gathered during search
+        if (!answeredQueries.isEmpty()) {
+            systemPrompt.append("\n<knowledge>\n");
+            answeredQueries.forEach((k, v) -> systemPrompt.append(k + ": " + v + "\n"));
+            systemPrompt.append("</knowledge>\n");
+        }
+
+        // Add information about current query
+        systemPrompt.append("\n<current-query>\n");
+        systemPrompt.append(currentQuery());
+        systemPrompt.append("\n</current-query>\n");
+
+        // Remind about the original query
+        systemPrompt.append("\n<original-query>\n");
+        systemPrompt.append(originalQuery);
+        systemPrompt.append("\n</original-query>\n");
+
+        messages.add(new SystemMessage(systemPrompt.toString()));
+        messages.add(new UserMessage("Determine the next action to take to search for code related to: " + currentQuery()));
+
+        return messages;
+    }
+
+    /**
+     * Parse the LLM response into a SearchStep object.
+     */
+    private BoundAction parseResponse(String response) {
+        // Default values in case parsing fails
+        Action action = Action.REFLECT;
+        Map<String, Object> parameters = new HashMap<>();
+
+        try {
+            // Attempt to find JSON content
+            int startIndex = response.indexOf("{");
+            int endIndex = response.lastIndexOf("}");
+
+            if (startIndex >= 0 && endIndex > startIndex) {
+                String jsonContent = response.substring(startIndex, endIndex + 1);
+
+                // Parse JSON using Jackson
+                ObjectMapper mapper = new ObjectMapper();
+                var parsed = mapper.readValue(jsonContent, new TypeReference<Map<String, Object>>() {});
+
+                String actionStr = getStringOrDefault(parsed, "action", "reflect");
+                action = Action.fromString(actionStr);
+
+                // Extract relevant parameters based on action type
+                switch (action) {
+                    case DEFINITIONS -> parameters.put("pattern", getStringOrDefault(parsed, "pattern", ""));
+                    case USAGES -> parameters.put("symbol", getStringOrDefault(parsed, "symbol", ""));
+                    case SKELETON -> parameters.put("className", getStringOrDefault(parsed, "className", ""));
+                    case METHOD -> parameters.put("methodName", getStringOrDefault(parsed, "methodName", ""));
+                    case ANSWER -> parameters.put("answer", getStringOrDefault(parsed, "answer", ""));
+                    case REFLECT -> {
+                        // Handle subQueries - convert to JSON string
+                        List<String> subQueries = new ArrayList<>();
+                        Object subQueriesObj = parsed.get("subQueries");
+                        if (subQueriesObj instanceof List) {
+                            @SuppressWarnings("unchecked")
+                            List<Object> subQueriesList = (List<Object>) subQueriesObj;
+                            if (!subQueriesList.isEmpty()) {
+                                subQueries = subQueriesList.stream()
+                                        .filter(Objects::nonNull)
+                                        .map(Object::toString)
+                                        .filter(s -> !s.trim().isEmpty())
+                                        .collect(Collectors.toList());
+                            }
+                        }
+
+                        try {
+                            String subQueriesJson = mapper.writeValueAsString(subQueries);
+                            parameters.put("subQueries", subQueriesJson);
+                        } catch (JsonProcessingException e) {
+                            logger.error("Failed to serialize subQueries to JSON", e);
+                            parameters.put("subQueries", "[]");
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // TODO add the bad response to context
+            logger.error("Failed to parse response: " + e.getMessage(), e);
+            io.toolError("Failed to parse response: " + e.getMessage());
+        }
+
+        // Convert parameters map to a JSON string
+        String parameterJson = "{}";
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            parameterJson = mapper.writeValueAsString(parameters);
+        } catch (JsonProcessingException e) {
+            logger.error("Failed to serialize parameters to JSON", e);
+        }
+
+        return new BoundAction(action, parameterJson, null);
+    }
+
+    /**
+     * Execute the selected action for the current step.
+     */
+    private BoundAction executeAction(BoundAction step) {
+        try {
+            String result = step.execute();
+            return step.withResult(result);
+        } catch (Exception e) {
+            io.toolError("Error executing action: " + e.getMessage());
+            logger.error("Action execution error", e);
+            return step.withResult("Error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Search for definitions matching a pattern.
+     */
+    private String executeDefinitionsSearch(BoundAction step) {
+        String pattern = step.getParameterValue("pattern");
+        if (pattern == null || pattern.isBlank()) {
+            return "Cannot search definitions: pattern is empty";
+        }
+
+        var definitions = analyzer.getDefinitions(pattern);
+        if (definitions.isEmpty()) {
+            return "No definitions found for pattern: " + pattern;
+        }
+
+        io.toolOutput("Raw definitions: " + definitions);
+
+        // Ask coder to determine which definitions are potentially relevant
+        StringBuilder definitionsStr = new StringBuilder();
+        for (CodeUnit definition : definitions) {
+            definitionsStr.append(definition.reference()).append("\n");
+        }
+
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(new SystemMessage("You are helping evaluate which code definitions are relevant to a user query. " +
+                                               "Review the list of definitions and select the ones most relevant to the query. " +
+                                               "Include your reasoning for each selection."));
+        messages.add(new UserMessage("Query: " + currentQuery() + "\n\nDefinitions found:\n" + definitionsStr));
+
+        String response = coder.sendMessage("Evaluating relevant definitions", messages);
+        currentTokenUsage += estimateTokenCount(response);
+
+        // Extract mentions of the definitions from the response
+        Set<String> relevantDefinitions = new HashSet<>();
+        for (CodeUnit definition : definitions) {
+            String ref = definition.reference();
+            // Look for the reference with word boundaries to avoid partial matches
+            var p = Pattern.compile("\\b" + Pattern.quote(ref) + "\\b");
+            var matcher = p.matcher(response);
+            if (matcher.find()) {
+                relevantDefinitions.add(ref);
+            }
+        }
+
+        // Include the matches in the result
+        var relevant = new ArrayList<String>();
+
+        // Add the relevant definitions first
+        for (CodeUnit definition : definitions) {
+            if (relevantDefinitions.contains(definition.reference())) {
+                relevant.add(definition.reference());
+            }
+        }
+
+        return "Relevant symbols: " + String.join(", ", relevant);
+    }
+
+    /**
+     * Search for usages of a symbol.
+     */
+    private String executeUsagesSearch(BoundAction step) {
+        String symbol = step.getParameterValue("symbol");
+        if (symbol == null || symbol.isBlank()) {
+            return "Cannot search usages: symbol is empty";
+        }
+
+        List<CodeUnit> uses = analyzer.getUses(symbol);
+        if (uses.isEmpty()) {
+            return "No usages found for: " + symbol;
+        }
+
+        // Process the usages and format the result
+        String processedUsages = AnalyzerWrapper.processUsages(analyzer, uses).toString();
+        return "Found " + uses.size() + " usages of " + symbol + ":\n\n" + processedUsages;
+    }
+
+    /**
+     * Find related code using PageRank.
+     */
+    private String executePageRankSearch(BoundAction step) {
+        // Create map of seeds from discovered units
+        HashMap<String, Double> weightedSeeds = new HashMap<>();
+        // TODO: Once we track discovered units, add them to the weightedSeeds map with weights
+
+        var pageRankResults = analyzer.getPagerank(weightedSeeds, 10, false);
+
+        if (pageRankResults.isEmpty()) {
+            return "No related code found via PageRank";
+        }
+
+        StringBuilder result = new StringBuilder();
+        result.append("Found ").append(pageRankResults.size()).append(" related code units via PageRank:\n\n");
+
+        AtomicInteger counter = new AtomicInteger(0);
+        pageRankResults.stream()
+                .limit(10)
+                .forEach(pair -> result.append(counter.incrementAndGet())
+                                      .append(". ")
+                                      .append(pair._1)
+                                      .append("\n"));
+
+        return result.toString();
+    }
+
+    /**
+     * Get the skeleton (structure) of a class.
+     */
+    private String executeSkeletonSearch(BoundAction step) {
+        String className = step.getParameterValue("className");
+        if (className == null || className.isBlank()) {
+            return "Cannot get skeleton: class name is empty";
+        }
+
+        var skeletonOpt = analyzer.getSkeleton(className);
+        if (skeletonOpt.isEmpty()) {
+            return "No skeleton found for class: " + className;
+        }
+
+        return skeletonOpt.get();
+    }
+
+    /**
+     * Get the source code of a method.
+     */
+    private String executeMethodSearch(BoundAction step) {
+        String methodName = step.getParameterValue("methodName");
+        if (methodName == null || methodName.isBlank()) {
+            return "Cannot get method source: method name is empty";
+        }
+
+        var methodSourceOpt = analyzer.getMethodSource(methodName);
+        if (methodSourceOpt.isEmpty()) {
+            return "No source found for method: " + methodName;
+        }
+
+        return methodSourceOpt.get();
+    }
+
+    /**
+     * Generate sub-queries to further explore the search space.
+     */
+    private String executeReflect(BoundAction step) {
+        List<String> subQueries = getSubQueriesFromJson(step.getParameterValue("subQueries"));
+        if (subQueries.isEmpty()) {
+            return "No sub-queries generated";
+        }
+
+        // Add the sub-queries to the queue
+        int i = 0;
+        for (String query : subQueries) {
+            // TODO semantic deduplications
+            if (!processedQueries.contains(query) && !gapQueries.contains(query)) {
+                gapQueries.offerFirst(query);
+                io.toolOutput("Adding new query: " + query);
+                i++;
+            } else {
+                io.toolOutput("Skipping duplicate query: " + query);
+            }
+            if (i >= MAX_SUB_QUERIES) {
+                break;
+            }
+        }
+
+        return String.join(", ", subQueries);
+    }
+
+    /**
+     * Answer the current query and remove it from the queue.
+     */
+    private String executeAnswer(BoundAction step) {
+        String answer = step.getParameterValue("answer");
+        assert answer != null && !answer.isBlank();
+
+        String currentQuery = gapQueries.poll();
+        io.toolOutput("Answering query: " + currentQuery);
+        io.toolOutput("Answer: " + answer);
+
+        // Store the answer in our collection
+        answeredQueries.put(currentQuery, answer);
+
+        return answer;
+    }
+
+    /**
+     * Estimate token count of messages or text.
+     * This is a very rough approximation - 1 token ~= 4 characters in English.
+     */
+    private int estimateTokenCount(List<ChatMessage> messages) {
+        int total = 0;
+        for (ChatMessage message : messages) {
+            if (message instanceof SystemMessage) {
+                total += estimateTokenCount(((SystemMessage) message).text());
+            } else if (message instanceof UserMessage) {
+                total += estimateTokenCount(((UserMessage) message).text());
+            } else if (message instanceof AiMessage) {
+                total += estimateTokenCount(((AiMessage) message).text());
+            }
+        }
+        return total;
+    }
+
+    private int estimateTokenCount(String text) {
+        return text.length() / 4;
+    }
+
+    private String getStringOrDefault(Map<String, Object> map, String key, String defaultValue) {
+        Object value = map.get(key);
+        return value != null ? value.toString() : defaultValue;
+    }
+
+    /**
+     * Helper method to parse subQueries from JSON string.
+     */
+    private List<String> getSubQueriesFromJson(String subQueriesJson) {
+        if (subQueriesJson == null || subQueriesJson.isBlank()) {
+            return new ArrayList<>();
+        }
+        
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            return mapper.readValue(subQueriesJson, new TypeReference<>() {});
+        } catch (Exception e) {
+            logger.error("Failed to parse subQueries JSON", e);
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Represents a single step in the search process with bound parameters.
+     */
+    public class BoundAction {
+        private final Action action;
+        private final String parametersJson;
+        private final String result;
+
+        public BoundAction(Action action, String parametersJson, String result) {
+            this.action = action;
+            this.parametersJson = parametersJson;
+            this.result = result;
+        }
+
+        public Action action() {
+            return action;
+        }
+
+        public String parametersJson() {
+            return parametersJson;
+        }
+
+        public String result() {
+            return result;
+        }
+
+        /**
+         * Execute this action and return the result.
+         */
+        public String execute() {
+            return action.getExecutor().apply(SearchAgent.this, this);
+        }
+
+        @Override
+        public String toString() {
+            return "SearchStep{" +
+                    "action=" + action +
+                    ", parametersJson='" + parametersJson + '\'' +
+                    (result != null ? ", result='" + result + '\'' : "") +
+                    '}';
+        }
+
+        public BoundAction withResult(String result) {
+            return new BoundAction(action, parametersJson, result);
+        }
+
+        /**
+         * Helper method to get a parametersJson value from the SearchStep's parametersJson JSON.
+         */
+        private String getParameterValue(String paramName) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                var params = mapper.readValue(parametersJson(), new TypeReference<Map<String, Object>>() {});
+                Object value = params.get(paramName);
+                return value != null ? value.toString() : null;
+            } catch (Exception e) {
+                SearchAgent.this.logger.error("Failed to get parametersJson " + paramName, e);
+                return null;
+            }
+        }
+    }
+}

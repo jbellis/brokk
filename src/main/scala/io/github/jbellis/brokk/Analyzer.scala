@@ -572,30 +572,39 @@ class Analyzer private (sourcePath: java.nio.file.Path, language: Language, cpgI
   def getDefinitions(pattern: String): java.util.List[CodeUnit] = {
     // Compile the regex pattern
     val ciPattern = "(?i)" + pattern // case-insensitive
-    
-    // Find matching classes (typeDecl)
+
+    // Find matching classes (typeDecl) that are in the project
     val matchingClasses = cpg.typeDecl
       .name(ciPattern)
       .fullName
+      .filter(isClassInProject)
       .map(CodeUnit.cls)
       .l
-      
-    // Find matching methods (by name, not fullName)
+
+    // Find matching methods (by name, not fullName) that belong to project classes
     val matchingMethods = cpg.method
       .nameNot("<.*>") // Filter out constructors and special methods
       .name(ciPattern)
+      .filter(m => {
+        val typeNameOpt = m.typeDecl.fullName.headOption
+        typeNameOpt.exists(typeName => isClassInProject(typeName))
+      })
       .map(m => CodeUnit.fn(resolveMethodName(chopColon(m.fullName))))
       .l
-      
-    // Find matching fields
+
+    // Find matching fields that belong to project classes
     val matchingFields = cpg.member
       .name(ciPattern)
+      .filter(f => {
+        val typeNameOpt = f.typeDecl.fullName.headOption
+        typeNameOpt.exists(typeName => isClassInProject(typeName.toString))
+      })
       .map(f => {
-        val className = f.typeDecl.fullName.head
+        val className = f.typeDecl.fullName.headOption.getOrElse("").toString
         CodeUnit.field(s"$className.${f.name}")
       })
       .l
-      
+
     // Combine all results
     val combined = matchingClasses ++ matchingMethods ++ matchingFields
     CollectionConverters.asJava(combined)
