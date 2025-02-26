@@ -540,7 +540,7 @@ public class Commands {
                     combined.append(ContextManager.getText(m)).append("\n\n");
                 }
             });
-            content = combined.toString();
+            content = combined + "\n<goal>\n\n</goal>";
         } else {
             // find matching fragment
             var fragment = cm.currentContext().toFragment(args.trim());
