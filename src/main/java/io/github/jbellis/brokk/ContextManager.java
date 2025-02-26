@@ -416,7 +416,7 @@ public class ContextManager implements IContextManager {
         if (combined.isEmpty()) {
             return false;
         }
-        pushContext(ctx -> ctx.addSkeletonFragment(shortNames, coalescedUnits, toString()));
+        pushContext(ctx -> ctx.addSkeletonFragment(shortNames, coalescedUnits, combined.toString()));
         return true;
     }
 
