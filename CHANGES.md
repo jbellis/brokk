@@ -1,3 +1,8 @@
+0.3.0
+
+## Fixes
+- Corner cases of /usages
+
 # 0.2.1
 
 ## Features

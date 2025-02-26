@@ -128,9 +128,11 @@ class Analyzer private (sourcePath: java.nio.file.Path, language: Language, cpgI
     val resolvedMethodName = resolveMethodName(methodName)
     val methods = methodsFromName(resolvedMethodName)
 
+    // static constructors are missing filenames and start/end lines, not much we can do about it
+    // https://github.com/joernio/joern/issues/5328
     val sources = methods.flatMap { method =>
       for {
-        file <- Option(toFile(method.filename)) // TODO log empty filenames
+        file <- Option(toFile(method.filename))
         startLine <- method.lineNumber
         endLine <- method.lineNumberEnd
       } yield {
