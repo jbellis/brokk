@@ -6,12 +6,13 @@ import java.util.Set;
 import java.util.concurrent.Future;
 
 public interface ContextFragment {
-    /** display name for interaction with commands */
-    String source();
     /** longer description displayed to user */
     String description();
     /** raw content */
     String text() throws IOException;
+
+    String source(Context context);
+
     /** content formatted for LLM */
     String format() throws IOException;
     /** fq classes found in this fragment */
@@ -39,7 +40,7 @@ public interface ContextFragment {
 
     record RepoPathFragment(RepoFile file) implements PathFragment {
         @Override
-        public String source() {
+        public String source(Context context) {
             return file.getFileName();
         }
 
@@ -66,7 +67,7 @@ public interface ContextFragment {
 
     record ExternalPathFragment(ExternalFile file) implements PathFragment {
         @Override
-        public String source() {
+        public String source(Context context) {
             return file.toString();
         }
 
@@ -96,33 +97,34 @@ public interface ContextFragment {
     }
 
     abstract class VirtualFragment implements ContextFragment {
-        private int position;
-
-        protected VirtualFragment(int position) {
-            this.position = position;
+        /**
+         * Returns the position of this fragment in its containing context.
+         * This is computed dynamically by the Context when needed.
+         */
+        public int position(Context context) {
+            return context.getPositionOfFragment(this);
         }
 
-        public int position() {
-            return position;
-        }
-
+        /**
+         * Returns the position-based source string when context is available
+         */
         @Override
-        public String source() {
-            // 1-based label in brackets
-            return "%d".formatted(position + 1);
-        }
-
-        public final void renumber(int newPosition) {
-            this.position = newPosition;
+        public String source(Context context) {
+            int pos = position(context);
+            if (pos == -1) {
+                return "[detached fragment]";
+            }
+            // 1-based label for display
+            return "%d".formatted(pos + 1);
         }
 
         @Override
         public String format() throws IOException {
             return """
-            <fragment id="%d" description="%s">
+            <fragment description="%s">
             %s
             </fragment>
-            """.formatted(position, description(), text()).stripIndent();
+            """.formatted(description(), text()).stripIndent();
         }
 
         @Override
@@ -141,8 +143,8 @@ public interface ContextFragment {
         private final String text;
         private final String description;
 
-        public StringFragment(int position, String text, String description) {
-            super(position);
+        public StringFragment(String text, String description) {
+            super();
             this.text = text;
             this.description = description;
         }
@@ -172,8 +174,8 @@ public interface ContextFragment {
         private final String text;
         private final Future<String> descriptionFuture;
 
-        public PasteFragment(int position, String text, Future<String> descriptionFuture) {
-            super(position);
+        public PasteFragment(String text, Future<String> descriptionFuture) {
+            super();
             this.text = text;
             this.descriptionFuture = descriptionFuture;
         }
@@ -212,8 +214,8 @@ public interface ContextFragment {
         private final String exception;
         private final String code;
 
-        public StacktraceFragment(int position, Set<CodeUnit> sources, String original, String exception, String code) {
-            super(position);
+        public StacktraceFragment(Set<CodeUnit> sources, String original, String exception, String code) {
+            super();
             this.sources = sources;
             this.original = original;
             this.exception = exception;
@@ -254,8 +256,8 @@ public interface ContextFragment {
         private final Set<CodeUnit> classnames;
         private final String code;
 
-        public UsageFragment(int position, String targetIdentifier, Set<CodeUnit> classnames, String code) {
-            super(position);
+        public UsageFragment(String targetIdentifier, Set<CodeUnit> classnames, String code) {
+            super();
             this.targetIdentifier = targetIdentifier;
             this.classnames = classnames;
             this.code = code;
@@ -287,8 +289,8 @@ public interface ContextFragment {
         private final Set<CodeUnit> sources;
         private final String skeletonText;
 
-        public SkeletonFragment(int position, List<String> shortClassnames, Set<CodeUnit> sources, String skeletonText) {
-            super(position);
+        public SkeletonFragment(List<String> shortClassnames, Set<CodeUnit> sources, String skeletonText) {
+            super();
             this.shortClassnames = shortClassnames;
             this.sources = sources;
             this.skeletonText = skeletonText;
@@ -334,8 +336,8 @@ public interface ContextFragment {
      * representation (e.g. skeletons) of those classes.
      */
     class AutoContext implements ContextFragment {
-        public static final AutoContext EMPTY = new AutoContext(List.of(new SkeletonFragment(-1, List.of("Enabled, but no references found"), Set.of(), "")));
-        public static final AutoContext DISABLED  = new AutoContext(List.of(new SkeletonFragment(-1, List.of("Disabled"), Set.of(), "")));
+        public static final AutoContext EMPTY = new AutoContext(List.of(new SkeletonFragment(List.of("Enabled, but no references found"), Set.of(), "")));
+        public static final AutoContext DISABLED  = new AutoContext(List.of(new SkeletonFragment(List.of("Disabled"), Set.of(), "")));
 
         private final List<SkeletonFragment> skeletons;
 
@@ -348,7 +350,7 @@ public interface ContextFragment {
         }
 
         @Override
-        public String source() {
+        public String source(Context context) {
             return "0 [Auto]";
         }
 

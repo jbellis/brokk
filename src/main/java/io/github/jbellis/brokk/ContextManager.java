@@ -137,8 +137,9 @@ public class ContextManager implements IContextManager {
     public Set<RepoFile> getFilesFromVirtualFragmentIndex(int index) {
         // numeric indexes are shown as 1-based in /show
         int position = index - 1;
-        var fragment = currentContext().virtualFragments()
-                .filter(f -> f.position() == position)
+        Context ctx = currentContext();
+        var fragment = ctx.virtualFragments()
+                .filter(f -> ctx.getPositionOfFragment(f) == position)
                 .findFirst();
         if (fragment.isEmpty()) {
             throw new IllegalArgumentException("No virtual fragment found at position " + index);
@@ -542,6 +543,7 @@ public class ContextManager implements IContextManager {
      */
     private int formatFragments(Stream<? extends ContextFragment> fragments, int termWidth) {
         final AtomicInteger sum = new AtomicInteger();
+        Context ctx = currentContext();
         fragments.forEach(f -> {
             try {
                 String text = f.text();
@@ -549,22 +551,29 @@ public class ContextManager implements IContextManager {
                 sum.addAndGet(lines);
 
                 // The "source", i.e. the filename or virtual fragment position
-                String source = f.source() + ": ";
+                String source = f.source(ctx) + ": ";
+
                 // We do naive wrapping of the fragment's short description
-                List<String> wrapped = wrapOnSpace(f.description(), termWidth - (LOC_FIELD_WIDTH + 3 + f.source().length()));
+                List<String> wrapped = wrapOnSpace(f.description(), termWidth - (LOC_FIELD_WIDTH + 3 + source.length()));
 
                 if (wrapped.isEmpty()) {
                     // No description, just print lines + prefix
                     io.context(formatLine(lines, source, termWidth));
                 } else {
-                    // First line includes the actual lines count
-                    io.context(formatLine(lines, source + wrapped.getFirst(), termWidth));
-
-                    // Remaining lines: pass 0 so we don't repeat the line count
-                    String indent = " ".repeat(source.length());
-                    for (int i = 1; i < wrapped.size(); i++) {
-                        io.context(formatLine(0, indent + wrapped.get(i), termWidth));
+                    // For virtual fragments, use the context-aware source method
+                    String displaySource = source;
+                if (f instanceof ContextFragment.VirtualFragment vf) {
+                        displaySource = vf.source(currentContext()) + ": ";
                     }
+                
+                    // First line includes the actual lines count
+                    io.context(formatLine(lines, displaySource + wrapped.getFirst(), termWidth));
+
+                // Remaining lines: pass 0 so we don't repeat the line count
+                String indent = " ".repeat(displaySource.length());
+                for (int i = 1; i < wrapped.size(); i++) {
+                    io.context(formatLine(0, indent + wrapped.get(i), termWidth));
+                }
                 }
             } catch (IOException e) {
                 removeBadFragment(f, e);
@@ -574,8 +583,8 @@ public class ContextManager implements IContextManager {
     }
 
     public void removeBadFragment(ContextFragment f, IOException e) {
-        logger.warn("Removing unreadable fragment %s".formatted(f.source()), e);
-        io.toolErrorRaw("Removing unreadable fragment %s".formatted(f.source()));
+        logger.warn("Removing unreadable fragment %s".formatted(f.source(currentContext())), e);
+        io.toolErrorRaw("Removing unreadable fragment %s".formatted(f.source(currentContext())));
         pushContext(c -> c.removeBadFragment(f));
     }
 
@@ -780,7 +789,7 @@ public class ContextManager implements IContextManager {
                 currentContext().editableFiles(),
                 currentContext().readonlyFiles(),
                 currentContext().virtualFragments()
-        ).map(ContextFragment::source).toList();
+        ).map(f -> f.source(currentContext())).toList();
     }
 
     /**

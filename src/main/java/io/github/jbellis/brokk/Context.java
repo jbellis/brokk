@@ -116,9 +116,6 @@ public class Context {
         if (newFragments.equals(virtualFragments)) {
             return this;
         }
-        for (int i = 0; i < newFragments.size(); i++) {
-            newFragments.get(i).renumber(i);
-        }
         return withVirtualFragments(newFragments).refresh();
     }
     
@@ -127,17 +124,17 @@ public class Context {
     }
 
     public Context addStringFragment(String description, String content) {
-        var fragment = new ContextFragment.StringFragment(virtualFragments.size(), content, description);
+        var fragment = new ContextFragment.StringFragment(content, description);
         return addVirtualFragment(fragment);
     }
 
     public Context addStacktraceFragment(Set<CodeUnit> sources, String original, String exception, String methods) {
-        var fragment = new StacktraceFragment(virtualFragments.size(), sources, original, exception, methods);
+        var fragment = new StacktraceFragment(sources, original, exception, methods);
         return addVirtualFragment(fragment);
     }
 
     public Context addPasteFragment(String content, Future<String> descriptionFuture) {
-        var fragment = new ContextFragment.PasteFragment(virtualFragments.size(), content, descriptionFuture);
+        var fragment = new ContextFragment.PasteFragment(content, descriptionFuture);
         return addVirtualFragment(fragment);
     }
 
@@ -241,7 +238,7 @@ public class Context {
                 var opt = analyzer.get().getSkeleton(fqName);
                 if (opt.isDefined()) {
                     var shortName = fqName.substring(fqName.lastIndexOf('.') + 1);
-                    skeletons.add(new SkeletonFragment(-1, List.of(shortName), Set.of(CodeUnit.cls(fqName)), opt.get()));
+                    skeletons.add(new SkeletonFragment(List.of(shortName), Set.of(CodeUnit.cls(fqName)), opt.get()));
                 }
             }
             if (skeletons.size() >= autoContextFileCount) {
@@ -344,7 +341,7 @@ public class Context {
             return virtualFragments.get(ordinal - 1);
         } catch (NumberFormatException e) {
             return Streams.concat(editableFiles.stream(), readonlyFiles.stream())
-                    .filter(f -> f.source().equals(target))
+                    .filter(f -> f.source(this).equals(target))
                     .findFirst()
                     .orElse(null);
         }
@@ -419,12 +416,20 @@ public class Context {
     }
 
     public Context addUsageFragment(String identifier, Set<CodeUnit> classnames, String code) {
-        var fragment = new ContextFragment.UsageFragment(virtualFragments.size(), identifier, classnames, code);
+        var fragment = new ContextFragment.UsageFragment(identifier, classnames, code);
         return addVirtualFragment(fragment);
     }
 
     public Context addSkeletonFragment(List<String> shortClassnames, Set<CodeUnit> classnames, String skeleton) {
-        var fragment = new SkeletonFragment(virtualFragments.size(), shortClassnames, classnames, skeleton);
+        var fragment = new SkeletonFragment(shortClassnames, classnames, skeleton);
         return addVirtualFragment(fragment);
+    }
+
+    /**
+     * Returns the position (index) of the given fragment in the virtual fragments list.
+     * Returns -1 if the fragment is not in the list.
+     */
+    public int getPositionOfFragment(ContextFragment.VirtualFragment fragment) {
+        return virtualFragments.indexOf(fragment);
     }
 }
