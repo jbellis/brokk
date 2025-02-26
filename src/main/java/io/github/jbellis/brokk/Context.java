@@ -5,6 +5,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import io.github.jbellis.brokk.ContextFragment.AutoContext;
 import io.github.jbellis.brokk.ContextFragment.SkeletonFragment;
 import io.github.jbellis.brokk.ContextFragment.StacktraceFragment;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -209,27 +210,11 @@ public class Context {
             return AutoContext.EMPTY;
         }
 
-
-        // do forward and reverse pagerank passes
-        var forwardResults = analyzer.get().getPagerank(weightedSeeds, 3 * MAX_AUTO_CONTEXT_FILES, false);
-        var reverseResults = analyzer.get().getPagerank(weightedSeeds, 3 * MAX_AUTO_CONTEXT_FILES, true);
-        
-        // combine results by summing scores
-        var combinedScores = new HashMap<String, Double>();
-        forwardResults.forEach(pair -> combinedScores.put(pair._1, pair._2));
-        reverseResults.forEach(pair -> combinedScores.merge(pair._1, pair._2, Double::sum));
-        
-        // sort by combined score
-        var pagerankResults = combinedScores.entrySet().stream()
-            .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
-            .map(e -> new scala.Tuple2<>(e.getKey(), e.getValue()))
-            .toList();
+        var pagerankResults = combinedPageRankFor(analyzer, weightedSeeds);
 
         // build skeleton lines
         var skeletons = new ArrayList<SkeletonFragment>();
-        for (var pair : pagerankResults) {
-            String fqName = pair._1;
-            
+        for (var fqName : pagerankResults) {
             // Check if the class or its parent is in ineligible classnames
             boolean eligible = !(ineligibleSources.contains(CodeUnit.cls(fqName))
                     || (fqName.contains("$") && ineligibleSources.contains(CodeUnit.cls(fqName.substring(0, fqName.indexOf('$'))))));
@@ -250,6 +235,23 @@ public class Context {
         }
 
         return new AutoContext(skeletons);
+    }
+
+    public static List<String> combinedPageRankFor(AnalyzerWrapper analyzer, HashMap<String, Double> weightedSeeds) {
+        // do forward and reverse pagerank passes
+        var forwardResults = analyzer.get().getPagerank(weightedSeeds, 3 * MAX_AUTO_CONTEXT_FILES, false);
+        var reverseResults = analyzer.get().getPagerank(weightedSeeds, 3 * MAX_AUTO_CONTEXT_FILES, true);
+
+        // combine results by summing scores
+        var combinedScores = new HashMap<String, Double>();
+        forwardResults.forEach(pair -> combinedScores.put(pair._1, pair._2));
+        reverseResults.forEach(pair -> combinedScores.merge(pair._1, pair._2, Double::sum));
+
+        // sort by combined score
+        return combinedScores.entrySet().stream()
+            .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+            .map(Map.Entry::getKey)
+            .toList();
     }
 
     // ---------------------------------------------------------
