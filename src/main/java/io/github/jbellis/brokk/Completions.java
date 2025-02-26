@@ -226,7 +226,8 @@ public class Completions {
                         .map(p -> maybeExternalFile(root, p.toString()))
                         .toList();
             } catch (IOException e) {
-                throw new UncheckedIOException(e);
+                // part of the path doesn't exist
+                return List.of();
             }
         }
 
