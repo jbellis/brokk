@@ -610,7 +610,7 @@ class Analyzer private (sourcePath: java.nio.file.Path, language: Language, cpgI
    * @param pattern A regular expression to match against class, method, and field names
    * @return A list of CodeUnit objects representing the matches
    */
-  def find(pattern: String): java.util.List[CodeUnit] = {
+  def getDefinitions(pattern: String): java.util.List[CodeUnit] = {
     // Compile the regex pattern
     val ciPattern = "(?i)" + pattern // case-insensitive
     
