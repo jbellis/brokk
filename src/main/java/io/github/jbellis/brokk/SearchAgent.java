@@ -129,13 +129,16 @@ public class SearchAgent {
 
             // Reset action controls for this step
             resetActionControls();
-            
+
             // Special handling based on previous steps
             updateActionControlsBasedOnContext();
 
             // Decide what action to take for this query
             BoundAction step = determineNextAction();
-            var spinMessage = "Step " + totalSteps + " | Exploring: " + currentQuery() + " | " + step.action.explanation;
+            String paramInfo = getHumanReadableParameter(step);
+            String spinMessage = "Step " + totalSteps + " | Exploring: " + currentQuery()
+                + " | " + step.action.explanation
+                + (paramInfo.isBlank() ? "" : " (" + paramInfo + ")");
             io.spin(spinMessage);
             logger.debug("{}; budget: {}/{}", spinMessage, currentTokenUsage, TOKEN_BUDGET);
             logger.debug("Action: {}", step);
@@ -665,6 +668,30 @@ public class SearchAgent {
     private String getStringOrDefault(Map<String, Object> map, String key, String defaultValue) {
         Object value = map.get(key);
         return value != null ? value.toString() : defaultValue;
+    }
+
+    private String getHumanReadableParameter(BoundAction step) {
+        // Reflect is omitted on purpose. Others show key info.
+        return switch (step.action()) {
+            case DEFINITIONS -> {
+                String pattern = step.getParameterValue("pattern");
+                yield "pattern=" + (pattern == null || pattern.isBlank() ? "?" : pattern);
+            }
+            case USAGES -> {
+                String symbol = step.getParameterValue("symbol");
+                yield "symbol=" + (symbol == null || symbol.isBlank() ? "?" : symbol);
+            }
+            case SKELETON -> {
+                String className = step.getParameterValue("className");
+                yield "class=" + (className == null || className.isBlank() ? "?" : className);
+            }
+            case METHOD -> {
+                String methodName = step.getParameterValue("methodName");
+                yield "method=" + (methodName == null || methodName.isBlank() ? "?" : methodName);
+            }
+            case ANSWER -> "finalizing";  // Keep it concise
+            default -> "";                // Reflect or malformed, omit
+        };
     }
 
     /**
