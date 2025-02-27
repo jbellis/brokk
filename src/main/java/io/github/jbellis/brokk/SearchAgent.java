@@ -9,6 +9,7 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.jetbrains.annotations.NotNull;
 import scala.Tuple2;
 
 import java.io.IOException;
@@ -143,7 +144,7 @@ public class SearchAgent {
         }).filter(Objects::nonNull).collect(Collectors.joining("\n"));
         if (!contextWithClasses.isBlank()) {
             io.spin("Evaluating context");
-            var messages = new ArrayList<>();
+            var messages = new ArrayList<ChatMessage>();
             messages.add(new SystemMessage("""
             You are an expert software architect.
             evaluating which code fragments are relevant to a user query.
@@ -441,46 +442,27 @@ public class SearchAgent {
                 ObjectMapper mapper = new ObjectMapper();
                 var parsed = mapper.readValue(jsonContent, new TypeReference<Map<String, Object>>() {});
 
-                String actionStr = getStringOrDefault(parsed, "action", "reflect");
+                String actionStr = getStringOrEmpty(parsed, "action");
                 action = Action.fromString(actionStr);
 
                 // Extract reasoning if available
-                String reasoning = getStringOrDefault(parsed, "reasoning", "");
+                String reasoning = getStringOrEmpty(parsed, "reasoning");
                 if (!reasoning.isBlank()) {
                     parameters.put("reasoning", reasoning);
                 }
 
                 // Extract relevant parameters based on action type
                 switch (action) {
-                    case DEFINITIONS -> parameters.put("pattern", getStringOrDefault(parsed, "pattern", ""));
-                    case USAGES -> parameters.put("symbol", getStringOrDefault(parsed, "symbol", ""));
-                    case SKELETON -> parameters.put("className", getStringOrDefault(parsed, "className", ""));
-                    case CLASS -> parameters.put("className", getStringOrDefault(parsed, "className", ""));
-                    case METHOD -> parameters.put("methodName", getStringOrDefault(parsed, "methodName", ""));
-                    case ANSWER -> parameters.put("explanation", getStringOrDefault(parsed, "explanation", ""));
+                    case DEFINITIONS -> parameters.put("pattern", getStringOrEmpty(parsed, "pattern"));
+                    case USAGES -> parameters.put("symbol", getStringOrEmpty(parsed, "symbol"));
+                    case SKELETON -> parameters.put("className", getStringOrEmpty(parsed, "className"));
+                    case CLASS -> parameters.put("className", getStringOrEmpty(parsed, "className"));
+                    case METHOD -> parameters.put("methodName", getStringOrEmpty(parsed, "methodName"));
+                    case ANSWER -> parameters.put("explanation", getStringOrEmpty(parsed, "explanation"));
                     case REFLECT -> {
                         // Handle subQueries - convert to JSON string
-                        List<String> subQueries = new ArrayList<>();
-                        Object subQueriesObj = parsed.get("subQueries");
-                        if (subQueriesObj instanceof List) {
-                            @SuppressWarnings("unchecked")
-                            List<Object> subQueriesList = (List<Object>) subQueriesObj;
-                            if (!subQueriesList.isEmpty()) {
-                                subQueries = subQueriesList.stream()
-                                        .filter(Objects::nonNull)
-                                        .map(Object::toString)
-                                        .filter(s -> !s.trim().isEmpty())
-                                        .collect(Collectors.toList());
-                            }
-                        }
-
-                        try {
-                            String subQueriesJson = mapper.writeValueAsString(subQueries);
-                            parameters.put("subQueries", subQueriesJson);
-                        } catch (JsonProcessingException e) {
-                            logger.error("Failed to serialize subQueries to JSON", e);
-                            parameters.put("subQueries", "[]");
-                        }
+                        var subQueries = getListOrEmpty(parsed, "subQueries");
+                        parameters.put("subQueries", mapper.writeValueAsString(subQueries));
                     }
                 }
             }
@@ -499,6 +481,26 @@ public class SearchAgent {
         }
 
         return new BoundAction(action, parameterJson, null);
+    }
+
+    @NotNull
+    private List<String> getListOrEmpty(Map<String, Object> parsed, String key) {
+        List<String> subQueries = new ArrayList<>();
+        Object subQueriesObj = parsed.get(key);
+        if (!(subQueriesObj instanceof List)) {
+            throw new IllegalArgumentException(String.format("%s is not a list", key));
+        }
+
+        @SuppressWarnings("unchecked")
+        List<Object> subQueriesList = (List<Object>) subQueriesObj;
+        if (!subQueriesList.isEmpty()) {
+            subQueries = subQueriesList.stream()
+                    .filter(Objects::nonNull)
+                    .map(Object::toString)
+                    .filter(s -> !s.trim().isEmpty())
+                    .collect(Collectors.toList());
+        }
+        return subQueries;
     }
 
     /**
@@ -767,9 +769,9 @@ public class SearchAgent {
         return text.length() / 4;
     }
 
-    private String getStringOrDefault(Map<String, Object> map, String key, String defaultValue) {
+    private String getStringOrEmpty(Map<String, Object> map, String key) {
         Object value = map.get(key);
-        return value != null ? value.toString() : defaultValue;
+        return value == null ? "" : value.toString();
     }
 
     private String getHumanReadableParameter(BoundAction step) {
