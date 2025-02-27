@@ -1,7 +1,6 @@
 package io.github.jbellis.brokk;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.AiMessage;
@@ -46,6 +45,7 @@ public class SearchAgent {
     private boolean allowReflect = true;
     private boolean allowSearch = true;
     private boolean allowSkeleton = true;
+    private boolean allowClass = true;
     private boolean allowMethod = true;
     private boolean allowPagerank = true;
     private boolean allowAnswer = true;
@@ -55,9 +55,10 @@ public class SearchAgent {
      */
     public enum Action {
         DEFINITIONS(SearchAgent::executeDefinitionsSearch, "Searching for symbols"),
-        USAGES(SearchAgent::executeUsagesSearch, "Finding usages"),
+        USAGES(SearchAgent::executeUsageSearch, "Finding usages"),
         PAGERANK(SearchAgent::executePageRankSearch, "Finding related code"),
         SKELETON(SearchAgent::executeSkeletonSearch, "Getting class overview"),
+        CLASS(SearchAgent::executeClassSearch, "Fetching class source"),
         METHOD(SearchAgent::executeMethodSearch, "Fetching method source"),
         REFLECT(SearchAgent::executeReflect, "Breaking down the query"),
         ANSWER(SearchAgent::executeAnswer, "Answering the question"),
@@ -165,7 +166,7 @@ public class SearchAgent {
             if (gapQueries.isEmpty()) {
                 logger.debug("Search complete after answering original query");
                 assert step.action == Action.ANSWER;
-                return step.result();
+                return actionWithResult.result();
             }
 
             // Add the step to the history
@@ -183,6 +184,7 @@ public class SearchAgent {
         allowReflect = true;
         allowSearch = true;
         allowSkeleton = true;
+        allowClass = true;
         allowMethod = true;
         allowPagerank = true;
         allowAnswer = true;
@@ -274,6 +276,15 @@ public class SearchAgent {
             </action>
             """.stripIndent());
         }
+        if (allowClass) {
+            systemPrompt.append("""
+            <action name=class parameters=className>
+            Get the full source code of a class.  This is expensive, so prefer inferring what you need
+            from the skeleton or method sources. But if you need the full source, this is available.
+             - Takes a fully-qualified class name
+            </action>
+            """.stripIndent());
+        }
         if (allowMethod) {
             systemPrompt.append("""
             <action name=method parameters=methodName>
@@ -320,14 +331,17 @@ public class SearchAgent {
             allowReflect = false;
             allowSearch = false;
             allowSkeleton = false;
+            allowClass = false;
             allowMethod = false;
         }
 
         systemPrompt.append("""
-        Respond with only ONE action in JSON format like this. Remember that symbols, class names, and method names must be fully-qualified.
+        Respond with your reasoning and only ONE action in JSON format like this.
+        Remember that symbols, class names, and method names must be fully-qualified.
         {
           "reasoning": "[your thought process]"
           "action": "[one of: definitions, usages, pagerank, skeleton, method, reflect, answer]",
+          // per-action parameters
           "pattern": "[pattern to search for, if applicable]",
           "symbol": "[specific symbol to find, if applicable]",
           "className": "[class name, if applicable]",
@@ -395,11 +409,18 @@ public class SearchAgent {
                 String actionStr = getStringOrDefault(parsed, "action", "reflect");
                 action = Action.fromString(actionStr);
 
+                // Extract reasoning if available
+                String reasoning = getStringOrDefault(parsed, "reasoning", "");
+                if (!reasoning.isBlank()) {
+                    parameters.put("reasoning", reasoning);
+                }
+
                 // Extract relevant parameters based on action type
                 switch (action) {
                     case DEFINITIONS -> parameters.put("pattern", getStringOrDefault(parsed, "pattern", ""));
                     case USAGES -> parameters.put("symbol", getStringOrDefault(parsed, "symbol", ""));
                     case SKELETON -> parameters.put("className", getStringOrDefault(parsed, "className", ""));
+                    case CLASS -> parameters.put("className", getStringOrDefault(parsed, "className", ""));
                     case METHOD -> parameters.put("methodName", getStringOrDefault(parsed, "methodName", ""));
                     case ANSWER -> parameters.put("explanation", getStringOrDefault(parsed, "explanation", ""));
                     case REFLECT -> {
@@ -486,11 +507,13 @@ public class SearchAgent {
             definitionsStr.append(definition.reference()).append("\n");
         }
 
+        // Get reasoning if available
+        String reasoning = step.getParameterValue("reasoning");
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new SystemMessage("You are helping evaluate which code definitions are relevant to a user query. " +
-                                               "Review the list of definitions and select the ones most relevant to the query. " +
-                                               "Include your reasoning for each selection."));
-        messages.add(new UserMessage("Query: " + currentQuery() + "\n\nDefinitions found:\n" + definitionsStr));
+                                               "Review the list of definitions and select the ones most relevant to the query and " +
+                                               "to your previous reasoning."));
+        messages.add(new UserMessage("Query: %s\nReasoning:%s\nDefinitions found:\n%s".formatted(currentQuery(), reasoning, definitionsStr)));
         String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
         currentTokenUsage += estimateTokenCount(response);
 
@@ -522,7 +545,7 @@ public class SearchAgent {
     /**
      * Search for usages of a symbol.
      */
-    private String executeUsagesSearch(BoundAction step) {
+    private String executeUsageSearch(BoundAction step) {
         String symbol = step.getParameterValue("symbol");
         if (symbol == null || symbol.isBlank()) {
             return "Cannot search usages: symbol is empty";
@@ -533,9 +556,21 @@ public class SearchAgent {
             return "No usages found for: " + symbol;
         }
 
-        // Process the usages and format the result
+        // Process the usages to get formatted result
         String processedUsages = AnalyzerWrapper.processUsages(analyzer, uses).toString();
-        return "Found " + uses.size() + " usages of " + symbol + ":\n\n" + processedUsages;
+
+        // Get reasoning if available
+        String reasoning = step.getParameterValue("reasoning");
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(new SystemMessage("You are helping evaluate which code usages are relevant to a user query. " +
+                                       "Review the following code usages and select ONLY the relevant chunks that directly " +
+                                       "address the user's query and/or your own reasoning. Output the FULL TEXT of the relevant code chunks."));
+        messages.add(new UserMessage("Query: %s\nReasoning: %s\nUsages found for %s:\n%s".formatted(
+                currentQuery(), reasoning, symbol, processedUsages)));
+        String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+        currentTokenUsage += estimateTokenCount(response);
+
+        return "Relevant usages of " + symbol + ":\n\n" + response;
     }
 
     /**
@@ -581,6 +616,34 @@ public class SearchAgent {
         }
 
         return skeletonOpt.get();
+    }
+
+    /**
+     * Get the full source code of a class.
+     */
+    private String executeClassSearch(BoundAction step) {
+        String className = step.getParameterValue("className");
+        if (className == null || className.isBlank()) {
+            return "Cannot get class source: class name is empty";
+        }
+
+        String classSource = analyzer.getClassSource(className);
+        if (classSource == null || classSource.isEmpty()) {
+            return "No source found for class: " + className;
+        }
+
+        // Get reasoning if available
+        String reasoning = step.getParameterValue("reasoning");
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(new SystemMessage("You are helping evaluate which parts of a class source are relevant to a user query. " +
+                                       "Review the following class source and select ONLY the relevant portions that directly " +
+                                       "address the user's query and/or your own reasoning. Output the FULL TEXT of the relevant code chunks. When in doubt, include the chunk."));
+        messages.add(new UserMessage("Query: %s\nReasoning: %s\nClass source for %s:\n%s".formatted(
+                currentQuery(), reasoning, className, classSource)));
+        String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+        currentTokenUsage += estimateTokenCount(response);
+
+        return "Relevant portions of " + className + ":\n\n" + response;
     }
 
     /**
@@ -686,6 +749,10 @@ public class SearchAgent {
                 yield (symbol == null || symbol.isBlank() ? "?" : symbol);
             }
             case SKELETON -> {
+                String className = step.getParameterValue("className");
+                yield (className == null || className.isBlank() ? "?" : className);
+            }
+            case CLASS -> {
                 String className = step.getParameterValue("className");
                 yield (className == null || className.isBlank() ? "?" : className);
             }
