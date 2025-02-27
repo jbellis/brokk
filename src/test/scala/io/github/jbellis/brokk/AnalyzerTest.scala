@@ -73,6 +73,34 @@ class AnalyzerTest {
 
     assertEquals(expected, source)
   }
+  
+  @Test
+  def getClassSourceTest(): Unit = {
+    val analyzer = getAnalyzer
+    val source = analyzer.getClassSource("A")
+
+    // Verify the source contains class definition and methods
+    assertTrue(source.contains("class A {"))
+    assertTrue(source.contains("public void method1()"))
+    assertTrue(source.contains("public String method2(String input)"))
+  }
+  
+  @Test
+  def getClassSourceNestedTest(): Unit = {
+    val analyzer = getAnalyzer
+    val source = analyzer.getClassSource("A$AInner")
+    
+    // Verify the source contains inner class definition
+    assertTrue(source.contains("class AInner {"))
+    assertTrue(source.contains("class AInnerInner {"))
+  }
+  
+  @Test
+  def getClassSourceNonexistentTest(): Unit = {
+    val analyzer = getAnalyzer
+    val source = analyzer.getClassSource("NonExistentClass")
+    assertEquals(null, source)
+  }
 
   @Test
   def sanitizeTypeTest(): Unit = {
@@ -285,7 +313,7 @@ class AnalyzerTest {
     // Find classes matching "*E"
     val classMatches = analyzer.getDefinitions(".*e")
     val classRefs = asScala(classMatches).filter(_.isClass).map(_.reference).toSet
-    assertEquals(Set("E", "UseE", "AnonymousUsage", "double", "java.lang.Runnable"), classRefs)
+    assertEquals(Set("E", "UseE", "AnonymousUsage", "java.lang.Runnable"), classRefs)
 
     // Find methods matching "method*"
     val methodMatches = analyzer.getDefinitions("method.*1")

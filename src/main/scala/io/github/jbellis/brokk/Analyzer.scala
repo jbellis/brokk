@@ -150,6 +150,36 @@ class Analyzer private (sourcePath: java.nio.file.Path, language: Language, cpgI
   }
 
   /**
+   * Gets the source code for the entire file containing a class.
+   *
+   * @param className the fully qualified class name
+   * @return the full source code of the file containing the class as a String
+   */
+  def getClassSource(className: String): java.lang.String = {
+    val classNodes = cpg.typeDecl.fullNameExact(className).l
+
+    if (classNodes.isEmpty) {
+      return null
+    }
+
+    val td = classNodes.head
+    // Get the file information
+    val fileOpt = Option(toFile(td.filename))
+
+    if (fileOpt.isEmpty) {
+      return null
+    }
+
+    // Read the entire file
+    val file = fileOpt.get
+    val sourceOpt = scala.util.Using(Source.fromFile(file.absPath().toFile)) { source =>
+      source.mkString
+    }.toOption
+
+    sourceOpt.orNull
+  }
+
+  /**
    * A helper to remove package names from a type string.
    * E.g. "java.lang.String[]" => "String[]", "com.foo.Bar" => "Bar".
    */
