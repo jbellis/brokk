@@ -229,15 +229,25 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
     public synchronized void spin(String message) {
         // Update the message
         spinnerMessage.set(message);
-        
+
         // If spinner is already running, just update the message
         if (spinnerActive.get()) {
             return;
         }
-        
+
         // Set active flag and start spinner thread
         spinnerActive.set(true);
-        
+
+        // Put the terminal in raw mode to disable user input and hide cursor
+        try {
+            terminal.enterRawMode();
+            // ANSI escape code to hide cursor
+            terminal.writer().print("\u001B[?25l");
+            terminal.writer().flush();
+        } catch (Exception e) {
+            logger.warn("Could not enter raw mode: {}", e.getMessage());
+        }
+
         spinnerThread = new Thread(() -> {
             int index = 0;
             try {
@@ -249,18 +259,18 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
                     for (int i = 0; i < getTerminalWidth() - 1; i++) {
                         terminal.writer().print(" ");
                     }
-                    terminal.writer().print("\r");
+                                        terminal.writer().print("\r");
 
                     // Print the spinner and message
                     llmOutput(spinnerChars[index] + " " + spinnerMessage.get());
 
                     // Update spinner index
                     index = (index + 1) % spinnerChars.length;
-                    
+
                     //noinspection BusyWait
                     Thread.sleep(100);
                 }
-                
+
                 // Clear the spinner line when done
                 terminal.writer().print("\r");
                 for (int i = 0; i < getTerminalWidth() - 1; i++) {
@@ -279,14 +289,14 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
     }
     
     /**
-     * Stops the spinner animation.
+     * Stops the spinner animation and restores normal input mode.
      */
     public synchronized void spinComplete() {
         if (!spinnerActive.get()) {
             return;
         }
         spinnerActive.set(false);
-        
+
         // Wait for spinner thread to finish cleaning up
         try {
             if (spinnerThread != null) {
@@ -295,9 +305,31 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        
-        // Ensure terminal is ready for new input by explicitly flushing
+
+        // Restore terminal to normal mode and show cursor
+        try {
+            // ANSI escape code to show cursor
+            terminal.writer().print("\u001B[?25h");
+            terminal.writer().flush();
+
+                        // Reinitialize the terminal to restore normal state
+            terminal.close(); // Release raw mode
+            terminal.flush();
+
+            // No direct init method available, so we'll rely on terminal.close() to reset the state
+            // Try to get terminal back into a usable state
+            try {
+                terminal.writer().println();
+                terminal.flush();
+            } catch (Exception ex) {
+                logger.warn("Could not reinitialize terminal: {}", ex.getMessage());
+            }
+        } catch (Exception e) {
+            logger.warn("Could not restore terminal mode: {}", e.getMessage());
+        }
+
+        // Force redraw to ensure output is visible
+        terminal.writer().println();
         terminal.writer().flush();
-        reader.getTerminal().flush();
     }
 }

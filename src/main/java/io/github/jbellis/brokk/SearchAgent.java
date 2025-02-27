@@ -503,7 +503,7 @@ public class SearchAgent {
 
     @Tool("Search for class/method/field definitions using a regular expression pattern. Use this when you need to find symbols matching a pattern.")
     public String executeDefinitionsSearch(
-            @P(value = "Regex pattern to search for code symbols. Should not contain whitespace. Don't include ^ or $ as they're implicit. Use explicit wildcarding for substrings (e.g., .*Value, Abstract.*, [a-z]*DAO).", required = true) String pattern,
+            @P(value = "Regex pattern to search for code symbols. Should not contain whitespace. Don't include ^ or $ as they're implicit. Thus you will nearly always want to use explicit wildcarding for substrings (e.g., .*Value, Abstract.*, [a-z]*DAO).", required = true) String pattern,
             @P(value = "Reasoning about why this pattern is relevant to the query", required = true) String reasoning
     ) {
         if (pattern.isBlank()) {
