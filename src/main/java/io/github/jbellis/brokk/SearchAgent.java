@@ -9,7 +9,9 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import scala.Tuple2;
 
+import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -99,7 +101,7 @@ public class SearchAgent {
     private final Deque<String> gapQueries = new ArrayDeque<>();
     private final List<String> processedQueries = new ArrayList<>();
     private final List<BoundAction> actionHistory = new ArrayList<>();
-    private final Map<String, String> answeredQueries = new HashMap<>();
+    private final List<Tuple2<String, String>> knowledge = new ArrayList<>();
 
     private int currentTokenUsage = 0;
     private int totalSteps = 0;
@@ -121,9 +123,39 @@ public class SearchAgent {
      * @return The final set of discovered code units
      */
     public String execute() {
-        gapQueries.add(originalQuery); // Initialize with original query
-        io.spin("Exploring: " + originalQuery);
+        // Initialize
+        gapQueries.add(originalQuery);
+        var contextWithClasses = contextManager.currentContext().allFragments().map(f -> {
+            String text;
+            try {
+                text = f.text();
+            } catch (IOException e) {
+                contextManager.removeBadFragment(f, e);
+                return null;
+            }
+            return """
+            <fragment description="%s" sources="%s">
+            %s
+            </fragment>
+            """.stripIndent().formatted(f.description(),
+                                        (f.sources(analyzer).stream().map(CodeUnit::reference).collect(Collectors.joining(", "))),
+                                        text);
+        }).filter(Objects::nonNull).collect(Collectors.joining("\n"));
+        if (!contextWithClasses.isBlank()) {
+            io.spin("Evaluating context");
+            var messages = new ArrayList<>();
+            messages.add(new SystemMessage("""
+            You are an expert software architect.
+            evaluating which code fragments are relevant to a user query.
+            Review the following list of code fragments and select the ones most relevant to the query.
+            Make sure to include the fully qualified source (class, method, etc) as well as the code.
+            """.stripIndent()));
+            messages.add(new UserMessage("<query>%s</query>\n\n".formatted(originalQuery) + contextWithClasses));
+            String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+            knowledge.add(new Tuple2<>("Initial context", response));
+        }
 
+        io.spin("Exploring: " + originalQuery);
         while (totalSteps < MAX_STEPS && currentTokenUsage < TOKEN_BUDGET && !gapQueries.isEmpty()) {
             totalSteps++;
             processedQueries.add(currentQuery());
@@ -350,6 +382,17 @@ public class SearchAgent {
         }
         """.stripIndent());
 
+        // Add knowledge gathered during search
+        if (!knowledge.isEmpty()) {
+            var collected = knowledge.stream().map(t -> systemPrompt.append("""
+            <entry description="%s">
+            %s
+            </entry>
+            """.stripIndent().formatted(t._1, t._2)))
+                    .collect(Collectors.joining("\n"));
+            systemPrompt.append("\n<knowledge>\n%s\n</knowledge>\n".formatted(collected));
+        }
+
         // Add information about current search state
         if (!actionHistory.isEmpty()) {
             systemPrompt.append("\n<action-history>\n");
@@ -358,13 +401,6 @@ public class SearchAgent {
                 systemPrompt.append(String.format("Step %d: %s\n", i + 1, step));
             }
             systemPrompt.append("</action-history>\n");
-        }
-
-        // Add knowledge gathered during search
-        if (!answeredQueries.isEmpty()) {
-            systemPrompt.append("\n<knowledge>\n");
-            answeredQueries.forEach((k, v) -> systemPrompt.append(k + ": " + v + "\n"));
-            systemPrompt.append("</knowledge>\n");
         }
 
         // Remind about the original query
@@ -704,7 +740,7 @@ public class SearchAgent {
         logger.debug("Answer: {}", answer);
 
         // Store the answer in our collection
-        answeredQueries.put(currentQuery, answer);
+        knowledge.add(new Tuple2<>(currentQuery, answer));
 
         return answer;
     }
