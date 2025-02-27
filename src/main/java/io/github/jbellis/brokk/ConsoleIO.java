@@ -282,7 +282,9 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
      * Stops the spinner animation.
      */
     public void spinComplete() {
-        assert spinnerActive.get();
+        if (!spinnerActive.get()) {
+            return;
+        }
         spinnerActive.set(false);
         
         // Wait for spinner thread to finish cleaning up
