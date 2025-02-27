@@ -5,6 +5,7 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import io.github.jbellis.brokk.ContextManager;
 import io.github.jbellis.brokk.GitRepo;
+import io.github.jbellis.brokk.Models;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -22,7 +23,7 @@ public abstract class CommitPrompts extends DefaultPrompts {
         boolean hasMessages = false;
         String context = cm.getHistoryMessages().stream()
                 .filter(m -> m instanceof UserMessage)
-                .map(ContextManager::getText)
+                .map(Models::getText)
                 .collect(Collectors.joining("\n\n"));
         if (!context.isEmpty()) {
             hasMessages = true;

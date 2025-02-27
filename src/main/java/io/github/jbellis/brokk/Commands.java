@@ -559,7 +559,7 @@ public class Commands {
             var combined = new StringBuilder();
             msgs.forEach(m -> {
                 if (!(m instanceof AiMessage)) {
-                    combined.append(ContextManager.getText(m)).append("\n\n");
+                    combined.append(Models.getText(m)).append("\n\n");
                 }
             });
             content = combined + "\n<goal>\n\n</goal>";

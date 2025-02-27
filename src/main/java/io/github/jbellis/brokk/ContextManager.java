@@ -472,7 +472,7 @@ public class ContextManager implements IContextManager {
 
         // message history lines
         int historyLines = currentContext().getHistory().stream()
-                .mapToInt(m -> getText(m).split("\n").length)
+                .mapToInt(m -> Models.getText(m).split("\n").length)
                 .sum();
         totalLines += historyLines;
 
@@ -727,15 +727,6 @@ public class ContextManager implements IContextManager {
                 .collect(Collectors.joining(", "));
     }
 
-
-    public static String getText(ChatMessage message) {
-        return switch (message) {
-            case SystemMessage sm -> sm.text();
-            case AiMessage am -> am.text();
-            case UserMessage um -> um.singleText();
-            default -> throw new UnsupportedOperationException(message.getClass().toString());
-        };
-    }
 
     public Set<RepoFile> getEditableFiles() {
         return currentContext().editableFiles()

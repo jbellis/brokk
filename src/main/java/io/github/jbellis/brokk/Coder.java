@@ -1,5 +1,6 @@
 package io.github.jbellis.brokk;
 
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -24,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
@@ -166,15 +168,27 @@ public class Coder {
      * writes to conversation history, etc.
      */
     public String sendStreaming(StreamingChatLanguageModel model, List<ChatMessage> messages, boolean echo) {
+        return Models.getText(sendStreamingWithTools(model, messages, echo, List.of()).content());
+    }
+    
+    /**
+     * Sends a user query to the LLM with tools enabled (with streaming),
+     * writes to conversation history, etc.
+     *
+     * @param model    The LLM model to use
+     * @param messages The messages to send
+     * @param echo     Whether to echo LLM responses to the console
+     * @param tools    List of tool specifications to enable for the LLM
+     * @return The final response from the LLM
+     */
+    public Response<AiMessage> sendStreamingWithTools(StreamingChatLanguageModel model, List<ChatMessage> messages, boolean echo, List<ToolSpecification> tools) {
         int userLineCount = messages.stream()
-                .mapToInt(m -> ContextManager.getText(m).split("\n", -1).length).sum();
+                .mapToInt(m -> Models.getText(m).split("\n", -1).length).sum();
 
         if (echo) {
             io.toolOutput("Request sent");
         }
-        writeRequestToHistory(messages);
 
-        StringBuilder currentResponse = new StringBuilder();
         var latch = new CountDownLatch(1);
         var streamThread = Thread.currentThread();
 
@@ -193,11 +207,14 @@ public class Coder {
             }
         });
 
-        model.generate(messages, new StreamingResponseHandler<>() {
+        // Write request with tools to history
+        writeRequestToHistory(messages, tools);
+        
+        var atomicResponse = new AtomicReference<Response<AiMessage>>();
+        model.generate(messages, tools, new StreamingResponseHandler<>() {
             @Override
             public void onNext(String token) {
                 ifNotCancelled.accept(() -> {
-                    currentResponse.append(token);
                     if (echo) {
                         io.llmOutput(token);
                     }
@@ -210,7 +227,8 @@ public class Coder {
                     if (echo) {
                         io.llmOutput("\n");
                     }
-                    writeToHistory("Response", currentResponse.toString());
+                    atomicResponse.set(response);
+                    writeToHistory("Response", response.toString());
                     if (response.tokenUsage() != null) {
                         totalInputTokens += response.tokenUsage().inputTokenCount();
                         totalLinesOfCode += userLineCount;
@@ -240,7 +258,7 @@ public class Coder {
         } finally {
             Signal.handle(sig, oldHandler);
         }
-        return currentResponse.toString();
+        return atomicResponse.get();
     }
 
     public String sendMessage(List<ChatMessage> messages) {
@@ -268,7 +286,7 @@ public class Coder {
         writeToHistory("Response", response.toString());
         if (response.tokenUsage() != null) {
             totalLinesOfCode += messages.stream()
-                    .mapToInt(m -> ContextManager.getText(m).split("\n", -1).length).sum();
+                    .mapToInt(m -> Models.getText(m).split("\n", -1).length).sum();
             totalInputTokens += response.tokenUsage().inputTokenCount();
         }
 
@@ -287,9 +305,25 @@ public class Coder {
 
     private void writeRequestToHistory(List<ChatMessage> messages) {
         String requestText = messages.stream()
-                .map(m -> "%s: %s\n".formatted(m.type(), ContextManager.getText(m)))
+                .map(m -> "%s: %s\n".formatted(m.type(), Models.getText(m)))
                 .reduce((a, b) -> a + "\n" + b)
                 .orElse("");
+        writeToHistory("Request", requestText);
+    }
+
+    private void writeRequestToHistory(List<ChatMessage> messages, List<ToolSpecification> tools) {
+        String requestText = messages.stream()
+                .map(m -> "%s: %s\n".formatted(m.type(), Models.getText(m)))
+                .reduce((a, b) -> a + "\n" + b)
+                .orElse("");
+                
+        if (!tools.isEmpty()) {
+            requestText += "\nTools:\n" + tools.stream()
+                .map(t -> "- %s: %s".formatted(t.name(), t.description()))
+                .reduce((a, b) -> a + "\n" + b)
+                .orElse("");
+        }
+        
         writeToHistory("Request", requestText);
     }
 

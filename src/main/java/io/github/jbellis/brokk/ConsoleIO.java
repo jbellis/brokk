@@ -226,7 +226,7 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
      * 
      * @param message The message to display next to the spinner
      */
-    public void spin(String message) {
+    public synchronized void spin(String message) {
         // Update the message
         spinnerMessage.set(message);
         
@@ -281,7 +281,7 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
     /**
      * Stops the spinner animation.
      */
-    public void spinComplete() {
+    public synchronized void spinComplete() {
         if (!spinnerActive.get()) {
             return;
         }

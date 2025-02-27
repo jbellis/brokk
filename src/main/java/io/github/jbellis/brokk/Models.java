@@ -3,6 +3,8 @@ package io.github.jbellis.brokk;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
 import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
@@ -348,6 +350,15 @@ public record Models(StreamingChatLanguageModel editModel,
     }
 
     static final String UNAVAILABLE = "AI is unavailable";
+
+    public static String getText(ChatMessage message) {
+        return switch (message) {
+            case SystemMessage sm -> sm.text();
+            case AiMessage am -> am.text();
+            case UserMessage um -> um.singleText();
+            default -> throw new UnsupportedOperationException(message.getClass().toString());
+        };
+    }
 
     public static class UnavailableModel implements ChatLanguageModel {
         public UnavailableModel() {

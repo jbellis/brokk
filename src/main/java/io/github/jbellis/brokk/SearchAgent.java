@@ -1,8 +1,9 @@
 package io.github.jbellis.brokk;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.P;
+import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -15,6 +16,7 @@ import scala.Tuple2;
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -22,7 +24,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -52,19 +53,48 @@ public class SearchAgent {
     private boolean allowMethod = true;
     private boolean allowPagerank = true;
     private boolean allowAnswer = true;
-    
+
     /**
      * Enum representing possible search actions.
      */
     public enum Action {
-        DEFINITIONS(SearchAgent::executeDefinitionsSearch, "Searching for symbols"),
-        USAGES(SearchAgent::executeUsageSearch, "Finding usages"),
-        PAGERANK(SearchAgent::executePageRankSearch, "Finding related code"),
-        SKELETON(SearchAgent::executeSkeletonSearch, "Getting class overview"),
-        CLASS(SearchAgent::executeClassSearch, "Fetching class source"),
-        METHOD(SearchAgent::executeMethodSearch, "Fetching method source"),
-        REFLECT(SearchAgent::executeReflect, "Breaking down the query"),
-        ANSWER(SearchAgent::executeAnswer, "Answering the question"),
+        DEFINITIONS((agent, boundAction) -> {
+            String pattern = boundAction.getParameterString("pattern");
+            String reasoning = boundAction.getParameterString("reasoning");
+            return agent.executeDefinitionsSearch(pattern, reasoning);
+        }, "Searching for symbols"),
+        USAGES((agent, boundAction) -> {
+            String symbol = boundAction.getParameterString("symbol");
+            String reasoning = boundAction.getParameterString("reasoning");
+            return agent.executeUsageSearch(symbol, reasoning);
+        }, "Finding usages"),
+        PAGERANK((agent, boundAction) -> {
+            @SuppressWarnings("unchecked")
+            List<String> classList = (List<String>) boundAction.getParameter("classList");
+            String reasoning = boundAction.getParameterString("reasoning");
+            return agent.executePageRankSearch(classList, reasoning);
+        }, "Finding related code"),
+        SKELETON((agent, boundAction) -> {
+            String className = boundAction.getParameterString("className");
+            return agent.executeSkeletonSearch(className);
+        }, "Getting class overview"),
+        CLASS((agent, boundAction) -> {
+            String className = boundAction.getParameterString("className");
+            String reasoning = boundAction.getParameterString("reasoning");
+            return agent.executeClassSearch(className, reasoning);
+        }, "Fetching class source"),
+        METHOD((agent, boundAction) -> {
+            String methodName = boundAction.getParameterString("methodName");
+            return agent.executeMethodSearch(methodName);
+        }, "Fetching method source"),
+        REFLECT((agent, boundAction) -> {
+            List<String> subQueries = (List<String>) boundAction.getParameter("subQueries");
+            return agent.executeReflect(subQueries);
+        }, "Breaking down the query"),
+        ANSWER((agent, boundAction) -> {
+            String explanation = boundAction.getParameterString("explanation");
+            return agent.executeAnswer(explanation);
+        }, "Answering the question"),
         MALFORMED(null, "Incorrectly formatted action");
 
         private final BiFunction<SearchAgent, BoundAction, String> executor;
@@ -168,41 +198,31 @@ public class SearchAgent {
             updateActionControlsBasedOnContext();
 
             // Decide what action to take for this query
-            BoundAction step = determineNextAction();
-            String paramInfo = getHumanReadableParameter(step);
-            String spinMessage = step.action.explanation + (paramInfo.isBlank() ? "" : " (" + paramInfo + ")");
+            var steps = determineNextActions();
+            String paramInfo = getHumanReadableParameter(steps.getFirst());
+            String spinMessage = steps.getFirst().action.explanation + (paramInfo.isBlank() ? "" : " (" + paramInfo + ")");
             io.spin(spinMessage);
             logger.debug("{}; budget: {}/{}", spinMessage, currentTokenUsage, TOKEN_BUDGET);
-            logger.debug("Action: {}", step);
+            logger.debug("Actions: {}", steps);
 
-            // Execute the action
-            var actionWithResult = executeAction(step);
-            logger.debug("Result: {}", actionWithResult.result());
-
-            // Track success/failure for action control
-            // TODO
-//            if (!success) {
-//                badAttempts++;
-//                io.toolOutput("Bad attempt #" + badAttempts + " - adjusting strategy");
-//
-//                // Disable the failed action for next step
-//                disableAction(step.action());
-//            } else {
-//                badAttempts = 0; // Reset on success
-//            }
-
-            // Debug output
+            // Execute the actions
+            var results = steps.stream().parallel().map(step -> {
+                var actionWithResult = executeAction(step);
+                logger.debug("Result: {}", actionWithResult.result());
+                return actionWithResult;
+            }).toList();
             logger.debug("Query queue: {}", gapQueries);
 
             // Check if we should terminate
             if (gapQueries.isEmpty()) {
                 logger.debug("Search complete after answering original query");
-                assert step.action == Action.ANSWER;
-                return actionWithResult.result();
+                assert steps.size() == 1 : steps;
+                assert steps.getFirst().action == Action.ANSWER;
+                return results.getFirst().result();
             }
 
             // Add the step to the history
-            actionHistory.add(actionWithResult);
+            actionHistory.addAll(results);
         }
 
         logger.debug("Search complete after reaching max steps or budget");
@@ -239,19 +259,77 @@ public class SearchAgent {
     /**
      * Determine the next action to take for the current query.
      */
-    private BoundAction determineNextAction() {
+    private List<BoundAction> determineNextActions() {
         List<ChatMessage> messages = buildPrompt();
 
-        // Track token usage for the prompt
-        int promptTokens = estimateTokenCount(messages);
-        currentTokenUsage += promptTokens;
+        // Ask LLM for next action with tools
+        var tools = createToolSpecifications();
+        var response = coder.sendStreamingWithTools(coder.models.editModel(), messages, false, tools);
+        currentTokenUsage += response.tokenUsage().inputTokenCount();
 
-        // Ask LLM for next action
-        String response = coder.sendStreaming(coder.models.editModel(), messages, false);
-        currentTokenUsage += estimateTokenCount(response);
-
-        // Parse response
-        return parseResponse(response);
+        // Parse response into potentially multiple actions
+        return parseResponse(response.content());
+    }
+    
+    /**
+     * Create tool specifications for the LLM based on allowed actions.
+     */
+    private List<dev.langchain4j.agent.tool.ToolSpecification> createToolSpecifications() {
+        List<dev.langchain4j.agent.tool.ToolSpecification> tools = new ArrayList<>();
+        
+        if (allowSearch) {
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("executeDefinitionsSearch")));
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("executeUsageSearch")));
+        }
+        
+        if (allowPagerank) {
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("executePageRankSearch")));
+        }
+        
+        if (allowSkeleton) {
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("executeSkeletonSearch")));
+        }
+        
+        if (allowClass) {
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("executeClassSearch")));
+        }
+        
+        if (allowMethod) {
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("executeMethodSearch")));
+        }
+        
+        if (allowReflect) {
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("executeReflect")));
+        }
+        
+        if (allowAnswer) {
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("executeAnswer")));
+        }
+        
+        return tools;
+    }
+    
+    /**
+     * Helper method to get a Method by name.
+     * 
+     * @param methodName The name of the method to find
+     * @return The Method object or null if not found
+     */
+    private java.lang.reflect.Method getMethodByName(String methodName) {
+        for (java.lang.reflect.Method method : getClass().getMethods()) {
+            if (method.getName().equals(methodName)) {
+                return method;
+            }
+        }
+        throw new IllegalArgumentException("Method not found: " + methodName);
     }
 
     /**
@@ -267,89 +345,8 @@ public class SearchAgent {
         Even if not explicitly stated, the query should be understood to refer to the current codebase,
         and not a general-knowledge question.
         Your goal is to find code definitions, implementations, and usages that answer the user's query.
-        You have several ways to analyze code:
+        You will be given access to tools that can help you analyze code.
         """.stripIndent());
-
-        systemPrompt.append("<actions>\n");
-
-        if (allowSearch) {
-            systemPrompt.append("""
-            <action name=definitions parameters=pattern>
-            Search for class/method/field definitions using a regular expression pattern.
-             - You can only search for one pattern at a time.
-             - You are searching for code symbols so you know that e.g. they never contain whitespace
-             - The pattern is implicitly surrounded by ^ and $ as bookends; do NOT include these in your pattern
-             - OTOH you *will* need to use explicit wildcarding to match substrings
-             - The pattern is also implicitly case-insensitive.
-            Examples:
-             - get.*Value // Matches methods like getValue, getStringValue, etc.
-             - [a-z]*DAO // Matches DAO classes like UserDAO, ProductDAO
-             - Abstract.* // Matches classes with Abstract prefix
-             - .*Exception // Matches all exception classes
-             - .*vec.* // Substring search for `vec`
-            </action>
-            """.stripIndent());
-            systemPrompt.append("""
-            <action name=usage parameters=symbol>
-            Find where a symbol is used in code
-             - Takes a fully-qualified symbol name (package name, class name, optional member name)
-            </action>
-            """.stripIndent());
-        }
-        if (allowPagerank) {
-            systemPrompt.append("""
-            <action name=pagerank parameters=classList>
-            Find related code units using PageRank. This is a good option
-            both when you've made some progress and got stuck, or when you're
-            almost done and want to doublecheck that you haven't missed anything.
-             - Takes an array of fully-qualified class names
-            </action>
-            """.stripIndent());
-        }
-        if (allowSkeleton) {
-            systemPrompt.append("""
-            <action name=skeleton parameters=className>
-            Get an overview of a class's contents, including fields and method signatures.
-             - Takes a fully-qualified class name
-            </action>
-            """.stripIndent());
-        }
-        if (allowClass) {
-            systemPrompt.append("""
-            <action name=class parameters=className>
-            Get the full source code of a class.  This is expensive, so prefer inferring what you need
-            from the skeleton or method sources. But if you need the full source, this is available.
-             - Takes a fully-qualified class name
-            </action>
-            """.stripIndent());
-        }
-        if (allowMethod) {
-            systemPrompt.append("""
-            <action name=method parameters=methodName>
-            Get the source code of a method
-             - Takes a fully-qualified method name (package name, class name, method name)
-            </action>
-            """.stripIndent());
-        }
-        if (allowReflect) {
-            systemPrompt.append("<action-reflect>Break down the query into sub-questions</action-reflect>\n");
-        }
-        if (allowAnswer) {
-            systemPrompt.append("""
-            <action name=answer parameters=explanation>
-            Provide an answer to the current query and remove it from the queue.
-             - Takes the answer to the current query as a string.  Explanations should include relevant source
-               code snippets as well as an description of how they relate to the query.
-            </action>
-            """.stripIndent());
-        }
-
-        systemPrompt.append("""
-        The code you are analyzing is *stable*.  You will NOT get different results by re-running the same action.
-        If an action is in your history already, you do not need to repeat it unless you have new information.
-        """.stripIndent());
-        
-        systemPrompt.append("</actions>\n\n");
 
         // Add beast mode if we're out of time or we've had too many bad attempts
         if (currentTokenUsage > 0.9 * TOKEN_BUDGET || badAttempts >= MAX_BAD_ATTEMPTS) {
@@ -372,23 +369,6 @@ public class SearchAgent {
             allowClass = false;
             allowMethod = false;
         }
-
-        systemPrompt.append("""
-        Respond with your reasoning and only ONE action in JSON format like this.
-        Remember that symbols, class names, and method names must be fully-qualified.
-        {
-          "reasoning": "[your thought process]"
-          "action": "[one of: definitions, usages, pagerank, skeleton, method, reflect, answer]",
-          // per-action parameters
-          "pattern": "[pattern to search for, if applicable]",
-          "symbol": "[specific symbol to find, if applicable]",
-          "className": "[class name, if applicable]",
-          "methodName": "[method name, if applicable]",
-          "classList": ["[class1]", "[class2]", ...],
-          "subQueries": ["[sub-query1]", "[sub-query2]", ...],
-          "explanation": "[the answer to the query]"
-        }
-        """.stripIndent());
 
         // Add knowledge gathered during search
         if (!knowledge.isEmpty()) {
@@ -430,51 +410,56 @@ public class SearchAgent {
     }
 
     /**
-     * Parse the LLM response into a SearchStep object.
+     * Parse the LLM response into a list of SearchStep objects.
+     * This method handles both direct text responses and tool execution responses.
+     * ANSWER tools will be sorted at the end.
      */
-    private BoundAction parseResponse(String response) {
-        Map<String, Object> parameters = new HashMap<>();
-
-        try {
-            // Attempt to find JSON content
-            int startIndex = response.indexOf("{");
-            int endIndex = response.lastIndexOf("}");
-
-            if (startIndex < 0 || endIndex <= startIndex) {
-                throw new IllegalArgumentException("No JSON content found");
-            }
-            String jsonContent = response.substring(startIndex, endIndex + 1);
-
-            // Parse JSON using Jackson
-            ObjectMapper mapper = new ObjectMapper();
-            var parsed = mapper.readValue(jsonContent, new TypeReference<Map<String, Object>>() {});
-
-            // required parameters
-            var actionStr = getStringOrEmpty(parsed, "action");
-            if (actionStr.isBlank()) {
-                throw new IllegalArgumentException("missing `action`");
-            }
-            var action = Action.fromString(actionStr);
-            var reasoning = getStringOrEmpty(parsed, "reasoning");
-            if (reasoning.isBlank()) {
-                throw new IllegalArgumentException("missing `response`");
-            }
-
-            // Extract relevant parameters based on action type
-            switch (action) {
-                case DEFINITIONS -> parameters.put("pattern", getStringOrEmpty(parsed, "pattern"));
-                case USAGES -> parameters.put("symbol", getStringOrEmpty(parsed, "symbol"));
-                case SKELETON -> parameters.put("className", getStringOrEmpty(parsed, "className"));
-                case CLASS -> parameters.put("className", getStringOrEmpty(parsed, "className"));
-                case METHOD -> parameters.put("methodName", getStringOrEmpty(parsed, "methodName"));
-                case ANSWER -> parameters.put("explanation", getStringOrEmpty(parsed, "explanation"));
-                case REFLECT -> parameters.put("subQueries", getListOrEmpty(parsed, "subQueries"));
-            }
-            return new BoundAction(action, parameters, null);
-        } catch (Exception e) {
-            logger.error("Failed to parse response {}: {}", response, e.getMessage());
-            return new BoundAction(Action.MALFORMED, Map.of("unparsed", response), "Failed to parse response: " + e.getMessage());
+    private List<BoundAction> parseResponse(AiMessage response) {
+        if (!response.hasToolExecutionRequests()) {
+            return List.of(new BoundAction(Action.MALFORMED, Map.of("unparsed", response.text()), "No tool execution requests found"));
         }
+
+        // Process each tool execution request
+        var L = response.toolExecutionRequests().stream().map(toolRequest -> {
+            String toolName = toolRequest.name();
+            try {
+                // Get the tool name and map it to an action
+                Action action = mapToolNameToAction(toolName);
+
+                // Convert the JSON arguments to a map
+                ObjectMapper mapper = new ObjectMapper();
+                String argumentsJson = toolRequest.arguments();
+                Map<String, Object> arguments = mapper.readValue(argumentsJson, new TypeReference<>() {});
+
+                // Create a new BoundAction with the parsed parameters
+                return new BoundAction(action, arguments, null);
+            } catch (Exception e) {
+                logger.error("Failed to parse tool response: {}", e.getMessage());
+                return new BoundAction(Action.MALFORMED, Map.of("error", e.getMessage()), "Error parsing tool execution request for " + toolName);
+            }
+        }).toList();
+        // if we have an ANSWER action, just return that
+        if (L.stream().anyMatch(t -> t.action == Action.ANSWER)) {
+            return List.of(L.stream().filter(t -> t.action == Action.ANSWER).findFirst().orElseThrow());
+        }
+        return L;
+    }
+    
+    /**
+     * Maps a tool name to a SearchAgent Action.
+     */
+    private Action mapToolNameToAction(String toolName) {
+        return switch (toolName) {
+            case "executeDefinitionsSearch" -> Action.DEFINITIONS;
+            case "executeUsageSearch" -> Action.USAGES;
+            case "executePageRankSearch" -> Action.PAGERANK;
+            case "executeSkeletonSearch" -> Action.SKELETON;
+            case "executeClassSearch" -> Action.CLASS;
+            case "executeMethodSearch" -> Action.METHOD;
+            case "executeReflect" -> Action.REFLECT;
+            case "executeAnswer" -> Action.ANSWER;
+            default -> throw new IllegalArgumentException("Unknown tool name: " + toolName);
+        };
     }
 
     @NotNull
@@ -516,13 +501,16 @@ public class SearchAgent {
         }
     }
 
-    /**
-     * Search for definitions matching a pattern.
-     */
-    private String executeDefinitionsSearch(BoundAction step) {
-        String pattern = step.getParameterString("pattern");
-        if (pattern == null || pattern.isBlank()) {
+    @Tool("Search for class/method/field definitions using a regular expression pattern. Use this when you need to find symbols matching a pattern.")
+    public String executeDefinitionsSearch(
+            @P(value = "Regex pattern to search for code symbols. Should not contain whitespace. Don't include ^ or $ as they're implicit. Use explicit wildcarding for substrings (e.g., .*Value, Abstract.*, [a-z]*DAO).", required = true) String pattern,
+            @P(value = "Reasoning about why this pattern is relevant to the query", required = true) String reasoning
+    ) {
+        if (pattern.isBlank()) {
             return "Cannot search definitions: pattern is empty";
+        }
+        if (reasoning.isBlank()) {
+            return "Cannot search definitions: reasoning is empty";
         }
 
         var definitions = analyzer.getDefinitions(pattern);
@@ -539,11 +527,10 @@ public class SearchAgent {
         }
 
         // Get reasoning if available
-        String reasoning = step.getParameterString("reasoning");
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new SystemMessage("You are helping evaluate which code definitions are relevant to a user query. " +
-                                               "Review the list of definitions and select the ones most relevant to the query and " +
-                                               "to your previous reasoning."));
+                                       "Review the list of definitions and select the ones most relevant to the query and " +
+                                       "to your previous reasoning."));
         messages.add(new UserMessage("Query: %s\nReasoning:%s\nDefinitions found:\n%s".formatted(currentQuery(), reasoning, definitionsStr)));
         String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
         currentTokenUsage += estimateTokenCount(response);
@@ -576,10 +563,16 @@ public class SearchAgent {
     /**
      * Search for usages of a symbol.
      */
-    private String executeUsageSearch(BoundAction step) {
-        String symbol = step.getParameterString("symbol");
-        if (symbol == null || symbol.isBlank()) {
+    @Tool("Find where a symbol is used in code. Use this to discover how a class, method, or field is actually used throughout the codebase.")
+    public String executeUsageSearch(
+        @P(value = "Fully qualified symbol name (package name, class name, optional member name) to find usages for", required = true) String symbol,
+        @P(value = "Reasoning about what information you're hoping to find in these usages", required = true) String reasoning
+    ) {
+        if (symbol.isBlank()) {
             return "Cannot search usages: symbol is empty";
+        }
+        if (reasoning.isBlank()) {
+            return "Cannot search usages: reasoning is empty";
         }
 
         List<CodeUnit> uses = analyzer.getUses(symbol);
@@ -590,12 +583,10 @@ public class SearchAgent {
         // Process the usages to get formatted result
         String processedUsages = AnalyzerWrapper.processUsages(analyzer, uses).toString();
 
-        // Get reasoning if available
-        String reasoning = step.getParameterString("reasoning");
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new SystemMessage("You are helping evaluate which code usages are relevant to a user query. " +
                                        "Review the following code usages and select ONLY the relevant chunks that directly " +
-                                       "address the user's query and/or your own reasoning. Output the FULL TEXT of the relevant code chunks."));
+                                       "address the query. Output the FULL TEXT of the relevant code chunks."));
         messages.add(new UserMessage("Query: %s\nReasoning: %s\nUsages found for %s:\n%s".formatted(
                 currentQuery(), reasoning, symbol, processedUsages)));
         String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
@@ -607,9 +598,23 @@ public class SearchAgent {
     /**
      * Find related code using PageRank.
      */
-    private String executePageRankSearch(BoundAction step) {
+    @Tool("Find related code units using PageRank algorithm. Use this when you've made some progress but got stuck, or when you're almost done and want to double-check that you haven't missed anything.")
+    public String executePageRankSearch(
+        @P(value = "List of fully qualified class names to use as seeds for PageRank. Use classes you've already found that seem relevant.", required = true) List<String> classList,
+        @P(value = "Reasoning about what related code you're hoping to discover", required = true) String reasoning
+    ) {
+        if (classList.isEmpty()) {
+            return "Cannot search pagerank: classList is empty";
+        }
+        if (reasoning.isBlank()) {
+            return "Cannot search pagerank: reasoning is empty";
+        }
+
         // Create map of seeds from discovered units
         HashMap<String, Double> weightedSeeds = new HashMap<>();
+        for (String className : classList) {
+            weightedSeeds.put(className, 1.0);
+        }
 
         var pageRankResults = AnalyzerWrapper.combinedPageRankFor(analyzer, weightedSeeds);
 
@@ -622,8 +627,6 @@ public class SearchAgent {
                 .limit(100)
                 .collect(Collectors.joining("\n"));
 
-        // Get reasoning if available
-        String reasoning = step.getParameterString("reasoning");
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new SystemMessage("You are helping evaluate which code units from PageRank results are relevant to a user query. " +
                                        "Review the list of code units and select the ones that are relevant to the query and " +
@@ -653,9 +656,11 @@ public class SearchAgent {
     /**
      * Get the skeleton (structure) of a class.
      */
-    private String executeSkeletonSearch(BoundAction step) {
-        String className = step.getParameterString("className");
-        if (className == null || className.isBlank()) {
+    @Tool("Get an overview of a class's contents, including fields and method signatures. Use this to understand a class's structure without fetching its full source code.")
+    public String executeSkeletonSearch(
+        @P(value = "Fully qualified class name to get the skeleton structure for", required = true) String className
+    ) {
+        if (className.isBlank()) {
             return "Cannot get skeleton: class name is empty";
         }
 
@@ -670,9 +675,12 @@ public class SearchAgent {
     /**
      * Get the full source code of a class.
      */
-    private String executeClassSearch(BoundAction step) {
-        String className = step.getParameterString("className");
-        if (className == null || className.isBlank()) {
+    @Tool("Get the full source code of a class. This is expensive, so prefer using skeleton or method sources when possible. Use this when you need the complete implementation details, or if you think multiple methods in the class may be relevant.")
+    public String executeClassSearch(
+        @P(value = "Fully qualified class name to retrieve the full source code for", required = true) String className,
+        @P(value = "Reasoning about what specific implementation details you're looking for in this class", required = true) String reasoning
+    ) {
+        if (className.isBlank()) {
             return "Cannot get class source: class name is empty";
         }
 
@@ -681,8 +689,6 @@ public class SearchAgent {
             return "No source found for class: " + className;
         }
 
-        // Get reasoning if available
-        String reasoning = step.getParameterString("reasoning");
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new SystemMessage("You are helping evaluate which parts of a class source are relevant to a user query. " +
                                        "Review the following class source and select ONLY the relevant portions that directly " +
@@ -698,9 +704,11 @@ public class SearchAgent {
     /**
      * Get the source code of a method.
      */
-    private String executeMethodSearch(BoundAction step) {
-        String methodName = step.getParameterString("methodName");
-        if (methodName == null || methodName.isBlank()) {
+    @Tool("Get the source code of a specific method. Use this to examine the implementation of a particular method without retrieving the entire class.")
+    public String executeMethodSearch(
+        @P(value = "Fully qualified method name (package name, class name, method name) to retrieve source for", required = true) String methodName
+    ) {
+        if (methodName.isBlank()) {
             return "Cannot get method source: method name is empty";
         }
 
@@ -715,9 +723,10 @@ public class SearchAgent {
     /**
      * Generate sub-queries to further explore the search space.
      */
-    private String executeReflect(BoundAction step) {
-        @SuppressWarnings("unchecked")
-        var subQueries = (List<String>) step.getParameter("subQueries");
+    @Tool("Break down the complex query into smaller, more targeted sub-queries. Use this when the current query is too broad or contains multiple distinct questions that should be explored separately.")
+    public String executeReflect(
+        @P(value = "List of focused sub-queries that together address the current query. Each sub-query should be more specific than the original.", required = true) List<String> subQueries
+    ) {
         if (subQueries.isEmpty()) {
             return "No sub-queries generated";
         }
@@ -744,20 +753,22 @@ public class SearchAgent {
     /**
      * Answer the current query and remove it from the queue.
      */
-    private String executeAnswer(BoundAction step) {
-        String answer = step.getParameterString("explanation");
-        if (answer == null || answer.isBlank()) {
+    @Tool("Provide a final answer to the current query and remove it from the queue. Use this when you have enough information to fully address the query.")
+    public String executeAnswer(
+        @P(value = "Comprehensive explanation that answers the current query. Include relevant source code snippets and explain how they relate to the query.", required = true) String explanation
+    ) {
+        if (explanation.isBlank()) {
             throw new IllegalArgumentException("Empty or missing explanation parameter");
         }
 
         String currentQuery = gapQueries.poll();
         logger.debug("Answering query: {}", currentQuery);
-        logger.debug("Answer: {}", answer);
+        logger.debug("Answer: {}", explanation);
 
         // Store the answer in our collection
-        knowledge.add(new Tuple2<>(currentQuery, answer));
+        knowledge.add(new Tuple2<>(currentQuery, explanation));
 
-        return answer;
+        return explanation;
     }
 
     /**

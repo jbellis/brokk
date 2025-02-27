@@ -7,11 +7,20 @@ organization := "io.github.jbellis"
 name := "brokk"
 
 val javaVersion = "21"
-javacOptions ++= Seq("-source", javaVersion, "-target", javaVersion)
+javacOptions ++= Seq(
+  "-source", javaVersion, 
+  "-target", javaVersion,
+  // Reflection-specific flags
+  "-parameters",           // Preserve method parameter names
+  "-g:source,lines,vars"   // Generate full debugging information
+)
 scalacOptions ++= Seq(
   "-print-lines",
   "-encoding",
-  "UTF-8"
+  "UTF-8",
+  // Reflection-related compiler options
+  "-language:reflectiveCalls",
+  "-feature",
 )
 
 // Additional repositories
