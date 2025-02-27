@@ -284,5 +284,18 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
     public void spinComplete() {
         assert spinnerActive.get();
         spinnerActive.set(false);
+        
+        // Wait for spinner thread to finish cleaning up
+        try {
+            if (spinnerThread != null) {
+                spinnerThread.join(200);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        
+        // Ensure terminal is ready for new input by explicitly flushing
+        terminal.writer().flush();
+        reader.getTerminal().flush();
     }
 }

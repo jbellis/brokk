@@ -364,7 +364,7 @@ public class AnalyzerWrapper {
 
     public Analyzer get() {
         if (!future.isDone()) {
-            io.toolOutput("Analyzer is being created; blocking until it is ready...");
+            io.spin("Analyzer is being created");
         }
         try {
             return future.get();
@@ -373,6 +373,9 @@ public class AnalyzerWrapper {
             throw new RuntimeException("Interrupted while fetching analyzer", e);
         } catch (ExecutionException e) {
             throw new RuntimeException("Failed to create analyzer", e);
+        }
+        finally {
+            io.spinComplete();
         }
     }
     

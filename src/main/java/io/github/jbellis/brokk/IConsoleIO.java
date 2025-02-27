@@ -12,4 +12,11 @@ public interface IConsoleIO {
     boolean confirmAsk(String msg);
 
     void llmOutput(String token);
+
+    default void spin(String s) {
+        toolOutput(s);
+    }
+
+    default void spinComplete() {
+    }
 }
