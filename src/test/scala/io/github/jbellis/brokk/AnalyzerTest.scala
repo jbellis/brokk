@@ -61,7 +61,20 @@ class AnalyzerTest {
     assertEquals(expected, source)
   }
 
-  @Test 
+  @Test
+  def extractMethodSourceConstructor(): Unit = {
+    val analyzer = getAnalyzer
+    val source = analyzer.getMethodSource("B.<init>").get
+
+    val expected =
+      """    public B() {
+        |        System.out.println("B constructor");
+        |    }""".stripMargin
+
+    assertEquals(expected, source)
+  }
+
+  @Test
   def sanitizeTypeTest(): Unit = {
     val analyzer = getAnalyzer
     
