@@ -136,8 +136,7 @@ public class SearchAgent {
             // Decide what action to take for this query
             BoundAction step = determineNextAction();
             String paramInfo = getHumanReadableParameter(step);
-            String spinMessage = "Step " + totalSteps + " | Exploring: " + currentQuery()
-                + " | " + step.action.explanation
+            String spinMessage = "Step " + totalSteps + " | " + step.action.explanation
                 + (paramInfo.isBlank() ? "" : " (" + paramInfo + ")");
             io.spin(spinMessage);
             logger.debug("{}; budget: {}/{}", spinMessage, currentTokenUsage, TOKEN_BUDGET);
@@ -241,7 +240,7 @@ public class SearchAgent {
 
         if (allowSearch) {
             systemPrompt.append("""
-            <action-definitions>
+            <action name=definitions parameters=pattern>
             Search for class/method/field definitions using a regular expression pattern.
              - You can only search for one pattern at a time.
              - You are searching for code symbols so you know that e.g. they never contain whitespace
@@ -254,13 +253,13 @@ public class SearchAgent {
              - Abstract.* // Matches classes with Abstract prefix
              - .*Exception // Matches all exception classes
              - .*vec.* // Substring search for `vec`
-            </action-definitions>
+            </action>
             """.stripIndent());
             systemPrompt.append("""
-            <action-usages>
+            <action name=usage parameters=symbol>
             Find where a symbol is used in code
              - Takes a fully-qualified symbol name (package name, class name, optional member name)
-            </action-usages>
+            </action>
             """.stripIndent());
         }
         if (allowPagerank) {
@@ -269,18 +268,18 @@ public class SearchAgent {
         }
         if (allowSkeleton) {
             systemPrompt.append("""
-            <action-skeleton>
+            <action name=skeleton parameters=className>
             Get an overview of a class's contents, including fields and method signatures.
              - Takes a fully-qualified class name
-            </action-skeleton>
+            </action>
             """.stripIndent());
         }
         if (allowMethod) {
             systemPrompt.append("""
-            <action-method>
+            <action name=method parameters=methodName>
             Get the source code of a method
              - Takes a fully-qualified method name (package name, class name, method name)
-            </action-method>
+            </action>
             """.stripIndent());
         }
         if (allowReflect) {
@@ -288,11 +287,11 @@ public class SearchAgent {
         }
         if (allowAnswer) {
             systemPrompt.append("""
-            <action-answer>
+            <action name=answer parameters=explanation>
             Provide an answer to the current query and remove it from the queue.
-             - Takes the answer to the current query as a string.  Answers should include relevant source
-               code snippets as well as an explanation.
-            </action-answer>
+             - Takes the answer to the current query as a string.  Explanations should include relevant source
+               code snippets as well as an description of how they relate to the query.
+            </action>
             """.stripIndent());
         }
 
@@ -334,6 +333,7 @@ public class SearchAgent {
           "className": "[class name, if applicable]",
           "methodName": "[method name, if applicable]",
           "subQueries": ["[sub-query1]", "[sub-query2]", ...],
+          "explanation": "[the answer to the query]"
         }
         """.stripIndent());
 
@@ -354,15 +354,17 @@ public class SearchAgent {
             systemPrompt.append("</knowledge>\n");
         }
 
+        // Remind about the original query
+        if (!originalQuery.equals(currentQuery())) {
+            systemPrompt.append("\n<original-query>\n");
+            systemPrompt.append(originalQuery);
+            systemPrompt.append("\n</original-query>\n");
+        }
+
         // Add information about current query
         systemPrompt.append("\n<current-query>\n");
         systemPrompt.append(currentQuery());
         systemPrompt.append("\n</current-query>\n");
-
-        // Remind about the original query
-        systemPrompt.append("\n<original-query>\n");
-        systemPrompt.append(originalQuery);
-        systemPrompt.append("\n</original-query>\n");
 
         messages.add(new SystemMessage(systemPrompt.toString()));
         messages.add(new UserMessage("Determine the next action to take to search for code related to: " + currentQuery()));
@@ -399,7 +401,7 @@ public class SearchAgent {
                     case USAGES -> parameters.put("symbol", getStringOrDefault(parsed, "symbol", ""));
                     case SKELETON -> parameters.put("className", getStringOrDefault(parsed, "className", ""));
                     case METHOD -> parameters.put("methodName", getStringOrDefault(parsed, "methodName", ""));
-                    case ANSWER -> parameters.put("answer", getStringOrDefault(parsed, "answer", ""));
+                    case ANSWER -> parameters.put("explanation", getStringOrDefault(parsed, "explanation", ""));
                     case REFLECT -> {
                         // Handle subQueries - convert to JSON string
                         List<String> subQueries = new ArrayList<>();
@@ -630,8 +632,10 @@ public class SearchAgent {
      * Answer the current query and remove it from the queue.
      */
     private String executeAnswer(BoundAction step) {
-        String answer = step.getParameterValue("answer");
-        assert answer != null && !answer.isBlank();
+        String answer = step.getParameterValue("explanation");
+        if (answer == null || answer.isBlank()) {
+            throw new IllegalArgumentException("Empty or missing explanation parameter");
+        }
 
         String currentQuery = gapQueries.poll();
         logger.debug("Answering query: {}", currentQuery);
@@ -675,19 +679,19 @@ public class SearchAgent {
         return switch (step.action()) {
             case DEFINITIONS -> {
                 String pattern = step.getParameterValue("pattern");
-                yield "pattern=" + (pattern == null || pattern.isBlank() ? "?" : pattern);
+                yield (pattern == null || pattern.isBlank() ? "?" : pattern);
             }
             case USAGES -> {
                 String symbol = step.getParameterValue("symbol");
-                yield "symbol=" + (symbol == null || symbol.isBlank() ? "?" : symbol);
+                yield (symbol == null || symbol.isBlank() ? "?" : symbol);
             }
             case SKELETON -> {
                 String className = step.getParameterValue("className");
-                yield "class=" + (className == null || className.isBlank() ? "?" : className);
+                yield (className == null || className.isBlank() ? "?" : className);
             }
             case METHOD -> {
                 String methodName = step.getParameterValue("methodName");
-                yield "method=" + (methodName == null || methodName.isBlank() ? "?" : methodName);
+                yield (methodName == null || methodName.isBlank() ? "?" : methodName);
             }
             case ANSWER -> "finalizing";  // Keep it concise
             default -> "";                // Reflect or malformed, omit
