@@ -3,6 +3,8 @@ package io.github.jbellis.brokk;
 import io.github.jbellis.brokk.Commands.Command;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.jline.keymap.KeyMap;
 import org.jline.reader.Candidate;
 import org.jline.reader.EndOfFileException;
@@ -23,6 +25,11 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
 
     private final Terminal terminal;
     private final LineReader reader;
+    
+    private final AtomicBoolean spinnerActive = new AtomicBoolean(false);
+    private final AtomicReference<String> spinnerMessage = new AtomicReference<>("");
+    private Thread spinnerThread;
+    private final char[] spinnerChars = {'/', '-', '\\', '|'};
 
     public ConsoleIO(Path sourceRoot, Collection<Command> commands, Commands.ArgumentCompleter chatCompleter) {
         try {
@@ -206,5 +213,71 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
 
     public int getTerminalWidth() {
         return terminal.getWidth();
+    }
+    
+    /**
+     * Creates an animated spinner with the given message.
+     * The spinner will continue until spinComplete() is called.
+     * 
+     * @param message The message to display next to the spinner
+     */
+    public void spin(String message) {
+        // Update the message
+        spinnerMessage.set(message);
+        
+        // If spinner is already running, just update the message
+        if (spinnerActive.get()) {
+            return;
+        }
+        
+        // Set active flag and start spinner thread
+        spinnerActive.set(true);
+        
+        spinnerThread = new Thread(() -> {
+            int index = 0;
+            try {
+                while (spinnerActive.get()) {
+                    // Clear the current line
+                    // Clear the current line
+                    terminal.writer().print("\r");
+                    // Clear to end of line to remove any previous message residue
+                    for (int i = 0; i < getTerminalWidth() - 1; i++) {
+                        terminal.writer().print(" ");
+                    }
+                    terminal.writer().print("\r");
+
+                    // Print the spinner and message
+                    llmOutput(spinnerChars[index] + " " + spinnerMessage.get());
+
+                    // Update spinner index
+                    index = (index + 1) % spinnerChars.length;
+                    
+                    //noinspection BusyWait
+                    Thread.sleep(100);
+                }
+                
+                // Clear the spinner line when done
+                terminal.writer().print("\r");
+                for (int i = 0; i < getTerminalWidth() - 1; i++) {
+                    terminal.writer().print(" ");
+                }
+                terminal.writer().print("\r");
+                terminal.writer().flush();
+            } catch (InterruptedException e) {
+                // Thread was interrupted, clean up
+                Thread.currentThread().interrupt();
+            }
+        });
+        
+        spinnerThread.setDaemon(true);
+        spinnerThread.start();
+    }
+    
+    /**
+     * Stops the spinner animation.
+     */
+    public void spinComplete() {
+        assert spinnerActive.get();
+        spinnerActive.set(false);
     }
 }

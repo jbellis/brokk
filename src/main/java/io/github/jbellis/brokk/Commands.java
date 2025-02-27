@@ -221,7 +221,9 @@ public class Commands {
 
         // Create and run the search agent
         SearchAgent agent = new SearchAgent(query, cm, coder, io);
+        io.spin("");
         var result = agent.execute();
+        io.spinComplete();
 
         io.toolOutput(result);
         return OperationResult.success();

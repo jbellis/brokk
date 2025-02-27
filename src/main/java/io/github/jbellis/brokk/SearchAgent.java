@@ -54,19 +54,21 @@ public class SearchAgent {
      * Enum representing possible search actions.
      */
     public enum Action {
-        DEFINITIONS(SearchAgent::executeDefinitionsSearch),
-        USAGES(SearchAgent::executeUsagesSearch),
-        PAGERANK(SearchAgent::executePageRankSearch),
-        SKELETON(SearchAgent::executeSkeletonSearch),
-        METHOD(SearchAgent::executeMethodSearch),
-        REFLECT(SearchAgent::executeReflect),
-        ANSWER(SearchAgent::executeAnswer),
-        MALFORMED(null);
+        DEFINITIONS(SearchAgent::executeDefinitionsSearch, "Searching for symbols"),
+        USAGES(SearchAgent::executeUsagesSearch, "Finding usages"),
+        PAGERANK(SearchAgent::executePageRankSearch, "Finding related code"),
+        SKELETON(SearchAgent::executeSkeletonSearch, "Getting class overview"),
+        METHOD(SearchAgent::executeMethodSearch, "Fetching method source"),
+        REFLECT(SearchAgent::executeReflect, "Breaking down the query"),
+        ANSWER(SearchAgent::executeAnswer, "Answering the question"),
+        MALFORMED(null, "Incorrectly formatted action");
 
         private final BiFunction<SearchAgent, BoundAction, String> executor;
+        private final String explanation;
 
-        Action(BiFunction<SearchAgent, BoundAction, String> executor) {
+        Action(BiFunction<SearchAgent, BoundAction, String> executor, String explanation) {
             this.executor = executor;
+            this.explanation = explanation;
         }
 
         public String getValue() {
@@ -75,6 +77,10 @@ public class SearchAgent {
 
         public BiFunction<SearchAgent, BoundAction, String> getExecutor() {
             return executor;
+        }
+        
+        public String getExplanation() {
+            return explanation;
         }
 
         public static Action fromString(String text) {
@@ -115,13 +121,11 @@ public class SearchAgent {
      */
     public String execute() {
         gapQueries.add(originalQuery); // Initialize with original query
+        io.spin("Step 0 | Exploring: " + originalQuery);
 
         while (totalSteps < MAX_STEPS && currentTokenUsage < TOKEN_BUDGET && !gapQueries.isEmpty()) {
             totalSteps++;
             processedQueries.add(currentQuery());
-
-            io.toolOutput("\nStep " + totalSteps + " | Exploring: " + currentQuery());
-            io.toolOutput("Current budget usage: " + String.format("%.1f%%", (currentTokenUsage * 100.0 / TOKEN_BUDGET)));
 
             // Reset action controls for this step
             resetActionControls();
@@ -131,11 +135,14 @@ public class SearchAgent {
 
             // Decide what action to take for this query
             BoundAction step = determineNextAction();
-            io.toolOutput("Selected action: " + step);
+            var spinMessage = "Step " + totalSteps + " | Exploring: " + currentQuery() + " | " + step.action.explanation;
+            io.spin(spinMessage);
+            logger.debug("{}; budget: {}/{}", spinMessage, currentTokenUsage, TOKEN_BUDGET);
+            logger.debug("Action: {}", step);
 
             // Execute the action
             var actionWithResult = executeAction(step);
-            io.toolOutput("Result: " + actionWithResult.result());
+            logger.debug("Result: {}", actionWithResult.result());
 
             // Track success/failure for action control
             // TODO
@@ -150,11 +157,11 @@ public class SearchAgent {
 //            }
 
             // Debug output
-            io.toolOutput("Query queue: " + gapQueries);
+            logger.debug("Query queue: {}", gapQueries);
 
             // Check if we should terminate
             if (gapQueries.isEmpty()) {
-                io.toolOutput("Search complete after answering original query");
+                logger.debug("Search complete after answering original query");
                 assert step.action == Action.ANSWER;
                 return step.result();
             }
@@ -163,6 +170,7 @@ public class SearchAgent {
             actionHistory.add(actionWithResult);
         }
 
+        logger.debug("Search complete after reaching max steps or budget");
         return "No answer found within budget";
     }
 
@@ -203,7 +211,6 @@ public class SearchAgent {
         currentTokenUsage += promptTokens;
 
         // Ask LLM for next action
-        io.toolOutput("Determining next action for: " + currentQuery());
         String response = coder.sendStreaming(coder.models.editModel(), messages, false);
         currentTokenUsage += estimateTokenCount(response);
 
@@ -317,13 +324,13 @@ public class SearchAgent {
         systemPrompt.append("""
         Respond with only ONE action in JSON format like this. Remember that symbols, class names, and method names must be fully-qualified.
         {
+          "reasoning": "[your thought process]"
           "action": "[one of: definitions, usages, pagerank, skeleton, method, reflect, answer]",
           "pattern": "[pattern to search for, if applicable]",
           "symbol": "[specific symbol to find, if applicable]",
           "className": "[class name, if applicable]",
           "methodName": "[method name, if applicable]",
           "subQueries": ["[sub-query1]", "[sub-query2]", ...],
-          "reasoning": "[your thought process]"
         }
         """.stripIndent());
 
@@ -447,7 +454,6 @@ public class SearchAgent {
             String result = step.execute();
             return step.withResult(result);
         } catch (Exception e) {
-            io.toolError("Error executing action: " + e.getMessage());
             logger.error("Action execution error", e);
             return step.withResult("Error: " + e.getMessage());
         }
@@ -467,7 +473,7 @@ public class SearchAgent {
             return "No definitions found for pattern: " + pattern;
         }
 
-        io.toolOutput("Raw definitions: " + definitions);
+        logger.debug("Raw definitions: {}", definitions);
 
         // Ask coder to determine which definitions are potentially relevant
         StringBuilder definitionsStr = new StringBuilder();
@@ -480,8 +486,6 @@ public class SearchAgent {
                                                "Review the list of definitions and select the ones most relevant to the query. " +
                                                "Include your reasoning for each selection."));
         messages.add(new UserMessage("Query: " + currentQuery() + "\n\nDefinitions found:\n" + definitionsStr));
-
-        io.toolOutput("Evaluating relevant definitions");
         String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
         currentTokenUsage += estimateTokenCount(response);
 
@@ -606,10 +610,10 @@ public class SearchAgent {
             // TODO semantic deduplications
             if (!processedQueries.contains(query) && !gapQueries.contains(query)) {
                 gapQueries.offerFirst(query);
-                io.toolOutput("Adding new query: " + query);
+                logger.debug("Adding new query: {}", query);
                 i++;
             } else {
-                io.toolOutput("Skipping duplicate query: " + query);
+                logger.debug("Skipping duplicate query: {}", query);
             }
             if (i >= MAX_SUB_QUERIES) {
                 break;
@@ -627,8 +631,8 @@ public class SearchAgent {
         assert answer != null && !answer.isBlank();
 
         String currentQuery = gapQueries.poll();
-        io.toolOutput("Answering query: " + currentQuery);
-        io.toolOutput("Answer: " + answer);
+        logger.debug("Answering query: {}", currentQuery);
+        logger.debug("Answer: {}", answer);
 
         // Store the answer in our collection
         answeredQueries.put(currentQuery, answer);
