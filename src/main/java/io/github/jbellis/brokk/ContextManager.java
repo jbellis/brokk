@@ -1,6 +1,7 @@
 package io.github.jbellis.brokk;
 
 import com.google.common.collect.Streams;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -44,6 +45,34 @@ public class ContextManager implements IContextManager {
     private ConsoleIO io;
     private Coder coder;
     private final ExecutorService backgroundTasks = Executors.newFixedThreadPool(2);
+    
+    public enum Mode {
+        EDIT,
+        APPLY
+    }
+    
+    private Mode mode = Mode.EDIT;
+    
+    /**
+     * Get the current mode
+     */
+    public Mode getMode() {
+        return mode;
+    }
+    
+    /**
+     * Set the current mode
+     */
+    public void setMode(Mode mode) {
+        this.mode = mode;
+    }
+    
+    /**
+     * Get the appropriate model based on current mode
+     */
+    public StreamingChatLanguageModel getCurrentModel(Models models) {
+        return mode == Mode.EDIT ? models.editModel() : models.applyModel();
+    }
 
     // build command inference stored here
     private Future<BuildCommand> buildCommand;
@@ -433,7 +462,7 @@ public class ContextManager implements IContextManager {
         }
         int humanContextSize = contextHistory.size() - 1; // first entry is sentinel
         showHeader("%s mode. %d %s in context history".formatted(
-                coder.mode.name(),
+                mode.name(),
                 humanContextSize,
                 humanContextSize > 1 ? "entries" : "entry"
         ));

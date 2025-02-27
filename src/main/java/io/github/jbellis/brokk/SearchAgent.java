@@ -1,6 +1,7 @@
 package io.github.jbellis.brokk;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.AiMessage;
@@ -205,7 +206,7 @@ public class SearchAgent {
 
         // Ask LLM for next action
         io.toolOutput("Determining next action for: " + currentQuery());
-        String response = coder.sendStreaming(messages, false);
+        String response = coder.sendStreaming(coder.models.editModel(), messages, false);
         currentTokenUsage += estimateTokenCount(response);
 
         // Parse response
@@ -477,7 +478,8 @@ public class SearchAgent {
                                                "Include your reasoning for each selection."));
         messages.add(new UserMessage("Query: " + currentQuery() + "\n\nDefinitions found:\n" + definitionsStr));
 
-        String response = coder.sendMessage("Evaluating relevant definitions", messages);
+        io.toolOutput("Evaluating relevant definitions");
+        String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
         currentTokenUsage += estimateTokenCount(response);
 
         // Extract mentions of the definitions from the response

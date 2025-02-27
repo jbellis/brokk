@@ -4,6 +4,7 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.StreamingResponseHandler;
+import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.output.Response;
 import io.github.jbellis.brokk.prompts.DefaultPrompts;
@@ -29,16 +30,10 @@ import java.util.function.Consumer;
 public class Coder {
     private final Logger logger = LogManager.getLogger(Coder.class);
 
-    public enum Mode {
-        EDIT,
-        APPLY
-    }
-
-    Mode mode = Mode.EDIT;
     private final IConsoleIO io;
     private final Path historyFile;
     private final DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private final Models models;
+    public final Models models;
     final IContextManager contextManager;
 
     private int totalLinesOfCode = 0;
@@ -56,7 +51,7 @@ public class Coder {
      *
      * @param userInput The original user message you want to send.
      */
-    public void runSession(String userInput) {
+    public void runSession(StreamingChatLanguageModel model, String userInput) {
         // Track original contents of files before any changes
         var originalContents = new HashMap<RepoFile, String>(); 
         List<ChatMessage> pendingHistory = new ArrayList<>();
@@ -64,8 +59,6 @@ public class Coder {
             io.toolError("No LLM available (missing API keys)");
             return;
         }
-
-        var beginMode = mode;
 
         var requestMsg = new UserMessage("<goal>\n%s\n</goal>".formatted(userInput.trim()));
 
@@ -78,7 +71,7 @@ public class Coder {
 
             // Actually send the message to the LLM and get the response
             logger.debug("Sending to LLM [only last message shown]: {}", requestMsg);
-            String llmResponse = sendStreaming(messages, true);
+            String llmResponse = sendStreaming(model, messages, true);
             logger.debug("response:\n{}", llmResponse);
             if (llmResponse == null) {
                 // Interrupted or error.  sendMessage is responsible for giving feedback to user
@@ -137,7 +130,7 @@ public class Coder {
             var parseReflection = reflectionManager.getParseReflection(parseResult, editResult.blocks(), blocks, contextManager);
             if (!parseReflection.isEmpty()) {
                 io.toolOutput("Attempting to fix parse/match errors...");
-                mode = Mode.APPLY; // faster
+                model = models.applyModel();
                 requestMsg = new UserMessage(parseReflection);
                 continue;
             }
@@ -153,12 +146,10 @@ public class Coder {
                 break;
             }
             io.toolOutput("Attempting to fix build errors...");
-            mode = Mode.EDIT; // smarter
+            // Use EDIT model (smarter) for build fixes
+            model = models.editModel();
             requestMsg = new UserMessage(buildReflection);
         }
-
-        // Reset mode back to what the user had it set to
-        mode = beginMode;
 
         // Add all pending messages to history in one batch
         if (!pendingHistory.isEmpty()) {
@@ -174,7 +165,7 @@ public class Coder {
      * Actually sends a user query to the LLM (with streaming),
      * writes to conversation history, etc.
      */
-    public String sendStreaming(List<ChatMessage> messages, boolean echo) {
+    public String sendStreaming(StreamingChatLanguageModel model, List<ChatMessage> messages, boolean echo) {
         int userLineCount = messages.stream()
                 .mapToInt(m -> ContextManager.getText(m).split("\n", -1).length).sum();
 
@@ -200,7 +191,6 @@ public class Coder {
             }
         });
 
-        var model = mode == Mode.EDIT ? models.editModel() : models.applyModel();
         model.generate(messages, new StreamingResponseHandler<>() {
             @Override
             public void onNext(String token) {
@@ -252,18 +242,22 @@ public class Coder {
     }
 
     public String sendMessage(List<ChatMessage> messages) {
-        return sendMessage(null, messages);
+        return sendMessage(models.quickModel(), null, messages);
     }
 
-    /** currently hardcoded to quick model */
     public String sendMessage(String description, List<ChatMessage> messages) {
+        return sendMessage(models.quickModel(), description, messages);
+    }
+
+    /** Send a message to a specific model */
+    public String sendMessage(ChatLanguageModel model, String description, List<ChatMessage> messages) {
         if (description != null) {
             io.toolOutput(description);
         }
         writeRequestToHistory(messages);
         Response<AiMessage> response;
         try {
-            response = models.quickModel().generate(messages);
+            response = model.generate(messages);
         } catch (Throwable th) {
             writeToHistory("Error", th.getMessage());
             return "";

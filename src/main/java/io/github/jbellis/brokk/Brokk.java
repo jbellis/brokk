@@ -122,7 +122,7 @@ public class Brokk {
             if (commands.isCommand(input)) {
                 result = commands.handleCommand(input);
             } else {
-                coder.runSession(input);
+                coder.runSession(contextManager.getCurrentModel(coder.models), input);
                 // coder handles its own feedback
                 result = OperationResult.success();
             }

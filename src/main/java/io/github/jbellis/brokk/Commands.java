@@ -495,7 +495,7 @@ public class Commands {
         var messages = AskPrompts.instance.collectMessages(cm);
         messages.add(new UserMessage("<question>\n%s\n</question>".formatted(input.trim())));
 
-        String response = coder.sendStreaming(messages, true);
+        String response = coder.sendStreaming(cm.getCurrentModel(coder.models), messages, true);
         if (response != null) {
             cm.addToHistory(List.of(messages.getLast(), new AiMessage(response)));
         }
@@ -536,10 +536,10 @@ public class Commands {
     private OperationResult cmdMode(String args) {
         String modeArg = args.trim().toUpperCase();
         if ("EDIT".equals(modeArg)) {
-            coder.mode = Coder.Mode.EDIT;
+            cm.setMode(ContextManager.Mode.EDIT);
             return OperationResult.success("Mode set to EDIT");
         } else if ("APPLY".equals(modeArg)) {
-            coder.mode = Coder.Mode.APPLY;
+            cm.setMode(ContextManager.Mode.APPLY);
             return OperationResult.success("Mode set to APPLY");
         } else {
             return OperationResult.error("Invalid mode. Valid modes are EDIT and APPLY.");
@@ -590,8 +590,8 @@ public class Commands {
             return OperationResult.error("Failed to copy to clipboard: " + e1.getMessage());
         }
 
-        if (args.isBlank() && coder.mode != Coder.Mode.APPLY) {
-            coder.mode = Coder.Mode.APPLY;
+        if (args.isBlank() && cm.getMode() != ContextManager.Mode.APPLY) {
+            cm.setMode(ContextManager.Mode.APPLY);
             io.toolOutput("/mode set to APPLY by /copy");
         }
 
@@ -746,7 +746,7 @@ public class Commands {
                 """.formatted(msg.trim()).stripIndent();
         messages.add(new UserMessage(st));
 
-        String response = coder.sendStreaming(messages, true);
+        String response = coder.sendStreaming(cm.getCurrentModel(coder.models), messages, true);
         if (response != null) {
             cm.addToHistory(List.of(messages.getLast(), new AiMessage(response)));
             var missing = cm.findMissingFileMentions(response);
