@@ -221,13 +221,10 @@ public class Commands {
 
         // Create and run the search agent
         SearchAgent agent = new SearchAgent(query, cm, coder, io);
-        Set<CodeUnit> results = agent.execute();
+        var result = agent.execute();
 
-        if (results.isEmpty()) {
-            return OperationResult.error("No relevant code found for query: " + query);
-        }
-
-        return OperationResult.success("Search complete - " + results.size() + " relevant code units found");
+        io.toolOutput(result);
+        return OperationResult.success();
     }
 
     /**

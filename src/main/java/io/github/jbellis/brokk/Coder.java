@@ -169,7 +169,9 @@ public class Coder {
         int userLineCount = messages.stream()
                 .mapToInt(m -> ContextManager.getText(m).split("\n", -1).length).sum();
 
-        io.toolOutput("Request sent");
+        if (echo) {
+            io.toolOutput("Request sent");
+        }
         writeRequestToHistory(messages);
 
         StringBuilder currentResponse = new StringBuilder();

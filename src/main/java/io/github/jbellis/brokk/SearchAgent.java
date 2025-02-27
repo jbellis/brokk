@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
 public class SearchAgent {
     private final Logger logger = LogManager.getLogger(SearchAgent.class);
     private static final int TOKEN_BUDGET = 64000; // 64K context window for models like R1
-    private static final int MAX_STEPS = 10;
+    private static final int MAX_STEPS = 20;
     private static final int MAX_SUB_QUERIES = 3;
 
     private final Analyzer analyzer;
@@ -54,24 +54,23 @@ public class SearchAgent {
      * Enum representing possible search actions.
      */
     public enum Action {
-        DEFINITIONS("definitions", SearchAgent::executeDefinitionsSearch),
-        USAGES("usages", SearchAgent::executeUsagesSearch),
-        PAGERANK("pagerank", SearchAgent::executePageRankSearch),
-        SKELETON("skeleton", SearchAgent::executeSkeletonSearch),
-        METHOD("method", SearchAgent::executeMethodSearch),
-        REFLECT("reflect", SearchAgent::executeReflect),
-        ANSWER("answer", SearchAgent::executeAnswer);
+        DEFINITIONS(SearchAgent::executeDefinitionsSearch),
+        USAGES(SearchAgent::executeUsagesSearch),
+        PAGERANK(SearchAgent::executePageRankSearch),
+        SKELETON(SearchAgent::executeSkeletonSearch),
+        METHOD(SearchAgent::executeMethodSearch),
+        REFLECT(SearchAgent::executeReflect),
+        ANSWER(SearchAgent::executeAnswer),
+        MALFORMED(null);
 
-        private final String value;
         private final BiFunction<SearchAgent, BoundAction, String> executor;
 
-        Action(String value, BiFunction<SearchAgent, BoundAction, String> executor) {
-            this.value = value;
+        Action(BiFunction<SearchAgent, BoundAction, String> executor) {
             this.executor = executor;
         }
 
         public String getValue() {
-                return value;
+            return name().toLowerCase();
         }
 
         public BiFunction<SearchAgent, BoundAction, String> getExecutor() {
@@ -80,13 +79,13 @@ public class SearchAgent {
 
         public static Action fromString(String text) {
             for (Action action : Action.values()) {
-                if (action.value.equalsIgnoreCase(text)) {
-                return action;
+                if (action.name().equalsIgnoreCase(text)) {
+                    return action;
+                }
             }
+            return REFLECT; // Default to reflect if unknown
         }
-        return REFLECT; // Default to reflect if unknown
     }
-}
 
     // Search state
     private final String originalQuery;
@@ -104,7 +103,6 @@ public class SearchAgent {
         this.analyzer = contextManager.getAnalyzer();
         this.coder = coder;
         this.io = io;
-        this.gapQueries.add(query); // Start with the original query
     }
 
     private String currentQuery() {
@@ -115,8 +113,7 @@ public class SearchAgent {
      * Execute the search process, iterating through queries until completion.
      * @return The final set of discovered code units
      */
-    public Set<CodeUnit> execute() {
-        io.toolOutput("Starting agentic code search for: " + originalQuery);
+    public String execute() {
         gapQueries.add(originalQuery); // Initialize with original query
 
         while (totalSteps < MAX_STEPS && currentTokenUsage < TOKEN_BUDGET && !gapQueries.isEmpty()) {
@@ -158,14 +155,15 @@ public class SearchAgent {
             // Check if we should terminate
             if (gapQueries.isEmpty()) {
                 io.toolOutput("Search complete after answering original query");
-                break;
+                assert step.action == Action.ANSWER;
+                return step.result();
             }
 
             // Add the step to the history
             actionHistory.add(actionWithResult);
         }
 
-        return Set.of(); // TODO
+        return "No answer found within budget";
     }
 
     /**
@@ -419,9 +417,8 @@ public class SearchAgent {
                 }
             }
         } catch (Exception e) {
-            // TODO add the bad response to context
-            logger.error("Failed to parse response: " + e.getMessage(), e);
-            io.toolError("Failed to parse response: " + e.getMessage());
+            logger.error("Failed to parse response {}: {}", response, e.getMessage());
+            return new BoundAction(Action.MALFORMED, response, "Failed to parse response: " + e.getMessage());
         }
 
         // Convert parameters map to a JSON string
@@ -440,6 +437,12 @@ public class SearchAgent {
      * Execute the selected action for the current step.
      */
     private BoundAction executeAction(BoundAction step) {
+        // Skip execution if the result is already present
+        if (step.result() != null) {
+            logger.debug("Skipping execution of {}", step);
+            return step;
+        }
+
         try {
             String result = step.execute();
             return step.withResult(result);
