@@ -33,6 +33,11 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
 
     public ConsoleIO(Path sourceRoot, Collection<Command> commands, Commands.ArgumentCompleter chatCompleter) {
         try {
+            // attempt to have jline sleep between polling for input
+            // this doesn't work but maybe try
+            // https://github.com/jline/jline3/blob/master/terminal/src/main/java/org/jline/utils/NonBlocking.java
+            // System.setProperty("jline.terminal.read.timeout", "50");
+
             var historyFile = sourceRoot.resolve(".brokk/linereader.txt");
             this.terminal = TerminalBuilder.terminal();
 
