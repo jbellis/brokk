@@ -125,6 +125,7 @@ public class AnalyzerWrapper {
         return combinedScores.entrySet().stream()
             .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
             .map(Map.Entry::getKey)
+            .filter(analyzer::isClassInProject)
             .toList();
     }
 

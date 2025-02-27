@@ -218,7 +218,7 @@ public class Context {
             boolean eligible = !(ineligibleSources.contains(CodeUnit.cls(fqName))
                     || (fqName.contains("$") && ineligibleSources.contains(CodeUnit.cls(fqName.substring(0, fqName.indexOf('$'))))));
             
-            if (eligible && analyzer.get().isClassInProject(fqName)) {
+            if (eligible) {
                 var opt = analyzer.get().getSkeleton(fqName);
                 if (opt.isDefined()) {
                     var shortName = fqName.substring(fqName.lastIndexOf('.') + 1);

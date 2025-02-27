@@ -93,7 +93,7 @@ public class SearchAgent {
                     return action;
                 }
             }
-            return REFLECT; // Default to reflect if unknown
+            throw new IllegalArgumentException("Unrecognized action: " + text);
         }
     }
 
@@ -297,8 +297,14 @@ public class SearchAgent {
             """.stripIndent());
         }
         if (allowPagerank) {
-            // TODO
-            // systemPrompt.append("<action-pagerank>Find related code elements using PageRank</action-pagerank>\n");
+            systemPrompt.append("""
+            <action name=pagerank parameters=classList>
+            Find related code units using PageRank. This is a good option
+            both when you've made some progress and got stuck, or when you're
+            almost done and want to doublecheck that you haven't missed anything.
+             - Takes an array of fully-qualified class names
+            </action>
+            """.stripIndent());
         }
         if (allowSkeleton) {
             systemPrompt.append("""
@@ -378,6 +384,7 @@ public class SearchAgent {
           "symbol": "[specific symbol to find, if applicable]",
           "className": "[class name, if applicable]",
           "methodName": "[method name, if applicable]",
+          "classList": ["[class1]", "[class2]", ...],
           "subQueries": ["[sub-query1]", "[sub-query2]", ...],
           "explanation": "[the answer to the query]"
         }
@@ -426,8 +433,6 @@ public class SearchAgent {
      * Parse the LLM response into a SearchStep object.
      */
     private BoundAction parseResponse(String response) {
-        // Default values in case parsing fails
-        Action action = Action.REFLECT;
         Map<String, Object> parameters = new HashMap<>();
 
         try {
@@ -435,52 +440,41 @@ public class SearchAgent {
             int startIndex = response.indexOf("{");
             int endIndex = response.lastIndexOf("}");
 
-            if (startIndex >= 0 && endIndex > startIndex) {
-                String jsonContent = response.substring(startIndex, endIndex + 1);
-
-                // Parse JSON using Jackson
-                ObjectMapper mapper = new ObjectMapper();
-                var parsed = mapper.readValue(jsonContent, new TypeReference<Map<String, Object>>() {});
-
-                String actionStr = getStringOrEmpty(parsed, "action");
-                action = Action.fromString(actionStr);
-
-                // Extract reasoning if available
-                String reasoning = getStringOrEmpty(parsed, "reasoning");
-                if (!reasoning.isBlank()) {
-                    parameters.put("reasoning", reasoning);
-                }
-
-                // Extract relevant parameters based on action type
-                switch (action) {
-                    case DEFINITIONS -> parameters.put("pattern", getStringOrEmpty(parsed, "pattern"));
-                    case USAGES -> parameters.put("symbol", getStringOrEmpty(parsed, "symbol"));
-                    case SKELETON -> parameters.put("className", getStringOrEmpty(parsed, "className"));
-                    case CLASS -> parameters.put("className", getStringOrEmpty(parsed, "className"));
-                    case METHOD -> parameters.put("methodName", getStringOrEmpty(parsed, "methodName"));
-                    case ANSWER -> parameters.put("explanation", getStringOrEmpty(parsed, "explanation"));
-                    case REFLECT -> {
-                        // Handle subQueries - convert to JSON string
-                        var subQueries = getListOrEmpty(parsed, "subQueries");
-                        parameters.put("subQueries", mapper.writeValueAsString(subQueries));
-                    }
-                }
+            if (startIndex < 0 || endIndex <= startIndex) {
+                throw new IllegalArgumentException("No JSON content found");
             }
+            String jsonContent = response.substring(startIndex, endIndex + 1);
+
+            // Parse JSON using Jackson
+            ObjectMapper mapper = new ObjectMapper();
+            var parsed = mapper.readValue(jsonContent, new TypeReference<Map<String, Object>>() {});
+
+            // required parameters
+            var actionStr = getStringOrEmpty(parsed, "action");
+            if (actionStr.isBlank()) {
+                throw new IllegalArgumentException("missing `action`");
+            }
+            var action = Action.fromString(actionStr);
+            var reasoning = getStringOrEmpty(parsed, "reasoning");
+            if (reasoning.isBlank()) {
+                throw new IllegalArgumentException("missing `response`");
+            }
+
+            // Extract relevant parameters based on action type
+            switch (action) {
+                case DEFINITIONS -> parameters.put("pattern", getStringOrEmpty(parsed, "pattern"));
+                case USAGES -> parameters.put("symbol", getStringOrEmpty(parsed, "symbol"));
+                case SKELETON -> parameters.put("className", getStringOrEmpty(parsed, "className"));
+                case CLASS -> parameters.put("className", getStringOrEmpty(parsed, "className"));
+                case METHOD -> parameters.put("methodName", getStringOrEmpty(parsed, "methodName"));
+                case ANSWER -> parameters.put("explanation", getStringOrEmpty(parsed, "explanation"));
+                case REFLECT -> parameters.put("subQueries", getListOrEmpty(parsed, "subQueries"));
+            }
+            return new BoundAction(action, parameters, null);
         } catch (Exception e) {
             logger.error("Failed to parse response {}: {}", response, e.getMessage());
-            return new BoundAction(Action.MALFORMED, response, "Failed to parse response: " + e.getMessage());
+            return new BoundAction(Action.MALFORMED, Map.of("unparsed", response), "Failed to parse response: " + e.getMessage());
         }
-
-        // Convert parameters map to a JSON string
-        String parameterJson = "{}";
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-            parameterJson = mapper.writeValueAsString(parameters);
-        } catch (JsonProcessingException e) {
-            logger.error("Failed to serialize parameters to JSON", e);
-        }
-
-        return new BoundAction(action, parameterJson, null);
     }
 
     @NotNull
@@ -526,7 +520,7 @@ public class SearchAgent {
      * Search for definitions matching a pattern.
      */
     private String executeDefinitionsSearch(BoundAction step) {
-        String pattern = step.getParameterValue("pattern");
+        String pattern = step.getParameterString("pattern");
         if (pattern == null || pattern.isBlank()) {
             return "Cannot search definitions: pattern is empty";
         }
@@ -545,7 +539,7 @@ public class SearchAgent {
         }
 
         // Get reasoning if available
-        String reasoning = step.getParameterValue("reasoning");
+        String reasoning = step.getParameterString("reasoning");
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new SystemMessage("You are helping evaluate which code definitions are relevant to a user query. " +
                                                "Review the list of definitions and select the ones most relevant to the query and " +
@@ -583,7 +577,7 @@ public class SearchAgent {
      * Search for usages of a symbol.
      */
     private String executeUsageSearch(BoundAction step) {
-        String symbol = step.getParameterValue("symbol");
+        String symbol = step.getParameterString("symbol");
         if (symbol == null || symbol.isBlank()) {
             return "Cannot search usages: symbol is empty";
         }
@@ -597,7 +591,7 @@ public class SearchAgent {
         String processedUsages = AnalyzerWrapper.processUsages(analyzer, uses).toString();
 
         // Get reasoning if available
-        String reasoning = step.getParameterValue("reasoning");
+        String reasoning = step.getParameterString("reasoning");
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new SystemMessage("You are helping evaluate which code usages are relevant to a user query. " +
                                        "Review the following code usages and select ONLY the relevant chunks that directly " +
@@ -616,9 +610,8 @@ public class SearchAgent {
     private String executePageRankSearch(BoundAction step) {
         // Create map of seeds from discovered units
         HashMap<String, Double> weightedSeeds = new HashMap<>();
-        // TODO: Once we track discovered units, add them to the weightedSeeds map with weights
 
-        var pageRankResults = analyzer.getPagerank(weightedSeeds, 10, false);
+        var pageRankResults = AnalyzerWrapper.combinedPageRankFor(analyzer, weightedSeeds);
 
         if (pageRankResults.isEmpty()) {
             return "No related code found via PageRank";
@@ -642,7 +635,7 @@ public class SearchAgent {
      * Get the skeleton (structure) of a class.
      */
     private String executeSkeletonSearch(BoundAction step) {
-        String className = step.getParameterValue("className");
+        String className = step.getParameterString("className");
         if (className == null || className.isBlank()) {
             return "Cannot get skeleton: class name is empty";
         }
@@ -659,7 +652,7 @@ public class SearchAgent {
      * Get the full source code of a class.
      */
     private String executeClassSearch(BoundAction step) {
-        String className = step.getParameterValue("className");
+        String className = step.getParameterString("className");
         if (className == null || className.isBlank()) {
             return "Cannot get class source: class name is empty";
         }
@@ -670,7 +663,7 @@ public class SearchAgent {
         }
 
         // Get reasoning if available
-        String reasoning = step.getParameterValue("reasoning");
+        String reasoning = step.getParameterString("reasoning");
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new SystemMessage("You are helping evaluate which parts of a class source are relevant to a user query. " +
                                        "Review the following class source and select ONLY the relevant portions that directly " +
@@ -687,7 +680,7 @@ public class SearchAgent {
      * Get the source code of a method.
      */
     private String executeMethodSearch(BoundAction step) {
-        String methodName = step.getParameterValue("methodName");
+        String methodName = step.getParameterString("methodName");
         if (methodName == null || methodName.isBlank()) {
             return "Cannot get method source: method name is empty";
         }
@@ -704,7 +697,8 @@ public class SearchAgent {
      * Generate sub-queries to further explore the search space.
      */
     private String executeReflect(BoundAction step) {
-        List<String> subQueries = getSubQueriesFromJson(step.getParameterValue("subQueries"));
+        @SuppressWarnings("unchecked")
+        var subQueries = (List<String>) step.getParameter("subQueries");
         if (subQueries.isEmpty()) {
             return "No sub-queries generated";
         }
@@ -732,7 +726,7 @@ public class SearchAgent {
      * Answer the current query and remove it from the queue.
      */
     private String executeAnswer(BoundAction step) {
-        String answer = step.getParameterValue("explanation");
+        String answer = step.getParameterString("explanation");
         if (answer == null || answer.isBlank()) {
             throw new IllegalArgumentException("Empty or missing explanation parameter");
         }
@@ -778,23 +772,23 @@ public class SearchAgent {
         // Reflect is omitted on purpose. Others show key info.
         return switch (step.action()) {
             case DEFINITIONS -> {
-                String pattern = step.getParameterValue("pattern");
+                String pattern = step.getParameterString("pattern");
                 yield (pattern == null || pattern.isBlank() ? "?" : pattern);
             }
             case USAGES -> {
-                String symbol = step.getParameterValue("symbol");
+                String symbol = step.getParameterString("symbol");
                 yield (symbol == null || symbol.isBlank() ? "?" : symbol);
             }
             case SKELETON -> {
-                String className = step.getParameterValue("className");
+                String className = step.getParameterString("className");
                 yield (className == null || className.isBlank() ? "?" : className);
             }
             case CLASS -> {
-                String className = step.getParameterValue("className");
+                String className = step.getParameterString("className");
                 yield (className == null || className.isBlank() ? "?" : className);
             }
             case METHOD -> {
-                String methodName = step.getParameterValue("methodName");
+                String methodName = step.getParameterString("methodName");
                 yield (methodName == null || methodName.isBlank() ? "?" : methodName);
             }
             case ANSWER -> "finalizing";  // Keep it concise
@@ -803,42 +797,21 @@ public class SearchAgent {
     }
 
     /**
-     * Helper method to parse subQueries from JSON string.
-     */
-    private List<String> getSubQueriesFromJson(String subQueriesJson) {
-        if (subQueriesJson == null || subQueriesJson.isBlank()) {
-            return new ArrayList<>();
-        }
-        
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-            return mapper.readValue(subQueriesJson, new TypeReference<>() {});
-        } catch (Exception e) {
-            logger.error("Failed to parse subQueries JSON", e);
-            return new ArrayList<>();
-        }
-    }
-
-    /**
      * Represents a single step in the search process with bound parameters.
      */
     public class BoundAction {
         private final Action action;
-        private final String parametersJson;
+        private final Map<String, Object> parameters;
         private final String result;
 
-        public BoundAction(Action action, String parametersJson, String result) {
+        public BoundAction(Action action, Map<String, Object> parameters, String result) {
             this.action = action;
-            this.parametersJson = parametersJson;
+            this.parameters = parameters;
             this.result = result;
         }
 
         public Action action() {
             return action;
-        }
-
-        public String parametersJson() {
-            return parametersJson;
         }
 
         public String result() {
@@ -856,28 +829,21 @@ public class SearchAgent {
         public String toString() {
             return "SearchStep{" +
                     "action=" + action +
-                    ", parametersJson='" + parametersJson + '\'' +
+                    ", parametersJson='" + parameters + '\'' +
                     (result != null ? ", result='" + result + '\'' : "") +
                     '}';
         }
 
         public BoundAction withResult(String result) {
-            return new BoundAction(action, parametersJson, result);
+            return new BoundAction(action, parameters, result);
         }
 
-        /**
-         * Helper method to get a parametersJson value from the SearchStep's parametersJson JSON.
-         */
-        private String getParameterValue(String paramName) {
-            try {
-                ObjectMapper mapper = new ObjectMapper();
-                var params = mapper.readValue(parametersJson(), new TypeReference<Map<String, Object>>() {});
-                Object value = params.get(paramName);
-                return value != null ? value.toString() : null;
-            } catch (Exception e) {
-                SearchAgent.this.logger.error("Failed to get parametersJson " + paramName, e);
-                return null;
-            }
+        private Object getParameter(String paramName) {
+            return parameters.get(paramName);
+        }
+
+        private String getParameterString(String paramName) {
+            return (String) parameters.get(paramName);
         }
     }
 }
