@@ -617,18 +617,37 @@ public class SearchAgent {
             return "No related code found via PageRank";
         }
 
-        StringBuilder result = new StringBuilder();
-        result.append("Found ").append(pageRankResults.size()).append(" related code units via PageRank:\n\n");
+        // Build a string with the top 100 results to pass to the LLM for relevance filtering
+        var pageRankUnits = pageRankResults.stream()
+                .limit(100)
+                .collect(Collectors.joining("\n"));
 
-        AtomicInteger counter = new AtomicInteger(0);
-        pageRankResults.stream()
-                .limit(10)
-                .forEach(pair -> result.append(counter.incrementAndGet())
-                                      .append(". ")
-                                      .append(pair._1)
-                                      .append("\n"));
+        // Get reasoning if available
+        String reasoning = step.getParameterString("reasoning");
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(new SystemMessage("You are helping evaluate which code units from PageRank results are relevant to a user query. " +
+                                       "Review the list of code units and select the ones that are relevant to the query and " +
+                                       "to your previous reasoning. Output just the fully qualified names of relevant units."));
+        messages.add(new UserMessage("Query: %s\nReasoning: %s\nPageRank results:\n%s".formatted(
+                currentQuery(), reasoning, pageRankUnits)));
+        String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+        currentTokenUsage += estimateTokenCount(response);
 
-        return result.toString();
+        // Extract mentions of the PageRank results from the response
+        var relevantUnits = new ArrayList<String>();
+        for (var ref : pageRankResults) {
+            // Look for the reference with word boundaries to avoid partial matches
+            var p = Pattern.compile("\\b" + Pattern.quote(ref) + "\\b");
+            var matcher = p.matcher(response);
+            if (matcher.find()) {
+                relevantUnits.add(ref);
+            }
+        }
+
+        if (relevantUnits.isEmpty()) {
+            return pageRankResults.stream().limit(10).collect(Collectors.joining(", "));
+        }
+        return String.join(", ", relevantUnits);
     }
 
     /**
