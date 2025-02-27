@@ -122,7 +122,7 @@ public class SearchAgent {
      */
     public String execute() {
         gapQueries.add(originalQuery); // Initialize with original query
-        io.spin("Step 0 | Exploring: " + originalQuery);
+        io.spin("Exploring: " + originalQuery);
 
         while (totalSteps < MAX_STEPS && currentTokenUsage < TOKEN_BUDGET && !gapQueries.isEmpty()) {
             totalSteps++;
@@ -137,8 +137,7 @@ public class SearchAgent {
             // Decide what action to take for this query
             BoundAction step = determineNextAction();
             String paramInfo = getHumanReadableParameter(step);
-            String spinMessage = "Step " + totalSteps + " | " + step.action.explanation
-                + (paramInfo.isBlank() ? "" : " (" + paramInfo + ")");
+            String spinMessage = step.action.explanation + (paramInfo.isBlank() ? "" : " (" + paramInfo + ")");
             io.spin(spinMessage);
             logger.debug("{}; budget: {}/{}", spinMessage, currentTokenUsage, TOKEN_BUDGET);
             logger.debug("Action: {}", step);

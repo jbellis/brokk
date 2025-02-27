@@ -217,8 +217,6 @@ public class Commands {
             return OperationResult.error("Please provide a search query");
         }
 
-        io.toolOutput("Starting agent-based code search...");
-
         // Create and run the search agent
         SearchAgent agent = new SearchAgent(query, cm, coder, io);
         io.spin("");
