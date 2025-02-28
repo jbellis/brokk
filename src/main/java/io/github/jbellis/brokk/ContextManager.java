@@ -50,23 +50,23 @@ public class ContextManager implements IContextManager {
         EDIT,
         APPLY
     }
-    
+
     private Mode mode = Mode.EDIT;
-    
+
     /**
      * Get the current mode
      */
     public Mode getMode() {
         return mode;
     }
-    
+
     /**
      * Set the current mode
      */
     public void setMode(Mode mode) {
         this.mode = mode;
     }
-    
+
     /**
      * Get the appropriate model based on current mode
      */
@@ -110,7 +110,12 @@ public class ContextManager implements IContextManager {
         Context newContext = new Context(this.analyzerWrapper, project.getAutoContextFileCount());
         contextHistory.add(newContext);
 
-        // For build command inference
+        // First-time setup
+        ensureStyleGuide();
+        ensureBuildCommand(io, coder);
+    }
+
+    private void ensureBuildCommand(ConsoleIO io, Coder coder) {
         String loadedCommand = project.getBuildCommand();
         if (loadedCommand != null) {
             buildCommand = CompletableFuture.completedFuture(BuildCommand.success(loadedCommand));
@@ -152,8 +157,11 @@ public class ContextManager implements IContextManager {
         }
     }
 
-    /** create a RepoFile object corresponding to a relative path String
-     */
+    public Project getProject() {
+        return project;
+    }
+
+    /** create a RepoFile object corresponding to a relative path String */
     @Override
     public RepoFile toFile(String relName) {
         return new RepoFile(root, relName);
@@ -216,7 +224,7 @@ public class ContextManager implements IContextManager {
         pushContext(Context::removeAll);
         return OperationResult.success();
     }
-    
+
     public void drop(List<PathFragment> pathFragsToRemove, List<VirtualFragment> virtualToRemove) {
         pushContext(ctx -> ctx
                 .removeEditableFiles(pathFragsToRemove)
@@ -560,18 +568,18 @@ public class ContextManager implements IContextManager {
                 } else {
                     // For virtual fragments, use the context-aware source method
                     String displaySource = source;
-                if (f instanceof ContextFragment.VirtualFragment vf) {
+                    if (f instanceof ContextFragment.VirtualFragment vf) {
                         displaySource = vf.source(currentContext()) + ": ";
                     }
-                
+
                     // First line includes the actual lines count
                     io.context(formatLine(lines, displaySource + wrapped.getFirst(), termWidth));
 
-                // Remaining lines: pass 0 so we don't repeat the line count
-                String indent = " ".repeat(displaySource.length());
-                for (int i = 1; i < wrapped.size(); i++) {
-                    io.context(formatLine(0, indent + wrapped.get(i), termWidth));
-                }
+                    // Remaining lines: pass 0 so we don't repeat the line count
+                    String indent = " ".repeat(displaySource.length());
+                    for (int i = 1; i < wrapped.size(); i++) {
+                        io.context(formatLine(0, indent + wrapped.get(i), termWidth));
+                    }
                 }
             } catch (IOException e) {
                 removeBadFragment(f, e);
@@ -829,6 +837,70 @@ public class ContextManager implements IContextManager {
         static BuildCommand failure(String message) {
             return new BuildCommand(null, message);
         }
+    }
+
+    /**
+     * Ensures a style guide exists, generating one if needed
+     */
+    private void ensureStyleGuide() {
+        if (project.getStyleGuide() != null) {
+            return;
+        }
+
+        backgroundTasks.submit(() -> {
+            try {
+                io.toolOutput("Generating project style guide...");
+
+                // Get top 5 classes by page rank
+                var analyzer = getAnalyzer();
+                var topClasses = AnalyzerWrapper.combinedPageRankFor(analyzer, new HashMap<>());
+                if (topClasses.size() > 5) {
+                    topClasses = topClasses.subList(0, 5);
+                }
+
+                // Get source code for these classes
+                StringBuilder codeForLLM = new StringBuilder();
+                for (var codeUnit : topClasses) {
+                    var path = analyzer.pathOf(codeUnit);
+                    if (path != null) {
+                        try {
+                            codeForLLM.append("// ").append(path).append("\n");
+                            codeForLLM.append(Files.readString(path.absPath())).append("\n\n");
+                        } catch (IOException e) {
+                            logger.warn("Failed to read {}: {}", path, e.getMessage());
+                        }
+                    }
+                }
+
+                if (codeForLLM.isEmpty()) {
+                    io.toolOutput("No relevant code found for style guide generation");
+                    return;
+                }
+
+                // Generate style guide using LLM
+                List<ChatMessage> messages = List.of(
+                        new SystemMessage("You are an expert software engineer. Your task is to extract a concise coding style guide from the provided code examples."),
+                        new UserMessage("""
+                        Based on these code examples, create a concise, clear coding style guide in Markdown format 
+                        that captures the conventions used in this codebase, particularly the ones that leverage new or uncommon features.
+                        DO NOT repeat what are simply common best practices.
+                        
+                        %s
+                        """.stripIndent().formatted(codeForLLM))
+                );
+
+                String styleGuide = coder.sendMessage(messages);
+                if (styleGuide.equals(Models.UNAVAILABLE)) {
+                    io.toolOutput("Failed to generate style guide: LLM unavailable");
+                    return;
+                }
+
+                project.saveStyleGuide(styleGuide);
+                io.toolOutput("Style guide generated and saved to .brokk/style.md");
+            } catch (Exception e) {
+                logger.error("Error generating style guide", e);
+            }
+        });
     }
 
     // ------------------------------------------------------------------

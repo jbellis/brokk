@@ -10,12 +10,14 @@ public class Project {
     private final Path root;
     private final IConsoleIO io;
     private final Properties props;
-    
+    private final Path styleGuidePath;
+
     private static final int DEFAULT_AUTO_CONTEXT_FILE_COUNT = 10;
 
     public Project(Path root, IConsoleIO io) {
         this.root = root;
         this.propertiesFile = root.resolve(".brokk").resolve("project.properties");
+        this.styleGuidePath = root.resolve(".brokk").resolve("style.md");
         this.io = io;
         this.props = new Properties();
 
@@ -95,5 +97,25 @@ public class Project {
         assert value != null;
         props.setProperty("cpg_refresh", value.name());
         saveProperties();
+    }
+
+    public String getStyleGuide() {
+        try {
+            if (Files.exists(styleGuidePath)) {
+                return Files.readString(styleGuidePath);
+            }
+        } catch (IOException e) {
+            io.toolErrorRaw("Error reading style guide: " + e.getMessage());
+        }
+        return null;
+    }
+
+    public void saveStyleGuide(String styleGuide) {
+        try {
+            Files.createDirectories(styleGuidePath.getParent());
+            Files.writeString(styleGuidePath, styleGuide);
+        } catch (IOException e) {
+            io.toolErrorRaw("Error saving style guide: " + e.getMessage());
+        }
     }
 }

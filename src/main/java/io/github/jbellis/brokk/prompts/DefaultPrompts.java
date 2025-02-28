@@ -29,6 +29,15 @@ public abstract class DefaultPrompts {
     public String formatIntro(ContextManager cm) {
         var editableContents = cm.getEditableSummary();
         var readOnlyContents = cm.getReadOnlySummary();
+        String styleGuide = cm.getProject().getStyleGuide();
+        String styleGuildeContents = styleGuide == null
+                ? ""
+                : """
+                <style_guide>
+                %s
+                </style_guide>
+                """.stripIndent().formatted(styleGuide);
+                
         return """
                 <instructions>
                 %s
@@ -38,10 +47,12 @@ public abstract class DefaultPrompts {
                 - Editable files: %s
                 - Read-only snippets: %s
                 </workspace>
+                %s
                 """.stripIndent().formatted(systemIntro(),
                                             cm.getRoot().getFileName(),
                                             editableContents,
-                                            readOnlyContents).trim();
+                                            readOnlyContents,
+                                            styleGuildeContents).trim();
     }
 
     public String systemIntro() {
