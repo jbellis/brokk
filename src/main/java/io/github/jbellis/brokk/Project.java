@@ -24,8 +24,6 @@ public class Project {
         if (Files.exists(propertiesFile)) {
             try (var reader = Files.newBufferedReader(propertiesFile)) {
                 props.load(reader);
-                // Validate autoContextFileCount on load
-                getAutoContextFileCount();
             } catch (Exception e) {
                 io.toolErrorRaw("Error loading project properties: " + e.getMessage());
                 props.clear();
@@ -44,15 +42,6 @@ public class Project {
 
     public void setBuildCommand(String command) {
         props.setProperty("buildCommand", command);
-        saveProperties();
-    }
-    
-    public int getAutoContextFileCount() {
-        return Integer.parseInt(props.getProperty("autoContextFileCount"));
-    }
-    
-    public void setAutoContextFileCount(int count) {
-        props.setProperty("autoContextFileCount", String.valueOf(count));
         saveProperties();
     }
     

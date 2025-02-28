@@ -107,7 +107,7 @@ public class ContextManager implements IContextManager {
         this.analyzerWrapper = new AnalyzerWrapper(project, backgroundTasks);
 
         // Start with a blank context
-        Context newContext = new Context(this.analyzerWrapper, project.getAutoContextFileCount());
+        Context newContext = new Context(this.analyzerWrapper, 5);
         contextHistory.add(newContext);
 
         // First-time setup
@@ -426,7 +426,6 @@ public class ContextManager implements IContextManager {
     /** Set the auto context size */
     public OperationResult setAutoContextFiles(int fileCount) {
         pushContext(ctx -> ctx.setAutoContextFiles(fileCount));
-        project.setAutoContextFileCount(fileCount);
         return OperationResult.success("Autocontext size set to " + fileCount);
     }
 
