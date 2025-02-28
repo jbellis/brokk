@@ -111,7 +111,7 @@ public class AnalyzerWrapper {
         return new CodeWithSource(code, sources);
     }
 
-    public static List<String> combinedPageRankFor(Analyzer analyzer, HashMap<String, Double> weightedSeeds) {
+    public static List<String> combinedPageRankFor(Analyzer analyzer, Map<String, Double> weightedSeeds) {
         // do forward and reverse pagerank passes
         var forwardResults = analyzer.getPagerank(weightedSeeds, 3 * Context.MAX_AUTO_CONTEXT_FILES, false);
         var reverseResults = analyzer.getPagerank(weightedSeeds, 3 * Context.MAX_AUTO_CONTEXT_FILES, true);
@@ -368,8 +368,11 @@ public class AnalyzerWrapper {
         });
     }
 
-    public Analyzer get() {
-        if (!future.isDone()) {
+    /**
+     * Get the analyzer, showing a spinner UI while waiting if requested.
+     */
+    private Analyzer get(boolean spin) {
+        if (!future.isDone() && spin) {
             if (logger.isDebugEnabled()) {
                 Exception e = new Exception("Stack trace");
                 logger.debug("Blocking on analyzer creation", e);
@@ -385,8 +388,26 @@ public class AnalyzerWrapper {
             throw new RuntimeException("Failed to create analyzer", e);
         }
         finally {
-            io.spinComplete();
+            if (spin) {
+                io.spinComplete();
+            }
         }
+    }
+
+    /**
+     * Get the analyzer, showing a spinner UI while waiting.
+     * For use in user-facing operations.
+     */
+    public Analyzer get() {
+        return get(true);
+    }
+
+    /**
+     * Get the analyzer without showing a spinner UI.
+     * For use in background operations.
+     */
+    public Analyzer getForBackground() {
+        return get(false);
     }
     
     public void requestRebuild() {

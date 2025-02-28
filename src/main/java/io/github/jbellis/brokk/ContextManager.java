@@ -36,6 +36,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static java.lang.Math.min;
+
 /**
  * Manages the current and previous context, along with other state like prompts and message history.
  */
@@ -788,6 +790,7 @@ public class ContextManager implements IContextManager {
 
     /**
      * Returns the main analyzer, building it if needed.
+     * This will display a UI spinner for user-facing operations.
      */
     public Analyzer getAnalyzer() {
         return analyzerWrapper.get();
@@ -848,25 +851,34 @@ public class ContextManager implements IContextManager {
             try {
                 io.toolOutput("Generating project style guide...");
 
-                // Get top 5 classes by page rank
-                var analyzer = getAnalyzer();
-                var topClasses = AnalyzerWrapper.combinedPageRankFor(analyzer, new HashMap<>());
-                if (topClasses.size() > 5) {
-                    topClasses = topClasses.subList(0, 5);
-                }
+                // Get top classes by pagerank
+                var analyzer = analyzerWrapper.getForBackground();
+                var topClasses = AnalyzerWrapper.combinedPageRankFor(analyzer, Map.of());
 
                 // Get source code for these classes
                 StringBuilder codeForLLM = new StringBuilder();
+                int tokens = 0;
                 for (var codeUnit : topClasses) {
                     var path = analyzer.pathOf(codeUnit);
-                    if (path != null) {
-                        try {
-                            codeForLLM.append("// ").append(path).append("\n");
-                            codeForLLM.append(Files.readString(path.absPath())).append("\n\n");
-                        } catch (IOException e) {
-                            logger.warn("Failed to read {}: {}", path, e.getMessage());
+                    if (path == null) {
+                        continue;
+                    }
+                    String chunk;
+                    try {
+                        chunk = "<file path=%s>\n%s\n</file>\n".formatted(path, path.read());
+                    } catch (IOException e) {
+                        logger.error("Failed to read {}: {}", path, e.getMessage());
+                        continue;
+                    }
+                    int chunkTokens = Models.getApproximateTokens(chunk);
+                    if (tokens + chunkTokens > 50000) {
+                        // don't quit until we find at least one class under 50k
+                        if (tokens > 0) {
+                            break;
                         }
                     }
+                    codeForLLM.append(chunk);
+                    tokens += chunkTokens;
                 }
 
                 if (codeForLLM.isEmpty()) {
