@@ -134,7 +134,8 @@ public class SearchAgent {
             }).toList();
 
             // Check if we should terminate
-            if (steps.getFirst().getRequest().name().equals("answer")) {
+            String firstToolName = steps.getFirst().getRequest().name();
+            if (firstToolName.equals("answer")) {
                 logger.debug("Search complete");
                 assert steps.size() == 1 : steps;
 
@@ -149,7 +150,7 @@ public class SearchAgent {
                     logger.debug("Relevant classes are {}", classNames);
                     // coalese inner classes whose parents are also present
                     var coalesced = classNames.stream().filter(c -> classNames.stream().noneMatch(c2 -> c.startsWith(c2 + "$"))).toList();
-                    
+
                     // Return a SearchFragment with the answer and class names
                     return new ContextFragment.SearchFragment(query, result, Set.copyOf(coalesced));
                 } catch (Exception e) {
@@ -157,6 +158,13 @@ public class SearchAgent {
                     // Fallback to just returning the answer as string in a SearchFragment with empty classes
                     return new ContextFragment.StringFragment(query, results.getFirst().execute());
                 }
+            } else if (firstToolName.equals("abort")) {
+                logger.debug("Search aborted");
+                assert steps.size() == 1 : steps;
+                
+                // Return a String fragment with the abort message
+                String result = results.getFirst().execute();
+                return new ContextFragment.StringFragment(query, result);
             }
 
             // Add the step to the history
@@ -204,6 +212,7 @@ public class SearchAgent {
             case "getClassSource" -> "Fetching class source";
             case "getMethodSource" -> "Fetching method source";
             case "answer" -> "Answering the question";
+            case "abort" -> "Abort the search";
             default -> "Processing request";
         };
         
@@ -268,29 +277,29 @@ public class SearchAgent {
      */
     private List<dev.langchain4j.agent.tool.ToolSpecification> createToolSpecifications() {
         List<dev.langchain4j.agent.tool.ToolSpecification> tools = new ArrayList<>();
-        
+
         if (allowSearch) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
                     getMethodByName("searchSymbols")));
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
                     getMethodByName("getUsages")));
         }
-        
+
         if (allowPagerank) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
                     getMethodByName("getRelatedClasses")));
         }
-        
+
         if (allowSkeleton) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
                     getMethodByName("getClassSkeleton")));
         }
-        
+
         if (allowClass) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
                     getMethodByName("getClassSource")));
         }
-        
+
         if (allowMethod) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
                     getMethodByName("getMethodSource")));
@@ -299,6 +308,10 @@ public class SearchAgent {
         if (allowAnswer) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
                     getMethodByName("answer")));
+            
+            // Always allow abort when answer is allowed
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("abort")));
         }
         
         return tools;
@@ -393,7 +406,7 @@ public class SearchAgent {
     /**
      * Parse the LLM response into a list of ToolCall objects.
      * This method handles both direct text responses and tool execution responses.
-     * ANSWER tools will be sorted at the end.
+     * ANSWER or ABORT tools will be sorted at the end.
      */
     private List<ToolCall> parseResponse(AiMessage response) {
         if (!response.hasToolExecutionRequests()) {
@@ -406,12 +419,12 @@ public class SearchAgent {
         var toolCalls = response.toolExecutionRequests().stream()
             .map(ToolCall::new)
             .toList();
-        
-        // If we have an Answer action, just return that
+
+        // If we have an Answer or Abort action, just return that
         var answerTools = toolCalls.stream()
-            .filter(t -> t.getRequest().name().equals("answer"))
+            .filter(t -> t.getRequest().name().equals("answer") || t.getRequest().name().equals("abort"))
             .toList();
-            
+
         if (!answerTools.isEmpty()) {
             return List.of(answerTools.getFirst());
         }
@@ -668,6 +681,20 @@ public class SearchAgent {
         logger.debug("Referenced classes: {}", classNames);
 
         return explanation;
+    }
+
+    @Tool("Abort the search process when you determine the question is not relevant to this codebase or when an answer cannot be found. Use this as a last resort when you're confident no useful answer can be provided.")
+    public String abort(
+        @P(value = "Explanation of why the question cannot be answered or is not relevant to this codebase")
+        String explanation
+    ) {
+        if (explanation.isBlank()) {
+            throw new IllegalArgumentException("Empty or missing explanation parameter");
+        }
+
+        logger.debug("Search aborted: {}", explanation);
+        
+        return "SEARCH ABORTED: " + explanation;
     }
 
     /**
