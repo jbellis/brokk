@@ -203,7 +203,7 @@ public class SearchAgent {
             allowAnswer = false; // Don't allow finishing immediately
         }
 
-        allowReflect = actionHistory.isEmpty() || !actionHistory.getLast().getRequest().name().equals("executeReflect");
+        allowReflect = actionHistory.isEmpty() || !actionHistory.getLast().getRequest().name().equals("reflect");
 
         // TODO more context-based control
     }
@@ -214,14 +214,14 @@ public class SearchAgent {
     private String getExplanationForTool(String toolName, ToolCall toolCall) {
         String paramInfo = getToolParameterInfo(toolCall);
         String baseExplanation = switch (toolName) {
-            case "executeDefinitionsSearch" -> "Searching for symbols";
-            case "executeUsageSearch" -> "Finding usages";
-            case "executePageRankSearch" -> "Finding related code";
-            case "executeSkeletonSearch" -> "Getting class overview";
-            case "executeClassSearch" -> "Fetching class source";
-            case "executeMethodSearch" -> "Fetching method source";
-            case "executeReflect" -> "Breaking down the query";
-            case "executeAnswer" -> "Answering the question";
+            case "searchSymbols" -> "Searching for symbols";
+            case "getUsages" -> "Finding usages";
+            case "getRelatedClasses" -> "Finding related code";
+            case "getClassSkeleton" -> "Getting class overview";
+            case "getClassSource" -> "Fetching class source";
+            case "getMethodSource" -> "Fetching method source";
+            case "reflect" -> "Breaking down the query";
+            case "answer" -> "Answering the question";
             default -> "Processing request";
         };
         
@@ -240,19 +240,19 @@ public class SearchAgent {
             Map<String, Object> arguments = mapper.readValue(toolCall.getRequest().arguments(), new TypeReference<>() {});
             
             return switch (toolCall.getRequest().name()) {
-                case "executeDefinitionsSearch" -> getStringParam(arguments, "pattern");
-                case "executeUsageSearch" -> getStringParam(arguments, "symbol");
-                case "executePageRankSearch" -> {
+                case "searchSymbols" -> getStringParam(arguments, "pattern");
+                case "getUsages" -> getStringParam(arguments, "symbol");
+                case "getRelatedClasses" -> {
                     Object classList = arguments.get("classList");
                     if (classList instanceof List<?> list && !list.isEmpty()) {
                         yield list.size() == 1 ? list.getFirst().toString() : list.size() + " classes";
                     }
                     yield "";
                 }
-                case "executeSkeletonSearch" -> getStringParam(arguments, "className");
-                case "executeClassSearch" -> getStringParam(arguments, "className");
-                case "executeMethodSearch" -> getStringParam(arguments, "methodName");
-                case "executeAnswer" -> "finalizing";  // Keep it concise
+                case "getClassSkeleton" -> getStringParam(arguments, "className");
+                case "getClassSource" -> getStringParam(arguments, "className");
+                case "getMethodSource" -> getStringParam(arguments, "methodName");
+                case "answer" -> "finalizing";  // Keep it concise
                 default -> "";  // Reflect or unknown, omit
             };
         } catch (Exception e) {
@@ -289,39 +289,39 @@ public class SearchAgent {
         
         if (allowSearch) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("executeDefinitionsSearch")));
+                    getMethodByName("searchSymbols")));
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("executeUsageSearch")));
+                    getMethodByName("getUsages")));
         }
         
         if (allowPagerank) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("executePageRankSearch")));
+                    getMethodByName("getRelatedClasses")));
         }
         
         if (allowSkeleton) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("executeSkeletonSearch")));
+                    getMethodByName("getClassSkeleton")));
         }
         
         if (allowClass) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("executeClassSearch")));
+                    getMethodByName("getClassSource")));
         }
         
         if (allowMethod) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("executeMethodSearch")));
+                    getMethodByName("getMethodSource")));
         }
         
         if (allowReflect) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("executeReflect")));
+                    getMethodByName("reflect")));
         }
         
         if (allowAnswer) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("executeAnswer")));
+                    getMethodByName("answer")));
         }
         
         return tools;
@@ -443,7 +443,7 @@ public class SearchAgent {
         
         // If we have an Answer action, just return that
         var answerTools = toolCalls.stream()
-            .filter(t -> t.getRequest().name().equals("executeAnswer"))
+            .filter(t -> t.getRequest().name().equals("answer"))
             .toList();
             
         if (!answerTools.isEmpty()) {
@@ -453,8 +453,8 @@ public class SearchAgent {
         return toolCalls;
     }
 
-    @Tool("Search for class/method/field definitions using a regular expression pattern. Use this when you need to find symbols matching a pattern.")
-    public String executeDefinitionsSearch(
+    @Tool("Search for symbols (class/method/field definitions) using a regular expression. This should usually be the first step in a search.")
+    public String searchSymbols(
             @P(value = "Regex pattern to search for code symbols. Should not contain whitespace. Don't include ^ or $ as they're implicit. Thus you will nearly always want to use explicit wildcarding for substrings (e.g., .*Value, Abstract.*, [a-z]*DAO).")
             String pattern,
             @P(value = "Reasoning about why this pattern is relevant to the query")
@@ -518,7 +518,7 @@ public class SearchAgent {
      * Search for usages of a symbol.
      */
     @Tool("Find where a symbol is used in code. Use this to discover how a class, method, or field is actually used throughout the codebase.")
-    public String executeUsageSearch(
+    public String getUsages(
         @P(value = "Fully qualified symbol name (package name, class name, optional member name) to find usages for")
         String symbol,
         @P(value = "Reasoning about what information you're hoping to find in these usages")
@@ -554,7 +554,7 @@ public class SearchAgent {
      * Find related code using PageRank.
      */
     @Tool("Find related code units using PageRank algorithm. Use this when you've made some progress but got stuck, or when you're almost done and want to double-check that you haven't missed anything.")
-    public String executePageRankSearch(
+    public String getRelatedClasses(
         @P(value = "List of fully qualified class names to use as seeds for PageRank. Use classes you've already found that seem relevant.")
         List<String> classList,
         @P(value = "Reasoning about what related code you're hoping to discover")
@@ -613,7 +613,7 @@ public class SearchAgent {
      * Get the skeleton (structure) of a class.
      */
     @Tool("Get an overview of a class's contents, including fields and method signatures. Use this to understand a class's structure without fetching its full source code.")
-    public String executeSkeletonSearch(
+    public String getClassSkeleton(
         @P(value = "Fully qualified class name to get the skeleton structure for")
         String className
     ) {
@@ -633,7 +633,7 @@ public class SearchAgent {
      * Get the full source code of a class.
      */
     @Tool("Get the full source code of a class. This is expensive, so prefer using skeleton or method sources when possible. Use this when you need the complete implementation details, or if you think multiple methods in the class may be relevant.")
-    public String executeClassSearch(
+    public String getClassSource(
         @P(value = "Fully qualified class name to retrieve the full source code for")
         String className,
         @P(value = "Reasoning about what specific implementation details you're looking for in this class")
@@ -663,7 +663,7 @@ public class SearchAgent {
      * Get the source code of a method.
      */
     @Tool("Get the source code of a specific method. Use this to examine the implementation of a particular method without retrieving the entire class.")
-    public String executeMethodSearch(
+    public String getMethodSource(
         @P(value = "Fully qualified method name (package name, class name, method name) to retrieve source for")
         String methodName
     ) {
@@ -683,7 +683,7 @@ public class SearchAgent {
      * Generate sub-queries to further explore the search space.
      */
     @Tool("Break down the complex query into smaller, more targeted sub-queries. Use this when the current query is too broad or contains multiple distinct questions that should be explored separately.")
-    public String executeReflect(
+    public String reflect(
         @P(value = "List of focused sub-queries that together address the current query. Each sub-query should be more specific than the original.")
         List<String> subQueries
     ) {
@@ -710,11 +710,8 @@ public class SearchAgent {
         return String.join(", ", subQueries);
     }
 
-    /**
-     * Answer the current query and remove it from the queue.
-     */
     @Tool("Provide a final answer to the current query and remove it from the queue. Use this when you have enough information to fully address the query.")
-    public String executeAnswer(
+    public String answer(
         @P(value = "Comprehensive explanation that answers the current query. Include relevant source code snippets and explain how they relate to the query.")
         String explanation,
         @P(value = "List of fully qualified class names (FQCNs) of all classes relevant to the explanation.")
