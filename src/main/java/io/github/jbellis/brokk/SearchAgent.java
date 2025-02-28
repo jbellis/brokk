@@ -9,6 +9,8 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.output.TokenUsage;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -51,6 +53,7 @@ public class SearchAgent {
     private boolean allowPagerank = true;
     private boolean allowAnswer = true;
     private boolean allowSubstringSearch = false; // Starts disabled until searchSymbols is called
+    private boolean symbolsFound = false;
 
     // Search state
     private final String query;
@@ -205,7 +208,10 @@ public class SearchAgent {
             case "getMethodSource" -> "Fetching method source";
             case "answer" -> "Answering the question";
             case "abort" -> "Abort the search";
-            default -> "Processing request";
+            default -> {
+                logger.debug("Unknown tool name: {}", toolName);
+                yield  "Processing request";
+            }
         };
         
         return paramInfo.isBlank() ? baseExplanation : baseExplanation + " (" + paramInfo + ")";
@@ -258,13 +264,20 @@ public class SearchAgent {
 
         // Ask LLM for next action with tools
         var tools = createToolSpecifications();
-        var response = coder.sendStreamingWithTools(coder.models.editModel(), messages, false, tools);
+        var response = coder.sendStreamingWithTools(actionModel(), messages, false, tools);
         totalUsage = TokenUsage.sum(totalUsage, response.tokenUsage());
 
         // Parse response into potentially multiple actions
         return parseResponse(response.content());
     }
-    
+
+    private StreamingChatLanguageModel actionModel() {
+        // openai: use applyModel (default o3-mini-low)
+        // everyone else: use editModel
+        // hardcoding this sucks but it's openai's fault for not giving us a smart+fast option
+        return coder.models.editModel() instanceof OpenAiStreamingChatModel ? coder.models.applyModel() : coder.models.editModel();
+    }
+
     /**
      * Create tool specifications for the LLM based on allowed actions.
      */
@@ -343,7 +356,6 @@ public class SearchAgent {
         Even if not explicitly stated, the query should be understood to refer to the current codebase,
         and not a general-knowledge question.
         Your goal is to find code definitions, implementations, and usages that answer the user's query.
-        You will be given access to tools that can help you analyze code.
         """.stripIndent());
 
         // Add beast mode if we're out of time or we've had too many bad attempts
@@ -395,8 +407,17 @@ public class SearchAgent {
         Determine the next action(s) to take to search for code related to: %s.
         It is more efficient to call multiple tools in a single response when you know they will be needed.
         But if you don't have enough information to speculate, you can call just one tool.
-        """.stripIndent().formatted(query);
-        messages.add(new UserMessage(instructions));
+        """.formatted(query);
+        if (!symbolsFound) {
+            instructions += """
+            Start with broad searches, and then explore more specific code units once you find a foothold.
+            For example, if the user is asking
+            [how do Cassandra reads prevent compaction from invalidating the sstables they are referencing]
+            then we should start with searchSymbols(".*SSTable.*) or searchSymbols(".*Compaction.*") or searchSymbols(".*reference.*"),
+            instead of a more specific pattern like ".*SSTable.*compaction.*" or ".*compaction.*invalidation.*"
+            """;
+        }
+        messages.add(new UserMessage(instructions.stripIndent()));
 
         return messages;
     }
@@ -426,13 +447,13 @@ public class SearchAgent {
         if (!answerTools.isEmpty()) {
             return List.of(answerTools.getFirst());
         }
-        
+
         return toolCalls;
     }
 
-    @Tool("Search for symbols (class/method/field definitions) using a regular expression. This should usually be the first step in a search.")
+    @Tool("Search for symbols (class/method/field definitions) using Joern. This should usually be the first step in a search.")
     public String searchSymbols(
-            @P(value = "Regex pattern to search for code symbols. Should not contain whitespace. Don't include ^ or $ as they're implicit. Thus you will nearly always want to use explicit wildcarding for substrings (e.g., .*Value, Abstract.*, [a-z]*DAO).")
+            @P(value = "Case-insensitive Joern regex pattern to search for code symbols. Since ^ and $ are implicitly included, YOU MUST use explicit wildcarding (e.g., .*Foo.*, Abstract.*, [a-z]*DAO) unless you really want exact matches.")
             String pattern,
             @P(value = "Reasoning about why this pattern is relevant to the query")
             String reasoning
@@ -444,25 +465,26 @@ public class SearchAgent {
             return "Cannot search definitions: reasoning is empty";
         }
 
+        // Enable substring search after the first successful searchSymbols call
+        allowSubstringSearch = true;
+
         var definitions = analyzer.getDefinitions(pattern);
         if (definitions.isEmpty()) {
             return "No definitions found for pattern: " + pattern;
         }
 
-        // Enable substring search after the first successful searchSymbols call
-        allowSubstringSearch = true;
-
+        symbolsFound = true;
         logger.debug("Raw definitions: {}", definitions);
 
         // Include all matches or filter if there are too many
         var relevant = new ArrayList<String>();
-        
+
         // Check if we need to filter by relevance (if results are > 10% of token budget)
         int definitionTokens = coder.approximateTokens(definitions.size());
         boolean shouldFilter = definitionTokens > TOKEN_BUDGET * 0.1;
         if (shouldFilter) {
             logger.debug("Filtering definitions due to size: {} tokens (> 10% of budget)", definitionTokens);
-            
+
             // Get reasoning if available
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(new SystemMessage("You are helping evaluate which code definitions are relevant to a user query. " +
@@ -476,7 +498,7 @@ public class SearchAgent {
             var relevantDefinitions = extractMatches(response, definitions.stream().map(CodeUnit::reference).collect(Collectors.toSet()));
 
             logger.debug("Filtered definitions: {} (from {})", relevantDefinitions.size(), definitions.size());
-            
+
             // Add the relevant definitions
             for (CodeUnit definition : definitions) {
                 if (relevantDefinitions.contains(definition.reference())) {
@@ -537,7 +559,7 @@ public class SearchAgent {
         boolean shouldFilter = usageTokens > TOKEN_BUDGET * 0.1;
         if (shouldFilter) {
             logger.debug("Filtering usages due to size: {} tokens (> 10% of budget)", usageTokens);
-            
+
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(new SystemMessage("You are helping evaluate which code usages are relevant to a user query. " +
                                           "Review the following code usages and select ONLY the relevant chunks that directly " +
@@ -545,7 +567,7 @@ public class SearchAgent {
             messages.add(new UserMessage("Query: %s\nReasoning: %s\nUsages found for %s:\n%s".formatted(
                     query, reasoning, symbol, processedUsages)));
             String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
-            
+
             return "Relevant usages of " + symbol + ":\n\n" + response;
         } else {
             // Return all usages without filtering
@@ -630,7 +652,7 @@ public class SearchAgent {
         boolean shouldFilter = sourceTokens > TOKEN_BUDGET * 0.1;
         if (shouldFilter) {
             logger.debug("Filtering class source due to size: {} tokens (> 10% of budget)", sourceTokens);
-            
+
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(new SystemMessage("You are helping evaluate which parts of a class source are relevant to a user query. " +
                                           "Review the following class source and select ONLY the relevant portions that directly " +
@@ -684,9 +706,9 @@ public class SearchAgent {
         return explanation;
     }
 
-    @Tool("Search for classes whose text contents match a regular expression pattern. This is slower than searchSymbols but can find usages of external dependencies and comment strings.")
+    @Tool("Search for classes whose text contents match a Java regular expression pattern. This is slower than searchSymbols but can find usages of external dependencies and comment strings.")
     public String searchSubstring(
-            @P(value = "Regex pattern to search for within file contents")
+            @P(value = "Java-style regex pattern to search for within file contents. Unlike searchSymbols this does not automatically include any implicit anchors or case insensitivity.")
             String pattern,
             @P(value = "Reasoning about why this pattern is relevant to the query")
             String reasoning
