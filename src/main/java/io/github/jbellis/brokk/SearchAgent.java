@@ -2,6 +2,7 @@ package io.github.jbellis.brokk;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.data.message.AiMessage;
@@ -10,13 +11,11 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.jetbrains.annotations.NotNull;
 import scala.Tuple2;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,7 +23,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.BiFunction;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -54,84 +52,11 @@ public class SearchAgent {
     private boolean allowPagerank = true;
     private boolean allowAnswer = true;
 
-    /**
-     * Enum representing possible search actions.
-     */
-    public enum Action {
-        DEFINITIONS((agent, boundAction) -> {
-            String pattern = boundAction.getParameterString("pattern");
-            String reasoning = boundAction.getParameterString("reasoning");
-            return agent.executeDefinitionsSearch(pattern, reasoning);
-        }, "Searching for symbols"),
-        USAGES((agent, boundAction) -> {
-            String symbol = boundAction.getParameterString("symbol");
-            String reasoning = boundAction.getParameterString("reasoning");
-            return agent.executeUsageSearch(symbol, reasoning);
-        }, "Finding usages"),
-        PAGERANK((agent, boundAction) -> {
-            @SuppressWarnings("unchecked")
-            List<String> classList = (List<String>) boundAction.getParameter("classList");
-            String reasoning = boundAction.getParameterString("reasoning");
-            return agent.executePageRankSearch(classList, reasoning);
-        }, "Finding related code"),
-        SKELETON((agent, boundAction) -> {
-            String className = boundAction.getParameterString("className");
-            return agent.executeSkeletonSearch(className);
-        }, "Getting class overview"),
-        CLASS((agent, boundAction) -> {
-            String className = boundAction.getParameterString("className");
-            String reasoning = boundAction.getParameterString("reasoning");
-            return agent.executeClassSearch(className, reasoning);
-        }, "Fetching class source"),
-        METHOD((agent, boundAction) -> {
-            String methodName = boundAction.getParameterString("methodName");
-            return agent.executeMethodSearch(methodName);
-        }, "Fetching method source"),
-        REFLECT((agent, boundAction) -> {
-            List<String> subQueries = (List<String>) boundAction.getParameter("subQueries");
-            return agent.executeReflect(subQueries);
-        }, "Breaking down the query"),
-        ANSWER((agent, boundAction) -> {
-            String explanation = boundAction.getParameterString("explanation");
-            return agent.executeAnswer(explanation);
-        }, "Answering the question"),
-        MALFORMED(null, "Incorrectly formatted action");
-
-        private final BiFunction<SearchAgent, BoundAction, String> executor;
-        private final String explanation;
-
-        Action(BiFunction<SearchAgent, BoundAction, String> executor, String explanation) {
-            this.executor = executor;
-            this.explanation = explanation;
-        }
-
-        public String getValue() {
-            return name().toLowerCase();
-        }
-
-        public BiFunction<SearchAgent, BoundAction, String> getExecutor() {
-            return executor;
-        }
-        
-        public String getExplanation() {
-            return explanation;
-        }
-
-        public static Action fromString(String text) {
-            for (Action action : Action.values()) {
-                if (action.name().equalsIgnoreCase(text)) {
-                    return action;
-                }
-            }
-            throw new IllegalArgumentException("Unrecognized action: " + text);
-        }
-    }
-
     // Search state
     private final String originalQuery;
     private final Deque<String> gapQueries = new ArrayDeque<>();
     private final List<String> processedQueries = new ArrayList<>();
-    private final List<BoundAction> actionHistory = new ArrayList<>();
+    private final List<ToolCall> actionHistory = new ArrayList<>();
     private final List<Tuple2<String, String>> knowledge = new ArrayList<>();
 
     private int currentTokenUsage = 0;
@@ -199,17 +124,23 @@ public class SearchAgent {
 
             // Decide what action to take for this query
             var steps = determineNextActions();
-            String paramInfo = getHumanReadableParameter(steps.getFirst());
-            String spinMessage = steps.getFirst().action.explanation + (paramInfo.isBlank() ? "" : " (" + paramInfo + ")");
-            io.spin(spinMessage);
-            logger.debug("{}; budget: {}/{}", spinMessage, currentTokenUsage, TOKEN_BUDGET);
+            
+            if (steps.isEmpty()) {
+                logger.debug("No valid actions determined");
+                break;
+            }
+            
+            // Get the tool name from the first step for spinner message
+            String toolName = steps.getFirst().getRequest().name();
+            String explanation = getExplanationForTool(toolName);
+            io.spin(explanation);
+            logger.debug("{}; budget: {}/{}", explanation, currentTokenUsage, TOKEN_BUDGET);
             logger.debug("Actions: {}", steps);
 
             // Execute the actions
-            var results = steps.stream().parallel().map(step -> {
-                var actionWithResult = executeAction(step);
-                logger.debug("Result: {}", actionWithResult.result());
-                return actionWithResult;
+            var results = steps.stream().parallel().peek(step -> {
+                executeAction(step);
+                logger.debug("Result: {}", step);
             }).toList();
             logger.debug("Query queue: {}", gapQueries);
 
@@ -217,8 +148,8 @@ public class SearchAgent {
             if (gapQueries.isEmpty()) {
                 logger.debug("Search complete after answering original query");
                 assert steps.size() == 1 : steps;
-                assert steps.getFirst().action == Action.ANSWER;
-                return results.getFirst().result();
+                assert steps.getFirst().getRequest().name().equals("executeAnswer");
+                return results.getFirst().execute();
             }
 
             // Add the step to the history
@@ -251,15 +182,32 @@ public class SearchAgent {
             allowAnswer = false; // Don't allow finishing immediately
         }
 
-        allowReflect = actionHistory.isEmpty() || actionHistory.getLast().action() != Action.REFLECT;
+        allowReflect = actionHistory.isEmpty() || !actionHistory.getLast().getRequest().name().equals("executeReflect");
 
         // TODO more context-based control
     }
 
     /**
+     * Gets an explanation for a tool name
+     */
+    private String getExplanationForTool(String toolName) {
+        return switch (toolName) {
+            case "executeDefinitionsSearch" -> "Searching for symbols";
+            case "executeUsageSearch" -> "Finding usages";
+            case "executePageRankSearch" -> "Finding related code";
+            case "executeSkeletonSearch" -> "Getting class overview";
+            case "executeClassSearch" -> "Fetching class source";
+            case "executeMethodSearch" -> "Fetching method source";
+            case "executeReflect" -> "Breaking down the query";
+            case "executeAnswer" -> "Answering the question";
+            default -> "Processing request";
+        };
+    }
+
+    /**
      * Determine the next action to take for the current query.
      */
-    private List<BoundAction> determineNextActions() {
+    private List<ToolCall> determineNextActions() {
         List<ChatMessage> messages = buildPrompt();
 
         // Ask LLM for next action with tools
@@ -410,75 +358,41 @@ public class SearchAgent {
     }
 
     /**
-     * Parse the LLM response into a list of SearchStep objects.
+     * Parse the LLM response into a list of ToolCall objects.
      * This method handles both direct text responses and tool execution responses.
      * ANSWER tools will be sorted at the end.
      */
-    private List<BoundAction> parseResponse(AiMessage response) {
+    private List<ToolCall> parseResponse(AiMessage response) {
         if (!response.hasToolExecutionRequests()) {
-            return List.of(new BoundAction(Action.MALFORMED, Map.of("unparsed", response.text()), "No tool execution requests found"));
+            var dummyTer = ToolExecutionRequest.builder().name("MISSING_TOOL_CALL").build();
+            var errorCall = new ToolCall(dummyTer, "Error: No tool execution requests found in response");
+            return List.of(errorCall);
         }
 
         // Process each tool execution request
-        var L = response.toolExecutionRequests().stream().map(toolRequest -> {
-            String toolName = toolRequest.name();
-            try {
-                // Get the tool name and map it to an action
-                Action action = mapToolNameToAction(toolName);
-
-                // Convert the JSON arguments to a map
-                ObjectMapper mapper = new ObjectMapper();
-                String argumentsJson = toolRequest.arguments();
-                Map<String, Object> arguments = mapper.readValue(argumentsJson, new TypeReference<>() {});
-
-                // Create a new BoundAction with the parsed parameters
-                return new BoundAction(action, arguments, null);
-            } catch (Exception e) {
-                logger.error("Failed to parse tool response: {}", e.getMessage());
-                return new BoundAction(Action.MALFORMED, Map.of("error", e.getMessage()), "Error parsing tool execution request for " + toolName);
-            }
-        }).toList();
-        // if we have an ANSWER action, just return that
-        if (L.stream().anyMatch(t -> t.action == Action.ANSWER)) {
-            return List.of(L.stream().filter(t -> t.action == Action.ANSWER).findFirst().orElseThrow());
+        var toolCalls = response.toolExecutionRequests().stream()
+            .map(ToolCall::new)
+            .toList();
+        
+        // If we have an Answer action, just return that
+        var answerTools = toolCalls.stream()
+            .filter(t -> t.getRequest().name().equals("executeAnswer"))
+            .toList();
+            
+        if (!answerTools.isEmpty()) {
+            return List.of(answerTools.getFirst());
         }
-        return L;
+        
+        return toolCalls;
     }
     
     /**
-     * Maps a tool name to a SearchAgent Action.
+     * Execute the selected tool call.
      */
-    private Action mapToolNameToAction(String toolName) {
-        return switch (toolName) {
-            case "executeDefinitionsSearch" -> Action.DEFINITIONS;
-            case "executeUsageSearch" -> Action.USAGES;
-            case "executePageRankSearch" -> Action.PAGERANK;
-            case "executeSkeletonSearch" -> Action.SKELETON;
-            case "executeClassSearch" -> Action.CLASS;
-            case "executeMethodSearch" -> Action.METHOD;
-            case "executeReflect" -> Action.REFLECT;
-            case "executeAnswer" -> Action.ANSWER;
-            default -> throw new IllegalArgumentException("Unknown tool name: " + toolName);
-        };
-    }
-
-    /**
-     * Execute the selected action for the current step.
-     */
-    private BoundAction executeAction(BoundAction step) {
-        // Skip execution if the result is already present
-        if (step.result() != null) {
-            logger.debug("Skipping execution of {}", step);
-            return step;
-        }
-
-        try {
-            String result = step.execute();
-            return step.withResult(result);
-        } catch (Exception e) {
-            logger.error("Action execution error", e);
-            return step.withResult("Error: " + e.getMessage());
-        }
+    private ToolCall executeAction(ToolCall toolCall) {
+        // If already executed, skip; otherwise, execute and log the result
+        toolCall.execute();
+        return toolCall;
     }
 
     @Tool("Search for class/method/field definitions using a regular expression pattern. Use this when you need to find symbols matching a pattern.")
@@ -756,82 +670,73 @@ public class SearchAgent {
         return text.length() / 4;
     }
 
-    private String getHumanReadableParameter(BoundAction step) {
-        // Reflect is omitted on purpose. Others show key info.
-        return switch (step.action()) {
-            case DEFINITIONS -> {
-                String pattern = step.getParameterString("pattern");
-                yield (pattern == null || pattern.isBlank() ? "?" : pattern);
-            }
-            case USAGES -> {
-                String symbol = step.getParameterString("symbol");
-                yield (symbol == null || symbol.isBlank() ? "?" : symbol);
-            }
-            case SKELETON -> {
-                String className = step.getParameterString("className");
-                yield (className == null || className.isBlank() ? "?" : className);
-            }
-            case CLASS -> {
-                String className = step.getParameterString("className");
-                yield (className == null || className.isBlank() ? "?" : className);
-            }
-            case METHOD -> {
-                String methodName = step.getParameterString("methodName");
-                yield (methodName == null || methodName.isBlank() ? "?" : methodName);
-            }
-            case ANSWER -> "finalizing";  // Keep it concise
-            default -> "";                // Reflect or malformed, omit
-        };
-    }
-
+    
     /**
-     * Represents a single step in the search process with bound parameters.
+     * Represents a single tool execution request and its result.
      */
-    public class BoundAction {
-        private final Action action;
-        private final Map<String, Object> parameters;
-        private final String result;
+    public class ToolCall {
+        private final ToolExecutionRequest request;
+        private String result; // initially null
 
-        public BoundAction(Action action, Map<String, Object> parameters, String result) {
-            this.action = action;
-            this.parameters = parameters;
+        public ToolCall(ToolExecutionRequest request) {
+            this(request, null);
+        }
+
+        public ToolCall(ToolExecutionRequest request, String result) {
+            this.request = request;
             this.result = result;
         }
 
-        public Action action() {
-            return action;
-        }
-
-        public String result() {
-            return result;
+        public ToolExecutionRequest getRequest() {
+            return request;
         }
 
         /**
-         * Execute this action and return the result.
+         * Executes the tool call by using reflection.
          */
         public String execute() {
-            return action.getExecutor().apply(SearchAgent.this, this);
+            if (result != null) {
+                return result;
+            }
+            try {
+                // Use TER's tool name as the method name
+                String methodName = request.name();
+                java.lang.reflect.Method method = getMethodByName(methodName);
+
+                // Parse the JSON arguments into a map
+                ObjectMapper mapper = new ObjectMapper();
+                Map<String, Object> arguments = mapper.readValue(request.arguments(), new TypeReference<>() {});
+
+                // Prepare arguments array from method parameters
+                var params = method.getParameters();
+                Object[] args = new Object[params.length];
+                for (int i = 0; i < params.length; i++) {
+                    String paramName = params[i].getName(); // requires compilation with -parameters
+                    Object value = arguments.get(paramName);
+                    if (value == null) {
+                        throw new IllegalArgumentException("Missing required parameter: " + paramName);
+                    }
+                    args[i] = value;
+                }
+
+                // Invoke the method
+                Object res = method.invoke(SearchAgent.this, args);
+                result = res != null ? res.toString() : "";
+                return result;
+            } catch (Exception e) {
+                logger.error("Tool method invocation error", e);
+                result = "Error: " + e.getMessage();
+                return result;
+            }
         }
 
         @Override
         public String toString() {
-            return "SearchStep{" +
-                    "action=" + action +
-                    ", parametersJson='" + parameters + '\'' +
-                    (result != null ? ", result='" + result + '\'' : "") +
+            return "ToolCall{" +
+                    "toolName=" + request.name() +
+                    ", arguments=" + request.arguments() +
+                    ", result=" + (result != null ? "'" + result + "'" : "null") +
                     '}';
-        }
-
-        public BoundAction withResult(String result) {
-            return new BoundAction(action, parameters, result);
-        }
-
-        private Object getParameter(String paramName) {
-            return parameters.get(paramName);
-        }
-
-        private String getParameterString(String paramName) {
-            return (String) parameters.get(paramName);
         }
     }
 }
