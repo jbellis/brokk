@@ -370,6 +370,10 @@ public class AnalyzerWrapper {
 
     public Analyzer get() {
         if (!future.isDone()) {
+            if (logger.isDebugEnabled()) {
+                Exception e = new Exception("Stack trace");
+                logger.debug("Blocking on analyzer creation", e);
+            }
             io.spin("Analyzer is being created");
         }
         try {
