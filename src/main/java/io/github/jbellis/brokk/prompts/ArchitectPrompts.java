@@ -31,9 +31,7 @@ public abstract class ArchitectPrompts extends DefaultPrompts {
                Describe how to modify the code to complete the request.
                The junior engineer will rely solely on your instructions, so make them unambiguous and complete.
                Do not skip steps or leave out corner cases.
-               Explain all needed code changes clearly and completely, but concisely.
-
-               Just show the changes needed. DO NOT show the entire updated function/file/etc!
+               Do not leave code changes to the junior engineer's discretion.
                """.stripIndent();
     }
 }

@@ -462,26 +462,6 @@ public class SearchAgent {
         };
     }
 
-    @NotNull
-    private List<String> getListOrEmpty(Map<String, Object> parsed, String key) {
-        List<String> subQueries = new ArrayList<>();
-        Object subQueriesObj = parsed.get(key);
-        if (!(subQueriesObj instanceof List)) {
-            throw new IllegalArgumentException(String.format("%s is not a list", key));
-        }
-
-        @SuppressWarnings("unchecked")
-        List<Object> subQueriesList = (List<Object>) subQueriesObj;
-        if (!subQueriesList.isEmpty()) {
-            subQueries = subQueriesList.stream()
-                    .filter(Objects::nonNull)
-                    .map(Object::toString)
-                    .filter(s -> !s.trim().isEmpty())
-                    .collect(Collectors.toList());
-        }
-        return subQueries;
-    }
-
     /**
      * Execute the selected action for the current step.
      */
@@ -755,7 +735,8 @@ public class SearchAgent {
      */
     @Tool("Provide a final answer to the current query and remove it from the queue. Use this when you have enough information to fully address the query.")
     public String executeAnswer(
-        @P(value = "Comprehensive explanation that answers the current query. Include relevant source code snippets and explain how they relate to the query.", required = true) String explanation
+        @P(value = "Comprehensive explanation that answers the current query. Include relevant source code snippets and explain how they relate to the query.", required = true)
+        String explanation
     ) {
         if (explanation.isBlank()) {
             throw new IllegalArgumentException("Empty or missing explanation parameter");
@@ -771,31 +752,8 @@ public class SearchAgent {
         return explanation;
     }
 
-    /**
-     * Estimate token count of messages or text.
-     * This is a very rough approximation - 1 token ~= 4 characters in English.
-     */
-    private int estimateTokenCount(List<ChatMessage> messages) {
-        int total = 0;
-        for (ChatMessage message : messages) {
-            if (message instanceof SystemMessage) {
-                total += estimateTokenCount(((SystemMessage) message).text());
-            } else if (message instanceof UserMessage) {
-                total += estimateTokenCount(((UserMessage) message).text());
-            } else if (message instanceof AiMessage) {
-                total += estimateTokenCount(((AiMessage) message).text());
-            }
-        }
-        return total;
-    }
-
     private int estimateTokenCount(String text) {
         return text.length() / 4;
-    }
-
-    private String getStringOrEmpty(Map<String, Object> map, String key) {
-        Object value = map.get(key);
-        return value == null ? "" : value.toString();
     }
 
     private String getHumanReadableParameter(BoundAction step) {
