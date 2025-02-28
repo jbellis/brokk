@@ -223,7 +223,7 @@ public class Commands {
         var result = agent.execute();
         io.spinComplete();
 
-        io.llmOutput(result.text() + "\n");
+        io.llmOutput(io.wrap(result.text()) + "\n");
         cm.addSearchFragment(result);
         return OperationResult.success();
     }

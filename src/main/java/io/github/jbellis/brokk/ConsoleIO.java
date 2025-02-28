@@ -221,6 +221,78 @@ public class ConsoleIO implements AutoCloseable, IConsoleIO {
     }
     
     /**
+     * Wraps the given text to fit within the terminal width, breaking at whitespace.
+     * 
+     * @param text The text to wrap
+     * @return The wrapped text
+     */
+    public String wrap(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        
+        int width = getTerminalWidth();
+        StringBuilder result = new StringBuilder();
+        String[] lines = text.split("\n", -1); // -1 to keep empty lines
+        
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            if (line.length() <= width) {
+                result.append(line);
+            } else {
+                int currentPos = 0;
+                int lastWrapPos = 0;
+                int lineStart = 0;
+                
+                while (currentPos < line.length()) {
+                    // If we've reached the width or end of the string
+                    if (currentPos - lineStart >= width || currentPos == line.length() - 1) {
+                        // If we found a wrap position, use it
+                        if (lastWrapPos > lineStart) {
+                            // Add the segment up to the last wrap position
+                            result.append(line, lineStart, lastWrapPos);
+                            lineStart = lastWrapPos + 1; // Skip the space
+                            // Reset wrap position for next line
+                            lastWrapPos = lineStart;
+                            result.append('\n');
+                        } else {
+                            // No suitable break found, force break at width
+                            int breakPoint = Math.min(lineStart + width, line.length());
+                            result.append(line, lineStart, breakPoint);
+                            lineStart = breakPoint;
+                            result.append('\n');
+                        }
+                        // If we've processed the whole line, break out
+                        if (lineStart >= line.length()) {
+                            break;
+                        }
+                        // Reset currentPos to the new line start
+                        currentPos = lineStart;
+                    } else {
+                        // If we encounter whitespace, mark it as a potential wrap position
+                        if (Character.isWhitespace(line.charAt(currentPos))) {
+                            lastWrapPos = currentPos;
+                        }
+                        currentPos++;
+                    }
+                }
+                
+                // Add any remaining content
+                if (lineStart < line.length()) {
+                    result.append(line.substring(lineStart));
+                }
+            }
+            
+            // Add newline for all but the last line
+            if (i < lines.length - 1) {
+                result.append('\n');
+            }
+        }
+        
+        return result.toString();
+    }
+    
+    /**
      * Creates an animated spinner with the given message.
      * The spinner will continue until spinComplete() is called.
      * 
