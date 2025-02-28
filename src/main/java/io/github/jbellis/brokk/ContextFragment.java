@@ -102,13 +102,13 @@ public interface ContextFragment {
     class SearchFragment extends VirtualFragment {
         private final String query;
         private final String explanation;
-        private final Set<String> classNames;
+        private final Set<CodeUnit> sources;
 
-        public SearchFragment(String query, String explanation, Set<String> classNames) {
+        public SearchFragment(String query, String explanation, Set<CodeUnit> sources) {
             super();
             this.query = query;
             this.explanation = explanation;
-            this.classNames = classNames;
+            this.sources = sources;
         }
 
         @Override
@@ -118,12 +118,7 @@ public interface ContextFragment {
 
         @Override
         public Set<CodeUnit> sources(Analyzer analyzer) {
-            Set<CodeUnit> result = new HashSet<>();
-            for (String className : classNames) {
-                // Try to find the class in the analyzer
-                result.addAll(analyzer.getDefinitions(className));
-            }
-            return result;
+            return sources;
         }
 
         @Override

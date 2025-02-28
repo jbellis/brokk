@@ -155,7 +155,8 @@ public class SearchAgent {
                     var coalesced = classNames.stream().filter(c -> classNames.stream().noneMatch(c2 -> c.startsWith(c2 + "$"))).toList();
 
                     // Return a SearchFragment with the answer and class names
-                    return new ContextFragment.SearchFragment(query, result, Set.copyOf(coalesced));
+                    var sources = coalesced.stream().map(CodeUnit::cls).collect(Collectors.toSet());
+                    return new ContextFragment.SearchFragment(query, result, sources);
                 } catch (Exception e) {
                     logger.error("Error creating SearchFragment", e);
                     // Fallback to just returning the answer as string in a SearchFragment with empty classes
