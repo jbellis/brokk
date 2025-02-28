@@ -161,9 +161,11 @@ public class SearchAgent {
                     var classNames = (List<String>) arguments.get("classNames");
                     String result = results.getFirst().execute();
                     logger.debug("Relevant classes are {}", classNames);
+                    // coalese inner classes whose parents are also present
+                    var coalesced = classNames.stream().filter(c -> classNames.stream().noneMatch(c2 -> c.startsWith(c2 + "$"))).toList();
                     
                     // Return a SearchFragment with the answer and class names
-                    return new ContextFragment.SearchFragment(originalQuery, result, Set.copyOf(classNames));
+                    return new ContextFragment.SearchFragment(originalQuery, result, Set.copyOf(coalesced));
                 } catch (Exception e) {
                     logger.error("Error creating SearchFragment", e);
                     // Fallback to just returning the answer as string in a SearchFragment with empty classes
