@@ -12,6 +12,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.output.TokenUsage;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.jetbrains.annotations.NotNull;
 import scala.Tuple2;
 
 import java.io.IOException;
@@ -474,24 +475,51 @@ public class SearchAgent {
 
         logger.debug("Raw definitions: {}", definitions);
 
-        // Ask coder to determine which definitions are potentially relevant
-        StringBuilder definitionsStr = new StringBuilder();
-        for (CodeUnit definition : definitions) {
-            definitionsStr.append(definition.reference()).append("\n");
+        // Include all matches or filter if there are too many
+        var relevant = new ArrayList<String>();
+        
+        // Check if we need to filter by relevance (if results are > 10% of token budget)
+        int definitionTokens = coder.approximateTokens(definitions.size());
+        boolean shouldFilter = definitionTokens > TOKEN_BUDGET * 0.1;
+        if (shouldFilter) {
+            logger.debug("Filtering definitions due to size: {} tokens (> 10% of budget)", definitionTokens);
+            
+            // Get reasoning if available
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(new SystemMessage("You are helping evaluate which code definitions are relevant to a user query. " +
+                                          "Review the list of definitions and select the ones most relevant to the query and " +
+                                          "to your previous reasoning."));
+            messages.add(new UserMessage("Query: %s\nReasoning:%s\nDefinitions found:\n%s".formatted(currentQuery(), reasoning, definitions)));
+            String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+            io.spin("Filtering very large search result");
+
+            // Extract mentions of the definitions from the response
+            var relevantDefinitions = extractMatches(response, definitions.stream().map(CodeUnit::reference).collect(Collectors.toSet()));
+
+            logger.debug("Filtered definitions: {} (from {})", relevantDefinitions.size(), definitions.size());
+            
+            // Add the relevant definitions
+            for (CodeUnit definition : definitions) {
+                if (relevantDefinitions.contains(definition.reference())) {
+                    relevant.add(definition.reference());
+                }
+            }
+        } else {
+            // Just use all definitions without filtering
+            for (CodeUnit definition : definitions) {
+                relevant.add(definition.reference());
+            }
         }
 
-        // Get reasoning if available
-        List<ChatMessage> messages = new ArrayList<>();
-        messages.add(new SystemMessage("You are helping evaluate which code definitions are relevant to a user query. " +
-                                       "Review the list of definitions and select the ones most relevant to the query and " +
-                                       "to your previous reasoning."));
-        messages.add(new UserMessage("Query: %s\nReasoning:%s\nDefinitions found:\n%s".formatted(currentQuery(), reasoning, definitionsStr)));
-        String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+        return "Relevant symbols: " + String.join(", ", relevant);
+    }
 
-        // Extract mentions of the definitions from the response
+    /**
+     * Extract text occurrences in response that match references from the originals
+     */
+    private static Set<String> extractMatches(String response, Set<String> originals) {
         Set<String> relevantDefinitions = new HashSet<>();
-        for (CodeUnit definition : definitions) {
-            String ref = definition.reference();
+        for (var ref : originals) {
             // Look for the reference with word boundaries to avoid partial matches
             var p = Pattern.compile("\\b" + Pattern.quote(ref) + "\\b");
             var matcher = p.matcher(response);
@@ -499,19 +527,7 @@ public class SearchAgent {
                 relevantDefinitions.add(ref);
             }
         }
-
-        // Include the matches in the result
-        var relevant = new ArrayList<String>();
-        logger.debug("Relevant definitions: {}", relevantDefinitions);
-
-        // Add the relevant definitions first
-        for (CodeUnit definition : definitions) {
-            if (relevantDefinitions.contains(definition.reference())) {
-                relevant.add(definition.reference());
-            }
-        }
-
-        return "Relevant symbols: " + String.join(", ", relevant);
+        return relevantDefinitions;
     }
 
     /**
@@ -536,18 +552,26 @@ public class SearchAgent {
             return "No usages found for: " + symbol;
         }
 
-        // Process the usages to get formatted result
+        // Check if we need to filter by relevance (if results are > 10% of token budget)
         String processedUsages = AnalyzerWrapper.processUsages(analyzer, uses).toString();
-
-        List<ChatMessage> messages = new ArrayList<>();
-        messages.add(new SystemMessage("You are helping evaluate which code usages are relevant to a user query. " +
-                                       "Review the following code usages and select ONLY the relevant chunks that directly " +
-                                       "address the query. Output the FULL TEXT of the relevant code chunks."));
-        messages.add(new UserMessage("Query: %s\nReasoning: %s\nUsages found for %s:\n%s".formatted(
-                currentQuery(), reasoning, symbol, processedUsages)));
-        String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
-
-        return "Relevant usages of " + symbol + ":\n\n" + response;
+        int usageTokens = coder.approximateTokens(processedUsages.length());
+        boolean shouldFilter = usageTokens > TOKEN_BUDGET * 0.1;
+        if (shouldFilter) {
+            logger.debug("Filtering usages due to size: {} tokens (> 10% of budget)", usageTokens);
+            
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(new SystemMessage("You are helping evaluate which code usages are relevant to a user query. " +
+                                          "Review the following code usages and select ONLY the relevant chunks that directly " +
+                                          "address the query. Output the FULL TEXT of the relevant code chunks."));
+            messages.add(new UserMessage("Query: %s\nReasoning: %s\nUsages found for %s:\n%s".formatted(
+                    currentQuery(), reasoning, symbol, processedUsages)));
+            String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+            
+            return "Relevant usages of " + symbol + ":\n\n" + response;
+        } else {
+            // Return all usages without filtering
+            return "Usages of " + symbol + ":\n\n" + processedUsages;
+        }
     }
 
     /**
@@ -579,34 +603,8 @@ public class SearchAgent {
             return "No related code found via PageRank";
         }
 
-        // Build a string with the top 100 results to pass to the LLM for relevance filtering
-        var pageRankUnits = pageRankResults.stream()
-                .limit(100)
-                .collect(Collectors.joining("\n"));
-
-        List<ChatMessage> messages = new ArrayList<>();
-        messages.add(new SystemMessage("You are helping evaluate which code units from PageRank results are relevant to a user query. " +
-                                       "Review the list of code units and select the ones that are relevant to the query and " +
-                                       "to your previous reasoning. Output just the fully qualified names of relevant units."));
-        messages.add(new UserMessage("Query: %s\nReasoning: %s\nPageRank results:\n%s".formatted(
-                currentQuery(), reasoning, pageRankUnits)));
-        String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
-
-        // Extract mentions of the PageRank results from the response
-        var relevantUnits = new ArrayList<String>();
-        for (var ref : pageRankResults) {
-            // Look for the reference with word boundaries to avoid partial matches
-            var p = Pattern.compile("\\b" + Pattern.quote(ref) + "\\b");
-            var matcher = p.matcher(response);
-            if (matcher.find()) {
-                relevantUnits.add(ref);
-            }
-        }
-
-        if (relevantUnits.isEmpty()) {
-            return pageRankResults.stream().limit(10).collect(Collectors.joining(", "));
-        }
-        return String.join(", ", relevantUnits);
+        // Check if we need to filter by relevance (if results are > 10% of token budget)
+        return pageRankResults.stream().limit(100).collect(Collectors.joining(", "));
     }
 
     /**
@@ -648,15 +646,26 @@ public class SearchAgent {
             return "No source found for class: " + className;
         }
 
-        List<ChatMessage> messages = new ArrayList<>();
-        messages.add(new SystemMessage("You are helping evaluate which parts of a class source are relevant to a user query. " +
-                                       "Review the following class source and select ONLY the relevant portions that directly " +
-                                       "address the user's query and/or your own reasoning. Output the FULL TEXT of the relevant code chunks. When in doubt, include the chunk."));
-        messages.add(new UserMessage("Query: %s\nReasoning: %s\nClass source for %s:\n%s".formatted(
-                currentQuery(), reasoning, className, classSource)));
-        String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+        // Check if we need to filter by relevance (if results are > 10% of token budget)
+        int sourceTokens = coder.approximateTokens(classSource.length());
+        boolean shouldFilter = sourceTokens > TOKEN_BUDGET * 0.1;
+        if (shouldFilter) {
+            logger.debug("Filtering class source due to size: {} tokens (> 10% of budget)", sourceTokens);
+            
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(new SystemMessage("You are helping evaluate which parts of a class source are relevant to a user query. " +
+                                          "Review the following class source and select ONLY the relevant portions that directly " +
+                                          "address the user's query and/or your own reasoning. Output the FULL TEXT of the relevant code chunks. When in doubt, include the chunk."));
+            messages.add(new UserMessage("Query: %s\nReasoning: %s\nClass source for %s:\n%s".formatted(
+                    currentQuery(), reasoning, className, classSource)));
+            String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+            io.spin("Filtering very large class source");
 
-        return "Relevant portions of " + className + ":\n\n" + response;
+            return "Relevant portions of " + className + ":\n\n" + response;
+        } else {
+            // Return full class source without filtering
+            return "Source code of " + className + ":\n\n" + classSource;
+        }
     }
 
     /**
