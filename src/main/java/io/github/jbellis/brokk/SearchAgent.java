@@ -443,6 +443,7 @@ public class SearchAgent {
 
         // Include the matches in the result
         var relevant = new ArrayList<String>();
+        logger.debug("Relevant definitions: {}", relevantDefinitions);
 
         // Add the relevant definitions first
         for (CodeUnit definition : definitions) {

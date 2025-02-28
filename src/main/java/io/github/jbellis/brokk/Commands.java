@@ -223,7 +223,7 @@ public class Commands {
         var result = agent.execute();
         io.spinComplete();
 
-        io.toolOutput(result);
+        io.llmOutput(result);
         return OperationResult.success();
     }
 
