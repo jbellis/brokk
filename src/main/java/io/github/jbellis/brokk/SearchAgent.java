@@ -15,6 +15,7 @@ import org.apache.logging.log4j.Logger;
 import scala.Tuple2;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,6 +25,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * SearchAgent implements an iterative, agentic approach to code search.
@@ -48,6 +50,7 @@ public class SearchAgent {
     private boolean allowMethod = true;
     private boolean allowPagerank = true;
     private boolean allowAnswer = true;
+    private boolean allowSubstringSearch = false; // Starts disabled until searchSymbols is called
 
     // Search state
     private final String query;
@@ -104,9 +107,6 @@ public class SearchAgent {
         io.spin("Exploring: " + query);
         while (totalSteps < MAX_STEPS && totalUsage.inputTokenCount() < TOKEN_BUDGET) {
             totalSteps++;
-
-            // Reset action controls for this step
-            resetActionControls();
 
             // Special handling based on previous steps
             updateActionControlsBasedOnContext();
@@ -176,27 +176,18 @@ public class SearchAgent {
     }
 
     /**
-     * Reset action controls for each search step.
+     * Update action controls based on current search context.
      */
-    private void resetActionControls() {
+    private void updateActionControlsBasedOnContext() {
+        // If we just started, don't allow answer yet
+        allowAnswer = !actionHistory.isEmpty();
+
         allowSearch = true;
         allowSkeleton = true;
         allowClass = true;
         allowMethod = true;
         allowPagerank = true;
-        allowAnswer = true;
-    }
-
-    /**
-     * Update action controls based on current search context.
-     */
-    private void updateActionControlsBasedOnContext() {
-        // If we just started, encourage reflection
-        if (actionHistory.isEmpty()) {
-            allowAnswer = false; // Don't allow finishing immediately
-        }
-
-        // TODO more context-based control
+        // don't reset allowSubstringSearch
     }
 
     /**
@@ -206,6 +197,7 @@ public class SearchAgent {
         String paramInfo = getToolParameterInfo(toolCall);
         String baseExplanation = switch (toolName) {
             case "searchSymbols" -> "Searching for symbols";
+            case "searchSubstring" -> "Searching for substrings";
             case "getUsages" -> "Finding usages";
             case "getRelatedClasses" -> "Finding related code";
             case "getClassSkeleton" -> "Getting class overview";
@@ -232,6 +224,7 @@ public class SearchAgent {
             
             return switch (toolCall.getRequest().name()) {
                 case "searchSymbols" -> getStringParam(arguments, "pattern");
+                case "searchSubstring" -> getStringParam(arguments, "pattern");
                 case "getUsages" -> getStringParam(arguments, "symbol");
                 case "getRelatedClasses" -> {
                     Object classList = arguments.get("classList");
@@ -283,6 +276,11 @@ public class SearchAgent {
                     getMethodByName("searchSymbols")));
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
                     getMethodByName("getUsages")));
+        }
+
+        if (allowSubstringSearch) {
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("searchSubstring")));
         }
 
         if (allowPagerank) {
@@ -450,6 +448,9 @@ public class SearchAgent {
         if (definitions.isEmpty()) {
             return "No definitions found for pattern: " + pattern;
         }
+
+        // Enable substring search after the first successful searchSymbols call
+        allowSubstringSearch = true;
 
         logger.debug("Raw definitions: {}", definitions);
 
@@ -625,7 +626,7 @@ public class SearchAgent {
         }
 
         // Check if we need to filter by relevance (if results are > 10% of token budget)
-        int sourceTokens = coder.approximateTokens(classSource.length());
+        int sourceTokens = coder.approximateTokens(classSource.split("\n").length);
         boolean shouldFilter = sourceTokens > TOKEN_BUDGET * 0.1;
         if (shouldFilter) {
             logger.debug("Filtering class source due to size: {} tokens (> 10% of budget)", sourceTokens);
@@ -683,6 +684,87 @@ public class SearchAgent {
         return explanation;
     }
 
+    @Tool("Search for classes whose text contents match a regular expression pattern. This is slower than searchSymbols but can find usages of external dependencies and comment strings.")
+    public String searchSubstring(
+            @P(value = "Regex pattern to search for within file contents")
+            String pattern,
+            @P(value = "Reasoning about why this pattern is relevant to the query")
+            String reasoning
+    ) {
+        if (pattern.isBlank()) {
+            return "Cannot search substrings: pattern is empty";
+        }
+        if (reasoning.isBlank()) {
+            return "Cannot search substrings: reasoning is empty";
+        }
+
+        logger.debug("Searching file contents for pattern: {}", pattern);
+
+        try {
+            // Compile the regex pattern
+            Pattern compiledPattern = Pattern.compile(pattern);
+
+            // Get all tracked files from GitRepo and process them functionally
+            var matchingClasses = GitRepo.instance.getTrackedFiles().parallelStream().map(file -> {
+                try {
+                    RepoFile repoFile = new RepoFile(GitRepo.instance.getRoot(), file.toString());
+                    String fileContents;
+                    fileContents = new String(Files.readAllBytes(repoFile.absPath()));
+                    // Return the repoFile if its contents match the pattern, otherwise null
+                    return compiledPattern.matcher(fileContents).find() ? repoFile : null;
+                } catch (Exception e) {
+                    logger.debug("Error processing file {}: {}", file, e.getMessage());
+                    return null;
+                }
+            })
+            .filter(Objects::nonNull) // Filter out nulls (files with errors or no matches)
+            .flatMap(repoFile -> {
+                try {
+                    // For each matching file, get all non-inner classes and flatten them into the stream
+                    return analyzer.getClassesInFile(repoFile).stream()
+                        .map(CodeUnit::reference)
+                        .filter(reference -> !reference.contains("$"));
+                } catch (Exception e) {
+                    logger.debug("Error getting classes for file {}: {}", repoFile, e.getMessage());
+                    return Stream.empty();
+                }
+            })
+            .collect(Collectors.toSet()); // Collect to a set to eliminate duplicates
+
+            if (matchingClasses.isEmpty()) {
+                return "No classes found with content matching pattern: " + pattern;
+            }
+
+            // Check if we need to filter by relevance (if results are > 10% of token budget)
+            int resultsTokens = coder.approximateTokens(matchingClasses.size());
+            boolean shouldFilter = resultsTokens > TOKEN_BUDGET * 0.1;
+            if (shouldFilter) {
+                logger.debug("Filtering substring search results due to size: {} tokens (> 10% of budget)", resultsTokens);
+
+                List<ChatMessage> messages = new ArrayList<>();
+                messages.add(new SystemMessage("You are helping evaluate which classes are relevant to a user query. " +
+                                             "Review the list of class names and select the ones most relevant to the query and " +
+                                             "to your previous reasoning."));
+                messages.add(new UserMessage("Query: %s\nReasoning: %s\nClasses found with content matching pattern '%s':\n%s".formatted(
+                        query, reasoning, pattern, String.join("\n", matchingClasses))));
+                String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+                io.spin("Filtering very large substring search result");
+
+                // Extract mentions of the class names from the response
+                var relevantClasses = extractMatches(response, matchingClasses);
+
+                logger.debug("Filtered substring search results: {} (from {})", relevantClasses.size(), matchingClasses.size());
+                return "Relevant classes with content matching pattern: " + String.join(", ", relevantClasses);
+            } else {
+                // Return all classes without filtering
+                return "Classes with content matching pattern: " + String.join(", ", matchingClasses);
+            }
+        } catch (Exception e) {
+            logger.error("Error searching file contents", e);
+            return "Error searching file contents: " + e.getMessage();
+        }
+    }
+
     @Tool("Abort the search process when you determine the question is not relevant to this codebase or when an answer cannot be found. Use this as a last resort when you're confident no useful answer can be provided.")
     public String abort(
         @P(value = "Explanation of why the question cannot be answered or is not relevant to this codebase")
@@ -693,7 +775,7 @@ public class SearchAgent {
         }
 
         logger.debug("Search aborted: {}", explanation);
-        
+
         return "SEARCH ABORTED: " + explanation;
     }
 
