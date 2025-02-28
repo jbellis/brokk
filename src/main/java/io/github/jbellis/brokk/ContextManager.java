@@ -45,7 +45,7 @@ public class ContextManager implements IContextManager {
     private ConsoleIO io;
     private Coder coder;
     private final ExecutorService backgroundTasks = Executors.newFixedThreadPool(2);
-    
+
     public enum Mode {
         EDIT,
         APPLY
@@ -294,8 +294,15 @@ public class ContextManager implements IContextManager {
 
     /** Store the pasted content as a read-only snippet */
     public OperationResult addPasteFragment(String pastedContent, Future<String> summaryFuture) {
-        pushContext(ctx -> ctx.addPasteFragment(pastedContent, summaryFuture));
+        pushContext(ctx -> {
+            var fragment = new ContextFragment.PasteFragment(pastedContent, summaryFuture);
+            return ctx.addVirtualFragment(fragment);
+        });
         return OperationResult.success("Added pasted content");
+    }
+
+    public void addSearchFragment(VirtualFragment fragment) {
+        pushContext(ctx -> ctx.addVirtualFragment(fragment));
     }
 
     /** Submits a background summarization for pasted content */
@@ -360,7 +367,10 @@ public class ContextManager implements IContextManager {
                 return OperationResult.error("no relevant methods found in stacktrace");
             }
 
-            pushContext(ctx -> ctx.addStacktraceFragment(sources, stacktraceText, exception, content.toString()));
+            pushContext(ctx -> {
+                var fragment = new ContextFragment.StacktraceFragment(sources, stacktraceText, exception, content.toString());
+                return ctx.addVirtualFragment(fragment);
+            });
             return OperationResult.success();
         } catch (Exception e) {
             return OperationResult.error("Failed to parse stacktrace: " + e.getMessage());
@@ -423,7 +433,10 @@ public class ContextManager implements IContextManager {
     }
 
     public void addStringFragment(String description, String content) {
-        pushContext(context -> context.addStringFragment(description, content));
+        pushContext(context -> {
+            var fragment = new ContextFragment.StringFragment(content, description);
+            return context.addVirtualFragment(fragment);
+        });
     }
 
     /**

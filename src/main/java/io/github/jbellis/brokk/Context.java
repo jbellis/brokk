@@ -4,7 +4,6 @@ import com.google.common.collect.Streams;
 import dev.langchain4j.data.message.ChatMessage;
 import io.github.jbellis.brokk.ContextFragment.AutoContext;
 import io.github.jbellis.brokk.ContextFragment.SkeletonFragment;
-import io.github.jbellis.brokk.ContextFragment.StacktraceFragment;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -12,7 +11,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -123,22 +121,7 @@ public class Context {
         return removeReadonlyFiles(List.of(path));
     }
 
-    public Context addStringFragment(String description, String content) {
-        var fragment = new ContextFragment.StringFragment(content, description);
-        return addVirtualFragment(fragment);
-    }
-
-    public Context addStacktraceFragment(Set<CodeUnit> sources, String original, String exception, String methods) {
-        var fragment = new StacktraceFragment(sources, original, exception, methods);
-        return addVirtualFragment(fragment);
-    }
-
-    public Context addPasteFragment(String content, Future<String> descriptionFuture) {
-        var fragment = new ContextFragment.PasteFragment(content, descriptionFuture);
-        return addVirtualFragment(fragment);
-    }
-
-    private Context addVirtualFragment(ContextFragment.VirtualFragment fragment) {
+    public Context addVirtualFragment(ContextFragment.VirtualFragment fragment) {
         var newFragments = new ArrayList<>(virtualFragments);
         newFragments.add(fragment);
         return withVirtualFragments(newFragments).refresh();

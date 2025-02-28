@@ -1,8 +1,11 @@
 package io.github.jbellis.brokk;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.Objects;
+import java.util.stream.Collectors;
 import java.util.concurrent.Future;
 
 public interface ContextFragment {
@@ -94,6 +97,49 @@ public interface ContextFragment {
             return new ExternalPathFragment(ext);
         }
         throw new IllegalArgumentException("Unknown BrokkFile subtype: " + bf.getClass().getName());
+    }
+
+    class SearchFragment extends VirtualFragment {
+        private final String query;
+        private final String explanation;
+        private final Set<String> classNames;
+
+        public SearchFragment(String query, String explanation, Set<String> classNames) {
+            super();
+            this.query = query;
+            this.explanation = explanation;
+            this.classNames = classNames;
+        }
+
+        @Override
+        public String text() {
+            return explanation;
+        }
+
+        @Override
+        public Set<CodeUnit> sources(Analyzer analyzer) {
+            Set<CodeUnit> result = new HashSet<>();
+            for (String className : classNames) {
+                // Try to find the class in the analyzer
+                result.addAll(analyzer.getDefinitions(className));
+            }
+            return result;
+        }
+
+        @Override
+        public String description() {
+            return "Search results for: " + query;
+        }
+
+        @Override
+        public boolean isEligibleForAutoContext() {
+            return true;
+        }
+
+        @Override
+        public String toString() {
+            return "SearchFragment('%s')".formatted(query);
+        }
     }
 
     abstract class VirtualFragment implements ContextFragment {

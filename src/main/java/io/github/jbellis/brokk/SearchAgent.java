@@ -9,6 +9,7 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.output.TokenUsage;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import scala.Tuple2;
@@ -59,7 +60,7 @@ public class SearchAgent {
     private final List<ToolCall> actionHistory = new ArrayList<>();
     private final List<Tuple2<String, String>> knowledge = new ArrayList<>();
 
-    private int currentTokenUsage = 0;
+    private TokenUsage totalUsage = new TokenUsage(0, 0);
     private int totalSteps = 0;
 
     public SearchAgent(String query, ContextManager contextManager, Coder coder, ConsoleIO io) {
@@ -78,7 +79,7 @@ public class SearchAgent {
      * Execute the search process, iterating through queries until completion.
      * @return The final set of discovered code units
      */
-    public String execute() {
+    public ContextFragment.VirtualFragment execute() {
         // Initialize
         gapQueries.add(originalQuery);
         var contextWithClasses = contextManager.currentContext().allFragments().map(f -> {
@@ -112,7 +113,7 @@ public class SearchAgent {
         }
 
         io.spin("Exploring: " + originalQuery);
-        while (totalSteps < MAX_STEPS && currentTokenUsage < TOKEN_BUDGET && !gapQueries.isEmpty()) {
+        while (totalSteps < MAX_STEPS && totalUsage.inputTokenCount() < TOKEN_BUDGET && !gapQueries.isEmpty()) {
             totalSteps++;
             processedQueries.add(currentQuery());
 
@@ -124,23 +125,23 @@ public class SearchAgent {
 
             // Decide what action to take for this query
             var steps = determineNextActions();
-            
+
             if (steps.isEmpty()) {
                 logger.debug("No valid actions determined");
                 break;
             }
-            
+
             // Get the tool name from the first step for spinner message
             ToolCall firstStep = steps.getFirst();
             String toolName = firstStep.getRequest().name();
             String explanation = getExplanationForTool(toolName, firstStep);
             io.spin(explanation);
-            logger.debug("{}; budget: {}/{}", explanation, currentTokenUsage, TOKEN_BUDGET);
+            logger.debug("{}; token usage: {}", explanation, totalUsage);
             logger.debug("Actions: {}", steps);
 
             // Execute the actions
             var results = steps.stream().parallel().peek(step -> {
-                executeAction(step);
+                step.execute();
                 logger.debug("Result: {}", step);
             }).toList();
             logger.debug("Query queue: {}", gapQueries);
@@ -150,7 +151,24 @@ public class SearchAgent {
                 logger.debug("Search complete after answering original query");
                 assert steps.size() == 1 : steps;
                 assert steps.getFirst().getRequest().name().equals("executeAnswer");
-                return results.getFirst().execute();
+                
+                // Parse the classNames from the answer tool call
+                try {
+                    ToolCall answerCall = steps.getFirst();
+                    ObjectMapper mapper = new ObjectMapper();
+                    Map<String, Object> arguments = mapper.readValue(answerCall.getRequest().arguments(), new TypeReference<>() {});
+                    @SuppressWarnings("unchecked")
+                    var classNames = (List<String>) arguments.get("classNames");
+                    String result = results.getFirst().execute();
+                    logger.debug("Relevant classes are {}", classNames);
+                    
+                    // Return a SearchFragment with the answer and class names
+                    return new ContextFragment.SearchFragment(originalQuery, result, Set.copyOf(classNames));
+                } catch (Exception e) {
+                    logger.error("Error creating SearchFragment", e);
+                    // Fallback to just returning the answer as string in a SearchFragment with empty classes
+                    return new ContextFragment.StringFragment(originalQuery, results.getFirst().execute());
+                }
             }
 
             // Add the step to the history
@@ -158,7 +176,7 @@ public class SearchAgent {
         }
 
         logger.debug("Search complete after reaching max steps or budget");
-        return "No answer found within budget";
+        return new ContextFragment.SearchFragment(originalQuery, "No answer found within budget", Set.of());
     }
 
     /**
@@ -225,7 +243,7 @@ public class SearchAgent {
                 case "executePageRankSearch" -> {
                     Object classList = arguments.get("classList");
                     if (classList instanceof List<?> list && !list.isEmpty()) {
-                        yield list.size() == 1 ? list.get(0).toString() : list.size() + " classes";
+                        yield list.size() == 1 ? list.getFirst().toString() : list.size() + " classes";
                     }
                     yield "";
                 }
@@ -255,7 +273,7 @@ public class SearchAgent {
         // Ask LLM for next action with tools
         var tools = createToolSpecifications();
         var response = coder.sendStreamingWithTools(coder.models.editModel(), messages, false, tools);
-        currentTokenUsage += response.tokenUsage().inputTokenCount();
+        totalUsage = TokenUsage.sum(totalUsage, response.tokenUsage());
 
         // Parse response into potentially multiple actions
         return parseResponse(response.content());
@@ -339,7 +357,7 @@ public class SearchAgent {
         """.stripIndent());
 
         // Add beast mode if we're out of time or we've had too many bad attempts
-        if (currentTokenUsage > 0.9 * TOKEN_BUDGET || badAttempts >= MAX_BAD_ATTEMPTS) {
+        if (totalUsage.inputTokenCount() > 0.9 * TOKEN_BUDGET || badAttempts >= MAX_BAD_ATTEMPTS) {
             gapQueries.clear();
             gapQueries.add(originalQuery);
 
@@ -394,7 +412,12 @@ public class SearchAgent {
         systemPrompt.append("\n</current-query>\n");
 
         messages.add(new SystemMessage(systemPrompt.toString()));
-        messages.add(new UserMessage("Determine the next action to take to search for code related to: " + currentQuery()));
+        var instructions = """
+        Determine the next action(s) to take to search for code related to: %s.
+        It is more efficient to call multiple tools in a single response when you know they will be needed.
+        But if you don't have enough information to speculate, you can call just one tool.
+        """.stripIndent().formatted(currentQuery());
+        messages.add(new UserMessage(instructions));
 
         return messages;
     }
@@ -427,20 +450,13 @@ public class SearchAgent {
         
         return toolCalls;
     }
-    
-    /**
-     * Execute the selected tool call.
-     */
-    private ToolCall executeAction(ToolCall toolCall) {
-        // If already executed, skip; otherwise, execute and log the result
-        toolCall.execute();
-        return toolCall;
-    }
 
     @Tool("Search for class/method/field definitions using a regular expression pattern. Use this when you need to find symbols matching a pattern.")
     public String executeDefinitionsSearch(
-            @P(value = "Regex pattern to search for code symbols. Should not contain whitespace. Don't include ^ or $ as they're implicit. Thus you will nearly always want to use explicit wildcarding for substrings (e.g., .*Value, Abstract.*, [a-z]*DAO).", required = true) String pattern,
-            @P(value = "Reasoning about why this pattern is relevant to the query", required = true) String reasoning
+            @P(value = "Regex pattern to search for code symbols. Should not contain whitespace. Don't include ^ or $ as they're implicit. Thus you will nearly always want to use explicit wildcarding for substrings (e.g., .*Value, Abstract.*, [a-z]*DAO).")
+            String pattern,
+            @P(value = "Reasoning about why this pattern is relevant to the query")
+            String reasoning
     ) {
         if (pattern.isBlank()) {
             return "Cannot search definitions: pattern is empty";
@@ -469,7 +485,6 @@ public class SearchAgent {
                                        "to your previous reasoning."));
         messages.add(new UserMessage("Query: %s\nReasoning:%s\nDefinitions found:\n%s".formatted(currentQuery(), reasoning, definitionsStr)));
         String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
-        currentTokenUsage += estimateTokenCount(response);
 
         // Extract mentions of the definitions from the response
         Set<String> relevantDefinitions = new HashSet<>();
@@ -502,8 +517,10 @@ public class SearchAgent {
      */
     @Tool("Find where a symbol is used in code. Use this to discover how a class, method, or field is actually used throughout the codebase.")
     public String executeUsageSearch(
-        @P(value = "Fully qualified symbol name (package name, class name, optional member name) to find usages for", required = true) String symbol,
-        @P(value = "Reasoning about what information you're hoping to find in these usages", required = true) String reasoning
+        @P(value = "Fully qualified symbol name (package name, class name, optional member name) to find usages for")
+        String symbol,
+        @P(value = "Reasoning about what information you're hoping to find in these usages")
+        String reasoning
     ) {
         if (symbol.isBlank()) {
             return "Cannot search usages: symbol is empty";
@@ -527,7 +544,6 @@ public class SearchAgent {
         messages.add(new UserMessage("Query: %s\nReasoning: %s\nUsages found for %s:\n%s".formatted(
                 currentQuery(), reasoning, symbol, processedUsages)));
         String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
-        currentTokenUsage += estimateTokenCount(response);
 
         return "Relevant usages of " + symbol + ":\n\n" + response;
     }
@@ -537,8 +553,10 @@ public class SearchAgent {
      */
     @Tool("Find related code units using PageRank algorithm. Use this when you've made some progress but got stuck, or when you're almost done and want to double-check that you haven't missed anything.")
     public String executePageRankSearch(
-        @P(value = "List of fully qualified class names to use as seeds for PageRank. Use classes you've already found that seem relevant.", required = true) List<String> classList,
-        @P(value = "Reasoning about what related code you're hoping to discover", required = true) String reasoning
+        @P(value = "List of fully qualified class names to use as seeds for PageRank. Use classes you've already found that seem relevant.")
+        List<String> classList,
+        @P(value = "Reasoning about what related code you're hoping to discover")
+        String reasoning
     ) {
         if (classList.isEmpty()) {
             return "Cannot search pagerank: classList is empty";
@@ -571,7 +589,6 @@ public class SearchAgent {
         messages.add(new UserMessage("Query: %s\nReasoning: %s\nPageRank results:\n%s".formatted(
                 currentQuery(), reasoning, pageRankUnits)));
         String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
-        currentTokenUsage += estimateTokenCount(response);
 
         // Extract mentions of the PageRank results from the response
         var relevantUnits = new ArrayList<String>();
@@ -595,7 +612,8 @@ public class SearchAgent {
      */
     @Tool("Get an overview of a class's contents, including fields and method signatures. Use this to understand a class's structure without fetching its full source code.")
     public String executeSkeletonSearch(
-        @P(value = "Fully qualified class name to get the skeleton structure for", required = true) String className
+        @P(value = "Fully qualified class name to get the skeleton structure for")
+        String className
     ) {
         if (className.isBlank()) {
             return "Cannot get skeleton: class name is empty";
@@ -614,8 +632,10 @@ public class SearchAgent {
      */
     @Tool("Get the full source code of a class. This is expensive, so prefer using skeleton or method sources when possible. Use this when you need the complete implementation details, or if you think multiple methods in the class may be relevant.")
     public String executeClassSearch(
-        @P(value = "Fully qualified class name to retrieve the full source code for", required = true) String className,
-        @P(value = "Reasoning about what specific implementation details you're looking for in this class", required = true) String reasoning
+        @P(value = "Fully qualified class name to retrieve the full source code for")
+        String className,
+        @P(value = "Reasoning about what specific implementation details you're looking for in this class")
+        String reasoning
     ) {
         if (className.isBlank()) {
             return "Cannot get class source: class name is empty";
@@ -633,7 +653,6 @@ public class SearchAgent {
         messages.add(new UserMessage("Query: %s\nReasoning: %s\nClass source for %s:\n%s".formatted(
                 currentQuery(), reasoning, className, classSource)));
         String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
-        currentTokenUsage += estimateTokenCount(response);
 
         return "Relevant portions of " + className + ":\n\n" + response;
     }
@@ -643,7 +662,8 @@ public class SearchAgent {
      */
     @Tool("Get the source code of a specific method. Use this to examine the implementation of a particular method without retrieving the entire class.")
     public String executeMethodSearch(
-        @P(value = "Fully qualified method name (package name, class name, method name) to retrieve source for", required = true) String methodName
+        @P(value = "Fully qualified method name (package name, class name, method name) to retrieve source for")
+        String methodName
     ) {
         if (methodName.isBlank()) {
             return "Cannot get method source: method name is empty";
@@ -662,7 +682,8 @@ public class SearchAgent {
      */
     @Tool("Break down the complex query into smaller, more targeted sub-queries. Use this when the current query is too broad or contains multiple distinct questions that should be explored separately.")
     public String executeReflect(
-        @P(value = "List of focused sub-queries that together address the current query. Each sub-query should be more specific than the original.", required = true) List<String> subQueries
+        @P(value = "List of focused sub-queries that together address the current query. Each sub-query should be more specific than the original.")
+        List<String> subQueries
     ) {
         if (subQueries.isEmpty()) {
             return "No sub-queries generated";
@@ -692,8 +713,10 @@ public class SearchAgent {
      */
     @Tool("Provide a final answer to the current query and remove it from the queue. Use this when you have enough information to fully address the query.")
     public String executeAnswer(
-        @P(value = "Comprehensive explanation that answers the current query. Include relevant source code snippets and explain how they relate to the query.", required = true)
-        String explanation
+        @P(value = "Comprehensive explanation that answers the current query. Include relevant source code snippets and explain how they relate to the query.")
+        String explanation,
+        @P(value = "List of fully qualified class names (FQCNs) of all classes relevant to the explanation.")
+        List<String> classNames
     ) {
         if (explanation.isBlank()) {
             throw new IllegalArgumentException("Empty or missing explanation parameter");
@@ -702,6 +725,7 @@ public class SearchAgent {
         String currentQuery = gapQueries.poll();
         logger.debug("Answering query: {}", currentQuery);
         logger.debug("Answer: {}", explanation);
+        logger.debug("Referenced classes: {}", classNames);
 
         // Store the answer in our collection
         knowledge.add(new Tuple2<>(currentQuery, explanation));
@@ -709,11 +733,6 @@ public class SearchAgent {
         return explanation;
     }
 
-    private int estimateTokenCount(String text) {
-        return text.length() / 4;
-    }
-
-    
     /**
      * Represents a single tool execution request and its result.
      */
