@@ -326,7 +326,12 @@ public class AnalyzerWrapper {
         }
         if (cpgMTime > maxTrackedMTime) {
             logger.debug("Using cached code intelligence data ({} > {})", cpgMTime, maxTrackedMTime);
-            return new Analyzer(root, analyzerPath);
+            try {
+                return new Analyzer(root, analyzerPath);
+            } catch (Throwable th) {
+                logger.info("Error loading analyzer", th);
+                // fall through to return null
+            }
         }
         return null;
     }
