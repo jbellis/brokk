@@ -38,9 +38,6 @@ public class Coder {
     public final Models models;
     final IContextManager contextManager;
 
-    private int totalLinesOfCode = 0;
-    private int totalInputTokens = 0;
-
     public Coder(Models models, IConsoleIO io, Path sourceRoot, IContextManager contextManager) {
         this.models = models;
         this.io = io;
@@ -229,10 +226,6 @@ public class Coder {
                     }
                     atomicResponse.set(response);
                     writeToHistory("Response", response.toString());
-                    if (response.tokenUsage() != null) {
-                        totalInputTokens += response.tokenUsage().inputTokenCount();
-                        totalLinesOfCode += userLineCount;
-                    }
                     latch.countDown();
                 });
             }
@@ -284,23 +277,8 @@ public class Coder {
         }
 
         writeToHistory("Response", response.toString());
-        if (response.tokenUsage() != null) {
-            totalLinesOfCode += messages.stream()
-                    .mapToInt(m -> Models.getText(m).split("\n", -1).length).sum();
-            totalInputTokens += response.tokenUsage().inputTokenCount();
-        }
 
         return response.content().text().trim();
-    }
-
-    /**
-     * Approximate tokens for N lines of code, based on observed ratio so far.
-     * If we haven't measured enough yet, returns null.
-     */
-    public Integer approximateTokens(int linesOfCode) {
-        if (totalLinesOfCode == 0) return null;
-        double ratio = (double) totalInputTokens / totalLinesOfCode;
-        return (int)Math.round(ratio * linesOfCode);
     }
 
     private void writeRequestToHistory(List<ChatMessage> messages) {

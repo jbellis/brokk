@@ -480,7 +480,7 @@ public class SearchAgent {
         var relevant = new ArrayList<String>();
 
         // Check if we need to filter by relevance (if results are > 10% of token budget)
-        int definitionTokens = coder.approximateTokens(definitions.size());
+        int definitionTokens = Models.getApproximateTokens(definitions.stream().map(CodeUnit::reference).collect(Collectors.joining("\n")));
         boolean shouldFilter = definitionTokens > TOKEN_BUDGET * 0.1;
         if (shouldFilter) {
             logger.debug("Filtering definitions due to size: {} tokens (> 10% of budget)", definitionTokens);
@@ -555,7 +555,7 @@ public class SearchAgent {
 
         // Check if we need to filter by relevance (if results are > 10% of token budget)
         String processedUsages = AnalyzerWrapper.processUsages(analyzer, uses).toString();
-        int usageTokens = coder.approximateTokens(processedUsages.length());
+        int usageTokens = Models.getApproximateTokens(processedUsages);
         boolean shouldFilter = usageTokens > TOKEN_BUDGET * 0.1;
         if (shouldFilter) {
             logger.debug("Filtering usages due to size: {} tokens (> 10% of budget)", usageTokens);
@@ -648,7 +648,7 @@ public class SearchAgent {
         }
 
         // Check if we need to filter by relevance (if results are > 10% of token budget)
-        int sourceTokens = coder.approximateTokens(classSource.split("\n").length);
+        int sourceTokens = Models.getApproximateTokens(classSource);
         boolean shouldFilter = sourceTokens > TOKEN_BUDGET * 0.1;
         if (shouldFilter) {
             logger.debug("Filtering class source due to size: {} tokens (> 10% of budget)", sourceTokens);
@@ -758,7 +758,7 @@ public class SearchAgent {
             }
 
             // Check if we need to filter by relevance (if results are > 10% of token budget)
-            int resultsTokens = coder.approximateTokens(matchingClasses.size());
+            int resultsTokens = Models.getApproximateTokens(String.join("\n", matchingClasses));
             boolean shouldFilter = resultsTokens > TOKEN_BUDGET * 0.1;
             if (shouldFilter) {
                 logger.debug("Filtering substring search results due to size: {} tokens (> 10% of budget)", resultsTokens);

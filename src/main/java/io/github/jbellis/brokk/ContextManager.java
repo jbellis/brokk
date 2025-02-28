@@ -8,6 +8,7 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import io.github.jbellis.brokk.ContextFragment.PathFragment;
 import io.github.jbellis.brokk.ContextFragment.VirtualFragment;
+import io.github.jbellis.brokk.prompts.DefaultPrompts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
@@ -518,14 +519,11 @@ public class ContextManager implements IContextManager {
         }
 
         io.context("\nTotal:");
-        Integer approxTokens = coder.approximateTokens(totalLines);
-        if (approxTokens == null) {
-            io.context(formatLoc(totalLines) + " lines");
-        } else {
-            io.context(String.format("%s lines, about %,dk tokens",
-                                     formatLoc(totalLines),
-                                     approxTokens / 1000));
-        }
+        var st = DefaultPrompts.instance.collectMessages(this).stream().map(Models::getText).collect(Collectors.joining("\n"));
+        int approxTokens = Models.getApproximateTokens(st);
+        io.context(String.format("%s lines, about %,dk tokens",
+                                 formatLoc(totalLines),
+                                 approxTokens / 1000));
     }
 
     private void showHeader(String label) {

@@ -13,6 +13,7 @@ import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import dev.langchain4j.model.openai.OpenAiTokenizer;
 import dev.langchain4j.model.output.Response;
 import org.yaml.snakeyaml.Yaml;
 
@@ -34,6 +35,10 @@ public record Models(StreamingChatLanguageModel editModel,
                      String applyModelName,
                      String quickModelName)
 {
+    // langchain4j only supports openai tokenization, this is not very accurate for other providers
+    // but doing loc-based estimation based on information in the responses was worse
+    private static final OpenAiTokenizer tokenizer = new OpenAiTokenizer("o3-mini");
+
     // correct for these models
     private static final int DEFAULT_MAX_TOKENS = 8192;
 
@@ -385,6 +390,10 @@ public record Models(StreamingChatLanguageModel editModel,
         };
     }
 
+    public static int getApproximateTokens(String text) {
+        return tokenizer.encode(text).size();
+    }
+
     public static class UnavailableModel implements ChatLanguageModel {
         public UnavailableModel() {
         }
@@ -429,4 +438,5 @@ public record Models(StreamingChatLanguageModel editModel,
         public void generate(List<ChatMessage> messages, ToolSpecification toolSpecification, StreamingResponseHandler<AiMessage> handler) {
             handler.onComplete(new Response<>(new AiMessage(UNAVAILABLE)));
         }
-    }}
+    }
+}
