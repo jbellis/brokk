@@ -41,6 +41,12 @@ Code intelligence only supports Java right now, but the non-intelligent pieces
 work fine in the meantime (I've edited my Python project
 [llmap](https://github.com/jbellis/llmap) with Brokk).
 
+### Lombok fine print!
+
+Joern (the code intelligence engine) needs to run delombok before it can analyze anything.
+Delombok is unusably slow for anything but trivial projects, making Brokk a poor fit for
+Lombok-using codebases.
+
 # Getting started
 
 Requirements: Java 21+
