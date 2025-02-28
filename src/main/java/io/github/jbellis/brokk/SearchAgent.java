@@ -131,8 +131,9 @@ public class SearchAgent {
             }
             
             // Get the tool name from the first step for spinner message
-            String toolName = steps.getFirst().getRequest().name();
-            String explanation = getExplanationForTool(toolName);
+            ToolCall firstStep = steps.getFirst();
+            String toolName = firstStep.getRequest().name();
+            String explanation = getExplanationForTool(toolName, firstStep);
             io.spin(explanation);
             logger.debug("{}; budget: {}/{}", explanation, currentTokenUsage, TOKEN_BUDGET);
             logger.debug("Actions: {}", steps);
@@ -188,10 +189,11 @@ public class SearchAgent {
     }
 
     /**
-     * Gets an explanation for a tool name
+     * Gets an explanation for a tool name with parameter information
      */
-    private String getExplanationForTool(String toolName) {
-        return switch (toolName) {
+    private String getExplanationForTool(String toolName, ToolCall toolCall) {
+        String paramInfo = getToolParameterInfo(toolCall);
+        String baseExplanation = switch (toolName) {
             case "executeDefinitionsSearch" -> "Searching for symbols";
             case "executeUsageSearch" -> "Finding usages";
             case "executePageRankSearch" -> "Finding related code";
@@ -202,6 +204,46 @@ public class SearchAgent {
             case "executeAnswer" -> "Answering the question";
             default -> "Processing request";
         };
+        
+        return paramInfo.isBlank() ? baseExplanation : baseExplanation + " (" + paramInfo + ")";
+    }
+    
+    /**
+     * Gets human-readable parameter information from a tool call
+     */
+    private String getToolParameterInfo(ToolCall toolCall) {
+        if (toolCall == null) return "";
+        
+        try {
+            // Parse the JSON arguments
+            ObjectMapper mapper = new ObjectMapper();
+            Map<String, Object> arguments = mapper.readValue(toolCall.getRequest().arguments(), new TypeReference<>() {});
+            
+            return switch (toolCall.getRequest().name()) {
+                case "executeDefinitionsSearch" -> getStringParam(arguments, "pattern");
+                case "executeUsageSearch" -> getStringParam(arguments, "symbol");
+                case "executePageRankSearch" -> {
+                    Object classList = arguments.get("classList");
+                    if (classList instanceof List<?> list && !list.isEmpty()) {
+                        yield list.size() == 1 ? list.get(0).toString() : list.size() + " classes";
+                    }
+                    yield "";
+                }
+                case "executeSkeletonSearch" -> getStringParam(arguments, "className");
+                case "executeClassSearch" -> getStringParam(arguments, "className");
+                case "executeMethodSearch" -> getStringParam(arguments, "methodName");
+                case "executeAnswer" -> "finalizing";  // Keep it concise
+                default -> "";  // Reflect or unknown, omit
+            };
+        } catch (Exception e) {
+            logger.error("Error getting parameter info", e);
+            return "";
+        }
+    }
+    
+    private String getStringParam(Map<String, Object> map, String key) {
+        Object value = map.get(key);
+        return value == null || value.toString().isBlank() ? "" : value.toString();
     }
 
     /**
