@@ -79,6 +79,26 @@ public record Models(StreamingChatLanguageModel editModel,
       maxTokens: 4096
     """;
 
+    private static final String DEEPSEEK_DEFAULTS = """
+    edit_model:
+      provider: deepseek
+      key: DEEPSEEK_API_KEY
+      name: deepseek-reasoner
+      maxTokens: 8192
+
+    apply_model:
+      provider: deepseek
+      key: DEEPSEEK_API_KEY
+      name: deepseek-chat
+      maxTokens: 8192
+
+    quick_model:
+      provider: deepseek
+      key: DEEPSEEK_API_KEY
+      name: deepseek-chat
+      maxTokens: 8192
+    """;
+
     /**
      * Attempts to load model configurations from <code>~/.config/brokk/brokk.yaml</code>.
      * <p>
@@ -142,6 +162,11 @@ public record Models(StreamingChatLanguageModel editModel,
         String openaiKey = System.getenv("OPENAI_API_KEY");
         if (openaiKey != null && !openaiKey.isBlank()) {
             return buildModelsFromYaml(OPENAI_DEFAULTS);
+        }
+
+        String deepseekKey = System.getenv("DEEPSEEK_API_KEY");
+        if (deepseekKey != null && !deepseekKey.isBlank()) {
+            return buildModelsFromYaml(DEEPSEEK_DEFAULTS);
         }
 
         // If no API keys are available, return disabled models
