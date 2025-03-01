@@ -184,7 +184,7 @@ public class ContextManager implements IContextManager {
 
         var classnames = fragment.get().sources(getAnalyzer());
         var files = classnames.stream()
-                .map(cu -> getAnalyzer().pathOf(cu.reference()))
+                .map(cu -> getAnalyzer().pathOf(cu))
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         if (files.isEmpty()) {
@@ -767,7 +767,7 @@ public class ContextManager implements IContextManager {
                                                     .getLast())) // simple classname
                 .filter(cu -> currentContext().allFragments().noneMatch(fragment ->
                                                                                 fragment.sources(getAnalyzer()).contains(cu)))
-                .map(cu -> getAnalyzer().pathOf(cu.reference()))
+                .map(cu -> getAnalyzer().pathOf(cu))
                 .filter(Objects::nonNull);
 
         return Streams.concat(missingByFilename, missingByClassname)
@@ -856,8 +856,8 @@ public class ContextManager implements IContextManager {
                 // Get source code for these classes
                 StringBuilder codeForLLM = new StringBuilder();
                 int tokens = 0;
-                for (var codeUnit : topClasses) {
-                    var path = analyzer.pathOf(codeUnit);
+                for (var fqcn : topClasses) {
+                    var path = analyzer.pathOf(CodeUnit.cls(fqcn));
                     if (path == null) {
                         continue;
                     }

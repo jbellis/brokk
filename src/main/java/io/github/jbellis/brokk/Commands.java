@@ -8,6 +8,8 @@ import io.github.jbellis.brokk.prompts.ArchitectPrompts;
 import io.github.jbellis.brokk.prompts.AskPrompts;
 import io.github.jbellis.brokk.prompts.CommitPrompts;
 import io.github.jbellis.brokk.prompts.PreparePrompts;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jline.reader.Candidate;
 
 import java.awt.*;
@@ -33,6 +35,8 @@ import java.util.stream.Stream;
  * since the ContextManager now holds the primary "business logic."
  */
 public class Commands {
+    private final Logger logger = LogManager.getLogger(Commands.class);
+
     @FunctionalInterface
     public interface CommandHandler {
         OperationResult handle(String args);
@@ -399,6 +403,7 @@ public class Commands {
                 }
             }
         } catch (Exception e) {
+            logger.error("Unexpected error reading context", e);
             return OperationResult.error(e.getMessage());
         }
 

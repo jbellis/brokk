@@ -334,9 +334,20 @@ class Analyzer private (sourcePath: java.nio.file.Path, language: Language, cpgI
     adjacency.map { case (src, tgtMap) => src -> tgtMap.toMap }.toMap
   }
 
-  def pathOf(fullClassName: String): RepoFile = {
-    val clsNode = cpg.typeDecl.fullNameExact(fullClassName).head
-    toFile(clsNode)
+  def pathOf(codeUnit: CodeUnit): RepoFile = {
+    codeUnit match {
+      case CodeUnit.ClassType(fullClassName) =>
+        val clsNode = cpg.typeDecl.fullNameExact(fullClassName).head
+        toFile(clsNode)
+      case CodeUnit.FunctionType(fullMethodName) =>
+        val className = fullMethodName.split("\\.").dropRight(1).mkString(".")
+        val clsNode = cpg.typeDecl.fullNameExact(className).head
+        toFile(clsNode)
+      case CodeUnit.FieldType(fullFieldName) =>
+        val className = fullFieldName.split("\\.").dropRight(1).mkString(".")
+        val clsNode = cpg.typeDecl.fullNameExact(className).head
+        toFile(clsNode)
+    }
   }
 
   private def increment(map: TrieMap[String, TrieMap[String, Int]], source: String, target: String, count: Int = 1): Unit = {
