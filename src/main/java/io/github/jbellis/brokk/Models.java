@@ -31,9 +31,11 @@ import java.util.function.Consumer;
 public record Models(StreamingChatLanguageModel editModel,
                      StreamingChatLanguageModel applyModel,
                      ChatLanguageModel quickModel,
+                     ChatLanguageModel searchModel,
                      String editModelName,
                      String applyModelName,
-                     String quickModelName)
+                     String quickModelName,
+                     String searchModelName)
 {
     // langchain4j only supports openai tokenization, this is not very accurate for other providers
     // but doing loc-based estimation based on information in the responses was worse
@@ -50,6 +52,13 @@ public record Models(StreamingChatLanguageModel editModel,
       reasoning_effort: high
       maxTokens: 100000
     
+    search_model:
+      provider: openai
+      key: OPENAI_API_KEY
+      name: o3-mini
+      reasoning_effort: low
+      maxTokens: 100000
+
     apply_model:
       provider: openai
       key: OPENAI_API_KEY
@@ -71,6 +80,13 @@ public record Models(StreamingChatLanguageModel editModel,
       name: claude-3-7-sonnet-latest
       maxTokens: 8192
 
+    search_model:
+      provider: anthropic
+      key: ANTHROPIC_API_KEY
+      name: claude-3-7-sonnet-latest
+      enableCaching: true
+      maxTokens: 8192
+
     apply_model:
       provider: anthropic
       key: ANTHROPIC_API_KEY
@@ -82,10 +98,17 @@ public record Models(StreamingChatLanguageModel editModel,
       key: ANTHROPIC_API_KEY
       name: claude-3-haiku-20240307
       maxTokens: 4096
+      
     """;
 
     private static final String DEEPSEEK_DEFAULTS = """
     edit_model:
+      provider: deepseek
+      key: DEEPSEEK_API_KEY
+      name: deepseek-reasoner
+      maxTokens: 8192
+
+    search_model:
       provider: deepseek
       key: DEEPSEEK_API_KEY
       name: deepseek-reasoner
@@ -187,12 +210,15 @@ public record Models(StreamingChatLanguageModel editModel,
             var editModel = buildStreamingModel(top, "edit_model", true);
             var applyModel = buildStreamingModel(top, "apply_model", false);
             var quickModel = buildChatModel(top, "quick_model", false);
-    
-        String editModelName = readModelName(top, "edit_model");
+            var searchModel = buildChatModel(top, "search_model", false);
+
+            String editModelName = readModelName(top, "edit_model");
             String applyModelName = readModelName(top, "apply_model");
             String quickModelName = readModelName(top, "quick_model");
-    
-        return new Models(editModel, applyModel, quickModel, editModelName, applyModelName, quickModelName);
+            String searchModelName = readModelName(top, "search_model");
+
+            return new Models(editModel, applyModel, quickModel, searchModel,
+                              editModelName, applyModelName, quickModelName, searchModelName);
         } catch (Exception e) {
             System.out.println("Error parsing yaml: " + e.getMessage());
             System.exit(1);
@@ -204,6 +230,8 @@ public record Models(StreamingChatLanguageModel editModel,
         return new Models(new UnavailableStreamingModel(),
                           new UnavailableStreamingModel(),
                           new UnavailableModel(),
+                          new UnavailableModel(),
+                          "disabled",
                           "disabled",
                           "disabled",
                           "disabled");
@@ -332,6 +360,13 @@ public record Models(StreamingChatLanguageModel editModel,
                             .modelName(modelName)
                             .maxTokens(maxTokens);
                     maybeSetDouble(temperature, builder::temperature);
+                    
+                    // Enable caching for search model if specified
+                    if (modelMap.containsKey("enableCaching") && (boolean)modelMap.get("enableCaching")) {
+                        builder = builder
+                            .cacheSystemMessages(true)
+                            .cacheTools(true);
+                    }
                     yield builder.build();
                 }
             }

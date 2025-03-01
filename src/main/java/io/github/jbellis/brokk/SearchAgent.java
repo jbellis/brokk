@@ -9,8 +9,6 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.StreamingChatLanguageModel;
-import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.output.TokenUsage;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -103,8 +101,8 @@ public class SearchAgent {
             Make sure to include the fully qualified source (class, method, etc) as well as the code.
             """.stripIndent()));
             messages.add(new UserMessage("<query>%s</query>\n\n".formatted(query) + contextWithClasses));
-            String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
-            knowledge.add(new Tuple2<>("Initial context", response));
+            var response = coder.sendMessage(coder.models.searchModel(), messages);
+            knowledge.add(new Tuple2<>("Initial context", response.content().text()));
         }
 
         io.spin("Exploring: " + query);
@@ -265,18 +263,11 @@ public class SearchAgent {
 
         // Ask LLM for next action with tools
         var tools = createToolSpecifications();
-        var response = coder.sendStreamingWithTools(actionModel(), messages, false, tools);
+        var response = coder.sendMessage(coder.models.searchModel(), null, messages, tools);
         totalUsage = TokenUsage.sum(totalUsage, response.tokenUsage());
 
         // Parse response into potentially multiple actions
         return parseResponse(response.content());
-    }
-
-    private StreamingChatLanguageModel actionModel() {
-        // openai: use applyModel (default o3-mini-low)
-        // everyone else: use editModel
-        // hardcoding this sucks but it's openai's fault for not giving us a smart+fast option
-        return coder.models.editModel() instanceof OpenAiStreamingChatModel ? coder.models.applyModel() : coder.models.editModel();
     }
 
     /**
@@ -492,11 +483,11 @@ public class SearchAgent {
                                           "Review the list of definitions and select the ones most relevant to the query and " +
                                           "to your previous reasoning."));
             messages.add(new UserMessage("Query: %s\nReasoning:%s\nDefinitions found:\n%s".formatted(query, reasoning, definitions)));
-            String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+            var response = coder.sendMessage(coder.models.searchModel(), messages);
             io.spin("Filtering very large search result");
 
             // Extract mentions of the definitions from the response
-            var relevantDefinitions = extractMatches(response, definitions.stream().map(CodeUnit::reference).collect(Collectors.toSet()));
+            var relevantDefinitions = extractMatches(response.content().text(), definitions.stream().map(CodeUnit::reference).collect(Collectors.toSet()));
 
             logger.debug("Filtered definitions: {} (from {})", relevantDefinitions.size(), definitions.size());
 
@@ -558,22 +549,23 @@ public class SearchAgent {
         String processedUsages = AnalyzerWrapper.processUsages(analyzer, uses).toString();
         int usageTokens = Models.getApproximateTokens(processedUsages);
         boolean shouldFilter = usageTokens > TOKEN_BUDGET * 0.1;
-        if (shouldFilter) {
-            logger.debug("Filtering usages due to size: {} tokens (> 10% of budget)", usageTokens);
-
-            List<ChatMessage> messages = new ArrayList<>();
-            messages.add(new SystemMessage("You are helping evaluate which code usages are relevant to a user query. " +
-                                          "Review the following code usages and select ONLY the relevant chunks that directly " +
-                                          "address the query. Output the FULL TEXT of the relevant code chunks."));
-            messages.add(new UserMessage("Query: %s\nReasoning: %s\nUsages found for %s:\n%s".formatted(
-                    query, reasoning, symbol, processedUsages)));
-            String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
-
-            return "Relevant usages of " + symbol + ":\n\n" + response;
-        } else {
+        if (!shouldFilter) {
             // Return all usages without filtering
             return "Usages of " + symbol + ":\n\n" + processedUsages;
         }
+
+        logger.debug("Filtering usages due to size: {} tokens (> 10% of budget)", usageTokens);
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(new SystemMessage("You are helping evaluate which code usages are relevant to a user query. " +
+                                      "Review the following code usages and select ONLY the relevant chunks that directly " +
+                                      "address the query. Output the FULL TEXT of the relevant code chunks."));
+        messages.add(new UserMessage("Query: %s\nReasoning: %s\nUsages found for %s:\n%s".formatted(
+                query, reasoning, symbol, processedUsages)));
+        var response = coder.sendMessage(coder.models.searchModel(), messages);
+        if (response == null) {
+            return "Error: No response from coder";
+        }
+        return "Relevant usages of " + symbol + ":\n\n" + Models.getText(response.content());
     }
 
     /**
@@ -660,10 +652,10 @@ public class SearchAgent {
                                           "address the user's query and/or your own reasoning. Output the FULL TEXT of the relevant code chunks. When in doubt, include the chunk."));
             messages.add(new UserMessage("Query: %s\nReasoning: %s\nClass source for %s:\n%s".formatted(
                     query, reasoning, className, classSource)));
-            String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+            var response = coder.sendMessage(coder.models.searchModel(), messages);
             io.spin("Filtering very large class source");
 
-            return "Relevant portions of " + className + ":\n\n" + response;
+            return "Relevant portions of " + className + ":\n\n" + response.content().text();
         } else {
             // Return full class source without filtering
             return "Source code of " + className + ":\n\n" + classSource;
@@ -770,11 +762,11 @@ public class SearchAgent {
                                              "to your previous reasoning."));
                 messages.add(new UserMessage("Query: %s\nReasoning: %s\nClasses found with content matching pattern '%s':\n%s".formatted(
                         query, reasoning, pattern, String.join("\n", matchingClasses))));
-                String response = coder.sendStreaming(coder.models.applyModel(), messages, false);
+                var response = coder.sendMessage(coder.models.searchModel(), messages);
                 io.spin("Filtering very large substring search result");
 
                 // Extract mentions of the class names from the response
-                var relevantClasses = extractMatches(response, matchingClasses);
+                var relevantClasses = extractMatches(response.content().text(), matchingClasses);
 
                 logger.debug("Filtered substring search results: {} (from {})", relevantClasses.size(), matchingClasses.size());
                 return "Relevant classes with content matching pattern: " + String.join(", ", relevantClasses);

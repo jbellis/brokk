@@ -1,11 +1,11 @@
 package io.github.jbellis.brokk;
 
 import com.google.common.collect.Streams;
-import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import io.github.jbellis.brokk.ContextFragment.PathFragment;
 import io.github.jbellis.brokk.ContextFragment.VirtualFragment;
 import io.github.jbellis.brokk.prompts.DefaultPrompts;
@@ -35,8 +35,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-
-import static java.lang.Math.min;
 
 /**
  * Manages the current and previous context, along with other state like prompts and message history.

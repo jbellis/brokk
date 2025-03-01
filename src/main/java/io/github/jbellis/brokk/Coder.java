@@ -70,23 +70,24 @@ public class Coder {
 
             // Actually send the message to the LLM and get the response
             logger.debug("Sending to LLM [only last message shown]: {}", requestMsg);
-            String llmResponse = sendStreaming(model, messages, true);
+            var llmResponse = sendStreaming(model, messages, true);
             logger.debug("response:\n{}", llmResponse);
             if (llmResponse == null) {
                 // Interrupted or error.  sendMessage is responsible for giving feedback to user
                 break;
             }
 
-            if (llmResponse.isEmpty()) {
+            var llmText = llmResponse.content().text();
+            if (llmText.isBlank()) {
                 io.toolError("Empty response from LLM, will retry");
                 continue;
             }
 
             // Add the request/response to pending history
-            pendingHistory.addAll(List.of(requestMsg, new AiMessage(llmResponse)));
+            pendingHistory.addAll(List.of(requestMsg, llmResponse.content()));
 
             // Gather all edit blocks in the reply
-            var parseResult = EditBlock.findOriginalUpdateBlocks(llmResponse, contextManager.getEditableFiles());
+            var parseResult = EditBlock.findOriginalUpdateBlocks(llmText, contextManager.getEditableFiles());
             var blocks = parseResult.blocks();
             logger.debug("Parsed {} blocks", blocks.size());
 
@@ -161,27 +162,15 @@ public class Coder {
     }
 
     /**
-     * Actually sends a user query to the LLM (with streaming),
-     * writes to conversation history, etc.
-     */
-    public String sendStreaming(StreamingChatLanguageModel model, List<ChatMessage> messages, boolean echo) {
-        return Models.getText(sendStreamingWithTools(model, messages, echo, List.of()).content());
-    }
-    
-    /**
-     * Sends a user query to the LLM with tools enabled (with streaming),
+     * Sends a user query to the LLM (with streaming),
      * writes to conversation history, etc.
      *
      * @param model    The LLM model to use
      * @param messages The messages to send
      * @param echo     Whether to echo LLM responses to the console
-     * @param tools    List of tool specifications to enable for the LLM
-     * @return The final response from the LLM
+     * @return The final response from the LLM as a string
      */
-    public Response<AiMessage> sendStreamingWithTools(StreamingChatLanguageModel model, List<ChatMessage> messages, boolean echo, List<ToolSpecification> tools) {
-        int userLineCount = messages.stream()
-                .mapToInt(m -> Models.getText(m).split("\n", -1).length).sum();
-
+    public Response<AiMessage> sendStreaming(StreamingChatLanguageModel model, List<ChatMessage> messages, boolean echo) {
         if (echo) {
             io.toolOutput("Request sent");
         }
@@ -205,10 +194,10 @@ public class Coder {
         });
 
         // Write request with tools to history
-        writeRequestToHistory(messages, tools);
-        
+        writeRequestToHistory(messages, List.of());
+
         var atomicResponse = new AtomicReference<Response<AiMessage>>();
-        model.generate(messages, tools, new StreamingResponseHandler<>() {
+        model.generate(messages, new StreamingResponseHandler<>() {
             @Override
             public void onNext(String token) {
                 ifNotCancelled.accept(() -> {
@@ -254,39 +243,53 @@ public class Coder {
         return atomicResponse.get();
     }
 
+    /**
+     * Send a message to the default quick model
+     * 
+     * @param messages The messages to send
+     * @return The LLM response as a string
+     */
     public String sendMessage(List<ChatMessage> messages) {
-        return sendMessage(models.quickModel(), null, messages);
+        return sendMessage((String) null, messages);
     }
 
+    /**
+     * Send a message to the default quick model with a description
+     * 
+     * @param description Description of the request (logged to console)
+     * @param messages The messages to send
+     * @return The LLM response as a string
+     */
     public String sendMessage(String description, List<ChatMessage> messages) {
-        return sendMessage(models.quickModel(), description, messages);
+        var R = sendMessage(models.quickModel(), description, messages, List.of());
+        return R.content().text().trim();
     }
 
-    /** Send a message to a specific model */
-    public String sendMessage(ChatLanguageModel model, String description, List<ChatMessage> messages) {
+    public Response<AiMessage> sendMessage(ChatLanguageModel model, List<ChatMessage> messages) {
+        return sendMessage(model, null, messages, List.of());
+    }
+    
+
+    /**
+     * Send a message to a specific model with tool support
+     *
+     * @param model       The model to use
+     * @param description Description of the request (logged to console)
+     * @param messages    The messages to send
+     * @param tools       List of tools to enable for the LLM
+     * @return The LLM response as a string
+     */
+    public Response<AiMessage> sendMessage(ChatLanguageModel model, String description, List<ChatMessage> messages, List<ToolSpecification> tools) {
         if (description != null) {
             io.toolOutput(description);
         }
-        writeRequestToHistory(messages);
+        writeRequestToHistory(messages, tools);
         Response<AiMessage> response;
-        try {
-            response = model.generate(messages);
-        } catch (Throwable th) {
-            writeToHistory("Error", th.getMessage());
-            return "";
-        }
+        response = model.generate(messages, tools);
 
         writeToHistory("Response", response.toString());
 
-        return response.content().text().trim();
-    }
-
-    private void writeRequestToHistory(List<ChatMessage> messages) {
-        String requestText = messages.stream()
-                .map(m -> "%s: %s\n".formatted(m.type(), Models.getText(m)))
-                .reduce((a, b) -> a + "\n" + b)
-                .orElse("");
-        writeToHistory("Request", requestText);
+        return response;
     }
 
     private void writeRequestToHistory(List<ChatMessage> messages, List<ToolSpecification> tools) {

@@ -493,9 +493,9 @@ public class Commands {
         var messages = AskPrompts.instance.collectMessages(cm);
         messages.add(new UserMessage("<question>\n%s\n</question>".formatted(input.trim())));
 
-        String response = coder.sendStreaming(cm.getCurrentModel(coder.models), messages, true);
+        var response = coder.sendStreaming(cm.getCurrentModel(coder.models), messages, true);
         if (response != null) {
-            cm.addToHistory(List.of(messages.getLast(), new AiMessage(response)));
+            cm.addToHistory(List.of(messages.getLast(), response.content()));
         }
 
         return OperationResult.success();
@@ -744,10 +744,10 @@ public class Commands {
                 """.formatted(msg.trim()).stripIndent();
         messages.add(new UserMessage(st));
 
-        String response = coder.sendStreaming(cm.getCurrentModel(coder.models), messages, true);
+        var response = coder.sendStreaming(cm.getCurrentModel(coder.models), messages, true);
         if (response != null) {
-            cm.addToHistory(List.of(messages.getLast(), new AiMessage(response)));
-            var missing = cm.findMissingFileMentions(response);
+            cm.addToHistory(List.of(messages.getLast(), response.content()));
+            var missing = cm.findMissingFileMentions(response.content().text());
             confirmAddRequestedFiles(missing);
         }
 
