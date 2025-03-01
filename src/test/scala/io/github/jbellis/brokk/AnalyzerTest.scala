@@ -323,7 +323,7 @@ class AnalyzerTest {
     // Find fields matching "field.*"
     val fieldMatches = analyzer.getDefinitions(".*field.*")
     val fieldRefs = asScala(fieldMatches).map(_.reference).toSet
-    assertEquals(Set("D.field1", "D.field2", "E.iField", "E.sField", "<operator>.fieldAccess"), fieldRefs)
+    assertEquals(Set("D.field1", "D.field2", "E.iField", "E.sField"), fieldRefs)
   }
 
   @Test
