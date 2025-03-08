@@ -498,6 +498,7 @@ public class ContextPanel extends JPanel {
                         .filter(Option::isDefined)
                         .map(Option::get)
                         .map(RepoFile::getFileName)
+                        .distinct()  // Remove duplicates while keeping the stream
                         .collect(Collectors.joining(", "));
                 }
             }
