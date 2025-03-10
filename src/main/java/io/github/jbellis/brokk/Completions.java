@@ -21,55 +21,31 @@ public class Completions {
         var allCodeUnits = analyzer.getAllClasses();
         var allClassnames = allCodeUnits.stream().map(CodeUnit::reference).toList();
         String partial = input.trim();
-
-        var matchingClasses = findClassesForMemberAccess(input, allClassnames);
-        if (matchingClasses.size() == 1) {
-            // find matching members
-            var results = new ArrayList<>(matchingClasses);
-            for (var matchedClass : matchingClasses) {
-                String memberPrefix = partial.substring(partial.lastIndexOf(".") + 1);
-                // Add members
-                var trueMembers = analyzer.getMembersInClass(matchedClass).stream().filter(m -> !m.reference().contains("$")).toList();
-                for (String fqMember : trueMembers.stream().map(CodeUnit::reference).toList()) {
-                    String shortMember = fqMember.substring(fqMember.lastIndexOf('.') + 1);
-                    if (shortMember.startsWith(memberPrefix)) {
-                        results.add(returnFqn ? fqMember : getShortClassName(matchedClass) + "." + shortMember);
-                    }
-                }
-            }
-            return results;
-        }
-
-        // Otherwise, we're completing class names
-        String partialLower = partial.toLowerCase();
-        Set<String> matchedClasses = new TreeSet<>();
-
-        // Gather matching classes
+        Set<String> uniqueCompletions = new HashSet<>();
+        
+        // Handle empty input - return all classes
         if (partial.isEmpty()) {
-            matchedClasses.addAll(allClassnames);
+            uniqueCompletions.addAll(allClassnames);
         } else {
-            var st = returnFqn ? allClassnames.stream() : allClassnames.stream().map(Completions::getShortClassName);
-            st.forEach(name -> {
-                if (name.toLowerCase().startsWith(partialLower)
-                        || getShortClassName(name).toLowerCase().startsWith(partialLower)) {
-                    matchedClasses.add(name);
-                }
-            });
-
-            matchedClasses.addAll(getClassnameMatches(partial, allClassnames));
+            var matchingMembers = findClassesForMemberAccess(input, allClassnames).stream()
+                    .flatMap(fqcn -> analyzer.getMembersInClass(fqcn).stream())
+                    .map(CodeUnit::reference)
+                    .toList();
+            // Otherwise, we're completing class names with prioritized matching similar to getFileCompletions
+            String partialLower = partial.toLowerCase();
+            uniqueCompletions.addAll(matchingMembers);
         }
 
-        // Return just the class names
-        return matchedClasses.stream()
-                .map(fqClass -> {
-                    return returnFqn ? fqClass : getShortClassName(fqClass);
-                })
+        // Return the class names in the requested format (FQN or short name)
+        return uniqueCompletions.stream()
+                .map(fqClass -> returnFqn ? fqClass : getShortClassName(fqClass))
                 .collect(Collectors.toList());
     }
 
     /**
      * Return the FQCNs corresponding to input if it identifies an unambiguous class in [the FQ] allClasses
      */
+
     static Set<String> findClassesForMemberAccess(String input, List<String> allClasses) {
         // suppose allClasses = [a.b.Do, a.b.Do$Re, d.Do, a.b.Do$Re$Sub]
         // then we want
