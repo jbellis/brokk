@@ -299,6 +299,32 @@ public class GitLogPanel extends JPanel {
         changesContextMenu.add(viewHistoryItem);
         changesContextMenu.add(editFileItem);
         changesTree.setComponentPopupMenu(changesContextMenu);
+        
+        // Add double-click handler to show diff
+        changesTree.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    TreePath path = changesTree.getPathForLocation(e.getX(), e.getY());
+                    if (path != null) {
+                        DefaultMutableTreeNode node = (DefaultMutableTreeNode) path.getLastPathComponent();
+                        if (node != changesRootNode && node.getParent() != changesRootNode) {
+                            // This is a file node (not a directory or root)
+                            String fileName = node.getUserObject().toString();
+                            DefaultMutableTreeNode parentNode = (DefaultMutableTreeNode) node.getParent();
+                            String dirPath = parentNode.getUserObject().toString();
+                            String filePath = dirPath.isEmpty() ? fileName : dirPath + "/" + fileName;
+                            
+                            int[] selRows = commitsTable.getSelectedRows();
+                            if (selRows.length == 1) {
+                                String commitId = (String) commitsTableModel.getValueAt(selRows[0], 3);
+                                showFileDiff(commitId, filePath);
+                            }
+                        }
+                    }
+                }
+            }
+        });
 
         changesContextMenu.addPopupMenuListener(new PopupMenuListener() {
             @Override
@@ -1214,6 +1240,20 @@ public class GitLogPanel extends JPanel {
         List<RepoFile> files = new ArrayList<>();
         files.add(new RepoFile(contextManager.getRoot(), filePath));
         contextManager.editFiles(files);
+    }
+    
+    /**
+     * Shows the diff for a file in a commit.
+     */
+    private void showFileDiff(String commitId, String filePath) {
+        RepoFile file = new RepoFile(contextManager.getRoot(), filePath);
+        DiffPanel diffPanel = new DiffPanel(contextManager);
+        
+        String shortCommitId = commitId.length() > 7 ? commitId.substring(0, 7) : commitId;
+        String dialogTitle = "Diff: " + file.getFileName() + " (" + shortCommitId + ")";
+        
+        diffPanel.showFileDiff(commitId, file, dialogTitle);
+        diffPanel.showInDialog(this, dialogTitle);
     }
 
     /**

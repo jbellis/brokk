@@ -113,6 +113,23 @@ public class GitPanel extends JPanel {
         uncommittedFilesTable.getColumnModel().getColumn(1).setPreferredWidth(450);
         uncommittedFilesTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
 
+        // Add double-click handler to show diff for uncommitted files
+        uncommittedFilesTable.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    int row = uncommittedFilesTable.rowAtPoint(e.getPoint());
+                    if (row >= 0) {
+                        uncommittedFilesTable.setRowSelectionInterval(row, row);
+                        String filename = (String) uncommittedFilesTable.getValueAt(row, 0);
+                        String path = (String) uncommittedFilesTable.getValueAt(row, 1);
+                        String filePath = path.isEmpty() ? filename : path + "/" + filename;
+                        showUncommittedFileDiff(filePath);
+                    }
+                }
+            }
+        });
+
         JScrollPane uncommittedScrollPane = new JScrollPane(uncommittedFilesTable);
         commitTab.add(uncommittedScrollPane, BorderLayout.CENTER);
 
@@ -567,6 +584,21 @@ public class GitPanel extends JPanel {
         });
 
         fileHistoryTable.setComponentPopupMenu(historyContextMenu);
+        
+        // Add double-click listener to show diff
+        fileHistoryTable.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    int row = fileHistoryTable.rowAtPoint(e.getPoint());
+                    if (row >= 0) {
+                        fileHistoryTable.setRowSelectionInterval(row, row);
+                        String commitId = (String) fileHistoryModel.getValueAt(row, 3);
+                        showFileHistoryDiff(commitId, filePath);
+                    }
+                }
+            }
+        });
 
         // Add listeners to context menu items
         addToContextItem.addActionListener(e -> {
@@ -767,6 +799,20 @@ public class GitPanel extends JPanel {
         files.add(contextManager.toFile(filePath));
         contextManager.editFiles(files);
     }
+    
+    /**
+     * Shows the diff for a file at a specific commit from file history.
+     */
+    private void showFileHistoryDiff(String commitId, String filePath) {
+        RepoFile file = new RepoFile(contextManager.getRoot(), filePath);
+        DiffPanel diffPanel = new DiffPanel(contextManager);
+        
+        String shortCommitId = commitId.length() > 7 ? commitId.substring(0, 7) : commitId;
+        String dialogTitle = "Diff: " + file.getFileName() + " (" + shortCommitId + ")";
+        
+        diffPanel.showFileDiff(commitId, file, dialogTitle);
+        diffPanel.showInDialog(this, dialogTitle);
+    }
 
     // ================ Stash Methods ==================
 
@@ -869,6 +915,18 @@ public class GitPanel extends JPanel {
     /**
      * Format commit date to show e.g. "HH:MM:SS today" if it is today's date.
      */
+    /**
+     * Shows the diff for an uncommitted file.
+     */
+    private void showUncommittedFileDiff(String filePath) {
+        RepoFile file = new RepoFile(contextManager.getRoot(), filePath);
+        DiffPanel diffPanel = new DiffPanel(contextManager);
+        
+        String dialogTitle = "Uncommitted Changes: " + file.getFileName();
+        diffPanel.showFileDiff("UNCOMMITTED", file, dialogTitle);
+        diffPanel.showInDialog(this, dialogTitle);
+    }
+    
     protected String formatCommitDate(Date date, java.time.LocalDate today) {
         try {
             java.time.LocalDate commitDate = date.toInstant()
