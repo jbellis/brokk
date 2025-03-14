@@ -1123,69 +1123,9 @@ public class Chrome implements AutoCloseable, IConsoleIO {
      * @param fragment The fragment to preview
      */
     public void openFragmentPreview(ContextFragment fragment) {
-        String text;
-        try {
-            text = fragment.text();
-        } catch (IOException e) {
-            contextManager.removeBadFragment(fragment, e);
-            return;
-        }
-        SwingUtilities.invokeLater(() -> {
-            // Create a new window
-            var previewFrame = new JFrame(fragment.description());
-            previewFrame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-
-            // Create syntax text area
-            var textArea = new RSyntaxTextArea();
-            textArea.setText(text);
-            textArea.setEditable(false);
-            textArea.setCodeFoldingEnabled(true);
-            textArea.setSyntaxEditingStyle(getSyntaxStyleForFragment(fragment));
-
-            // Apply current theme to the text area
-            if (themeManager != null) {
-                themeManager.applyCurrentThemeToComponent(textArea);
-            }
-
-            var scrollPane = new JScrollPane(textArea);
-            previewFrame.add(scrollPane);
-
-            // Ensure text area starts scrolled to the top
-            textArea.setCaretPosition(0);
-
-            // Set window size from saved properties
-            Rectangle bounds = getProject().getPreviewWindowBounds();
-            previewFrame.setSize(bounds.width, bounds.height);
-
-            // Position the window, checking if position is valid
-            if (bounds.x >= 0 && bounds.y >= 0 && isPositionOnScreen(bounds.x, bounds.y)) {
-                previewFrame.setLocation(bounds.x, bounds.y);
-            } else {
-                previewFrame.setLocationRelativeTo(frame);
-            }
-
-            // Add component listener to save position
-            previewFrame.addComponentListener(new java.awt.event.ComponentAdapter() {
-                @Override
-                public void componentResized(java.awt.event.ComponentEvent e) {
-                    getProject().savePreviewWindowBounds(previewFrame);
-                }
-
-                @Override
-                public void componentMoved(java.awt.event.ComponentEvent e) {
-                    getProject().savePreviewWindowBounds(previewFrame);
-                }
-            });
-
-            // Add Escape key to close
-            previewFrame.getRootPane().registerKeyboardAction(
-                    e -> previewFrame.dispose(),
-                    KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0),
-                    JComponent.WHEN_IN_FOCUSED_WINDOW
-            );
-
-            previewFrame.setVisible(true);
-        });
+        String syntaxStyle = getSyntaxStyleForFragment(fragment);
+        FragmentPreviewDialog dialog = new FragmentPreviewDialog(frame, fragment, syntaxStyle);
+        dialog.setVisible(true);
     }
 
     /**

@@ -7,6 +7,7 @@ import io.github.jbellis.brokk.ContextManager;
 import io.github.jbellis.brokk.IAnalyzer;
 import io.github.jbellis.brokk.RepoFile;
 import io.github.jbellis.brokk.Models;
+import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import scala.Option;
@@ -242,19 +243,19 @@ public class ContextPanel extends JPanel {
             }
 
             private void handlePopup(MouseEvent e) {
-                if (e.isPopupTrigger()) {
-                    int row = contextTable.rowAtPoint(e.getPoint());
-                    int col = contextTable.columnAtPoint(e.getPoint());
+        if (e.isPopupTrigger()) {
+            int row = contextTable.rowAtPoint(e.getPoint());
+            int col = contextTable.columnAtPoint(e.getPoint());
 
-                    // Clear the menu and rebuild according to row/column
-                    contextMenu.removeAll();
+            // Clear the menu and rebuild according to row/column
+            contextMenu.removeAll();
 
-                    if (row >= 0) {
-                        // Only select the row if nothing is currently selected
-                        if (contextTable.getSelectedRowCount() == 0) {
-                            contextTable.setRowSelectionInterval(row, row);
-                        }
-                        var fragment = (ContextFragment) contextTable.getModel().getValueAt(row, FRAGMENT_COLUMN);
+            if (row >= 0) {
+                // Only select the row if nothing is currently selected
+                if (contextTable.getSelectedRowCount() == 0) {
+                    contextTable.setRowSelectionInterval(row, row);
+                }
+                var fragment = (ContextFragment) contextTable.getModel().getValueAt(row, FRAGMENT_COLUMN);
 
                         // If this is the AutoContext row, show AutoContext items
                         if (fragment instanceof ContextFragment.AutoContext) {
