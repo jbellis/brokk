@@ -225,6 +225,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
         // Create a split pane with output+history in top and command+context+status in bottom
         verticalSplitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
         verticalSplitPane.setTopComponent(historySplitPane);
+        verticalSplitPane.setResizeWeight(0.4);
         
         // Create a panel for everything below the output area
         var bottomPanel = new JPanel(new BorderLayout());
@@ -1199,7 +1200,11 @@ public class Chrome implements AutoCloseable, IConsoleIO {
             // Restore vertical split pane position
             int verticalPos = getProject().getVerticalSplitPosition();
             if (verticalPos > 0) {
+                // Use the saved position
                 verticalSplitPane.setDividerLocation(verticalPos);
+            } else {
+                // If there's no saved position, pick 40% for the top
+                verticalSplitPane.setDividerLocation(0.4);
             }
             
             // Restore history split pane position

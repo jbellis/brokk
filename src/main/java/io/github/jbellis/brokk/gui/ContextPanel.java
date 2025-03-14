@@ -68,7 +68,10 @@ public class ContextPanel extends JPanel {
 
         buildContextPanel();
 
-        ((JLabel) locSummaryLabel.getComponent(0)).setText("No context - use Edit or Read or Summarize to add content");
+    // Ensure the panel's minimum size accommodates all buttons
+    setMinimumSize(getPreferredSize());
+
+    ((JLabel) locSummaryLabel.getComponent(0)).setText("No context - use Edit or Read or Summarize to add content");
     }
 
     /**
