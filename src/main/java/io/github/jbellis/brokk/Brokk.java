@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 
 public class Brokk {
@@ -93,6 +94,8 @@ public class Brokk {
             return;
         }
 
+        updateLoggerPath(projectPath);
+
         // Save to recent projects
         Project.updateRecentProject(projectPath);
 
@@ -166,5 +169,18 @@ public class Brokk {
         io.shellOutput("Quick model: " + models.quickModelName());
         var trackedFiles = Brokk.contextManager.getProject().getRepo().getTrackedFiles();
         io.shellOutput("Git repo at %s with %d files".formatted(cm.getProject().getRoot(), trackedFiles.size()));
+    }
+
+
+    /**
+     * @param newPath to set "logfile.path" system property for a logging file 
+     *                and update logging configurations
+     */
+    public static void updateLoggerPath(Path newPath) {
+        Objects.requireNonNull(newPath);
+        System.setProperty("logfile.path", newPath.toString() + "/.brokk/debug.log");
+
+        ((org.apache.logging.log4j.core.LoggerContext) 
+         LogManager.getContext(false)).reconfigure();
     }
 }

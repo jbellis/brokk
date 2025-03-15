@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Configuration status="ERROR">
   <Properties>
-    <Property name="logFile">${sys:logfile.path}</Property>
+  <!-- On start up "./.brokk/debug.log" will be the place to store first 
+       logs until "logfile.path is provided and configuration is reloaded -->
+    <Property name="logFile">${sys:logfile.path:-.brokk/debug.log}</Property>
   </Properties>
 
   <Appenders>
