@@ -53,14 +53,19 @@ public class Context implements Serializable {
     transient final Future<String> action;
     public static final String SUMMARIZING = "(Summarizing)";
 
-    public record ParsedOutput(String output, ContextFragment.VirtualFragment parsedFragment) {
+    public record ParsedOutput(String output, ContextFragment.VirtualFragment parsedFragment, Future<String> descriptionFuture) {
         public ParsedOutput {
             assert output != null;
             assert parsedFragment != null;
+            // descriptionFuture can be null
+        }
+
+        public ParsedOutput(String output, ContextFragment.VirtualFragment parsedFragment) {
+            this(output, parsedFragment, null);
         }
 
         public ParsedOutput() {
-            this("", new ContextFragment.StringFragment("", ""));
+            this("", new ContextFragment.StringFragment("", ""), null);
         }
     }
 

@@ -288,9 +288,10 @@ public class ContextManager implements IContextManager
 
             // Add to context history with the output text
             pushContext(ctx -> {
+                var descFuture = CompletableFuture.completedFuture("Run " + input);
                 var runFrag = new ContextFragment.StringFragment(output, "Run " + input);
-                var parsed = new ParsedOutput(io.getLlmOutputText(), runFrag);
-                return ctx.withParsedOutput(parsed, CompletableFuture.completedFuture("Run " + input));
+                var parsed = new ParsedOutput(io.getLlmOutputText(), runFrag, descFuture);
+                return ctx.withParsedOutput(parsed, descFuture);
             });
         });
     }
@@ -875,7 +876,7 @@ public class ContextManager implements IContextManager
         } else {
             query = CompletableFuture.completedFuture(fragment.description());
         }
-        var parsed = new ParsedOutput(io.getLlmOutputText(), fragment);
+        var parsed = new ParsedOutput(io.getLlmOutputText(), fragment, query);
         pushContext(ctx -> ctx.addSearchFragment(query, parsed));
     }
 
@@ -898,7 +899,23 @@ public class ContextManager implements IContextManager
                 // Use reflection or pass chrome reference in constructor to avoid direct dependency
                 var selectedCtx = selectedContext();
                 if (selectedCtx != null) {
-                    addVirtualFragment(selectedCtx.getParsedOutput().parsedFragment());
+                    var parsedOutput = selectedCtx.getParsedOutput();
+                    var fragment = parsedOutput.parsedFragment();
+                    
+                    // Check for a description from the future if available
+                    if (parsedOutput.descriptionFuture() != null && parsedOutput.descriptionFuture().isDone()) {
+                        try {
+                            String description = parsedOutput.descriptionFuture().get();
+                            if (!description.isBlank()) {
+                                // Create a new fragment with the description
+                                fragment = new ContextFragment.StringFragment(fragment.text(), description);
+                            }
+                        } catch (Exception e) {
+                            logger.warn("Error getting description from future", e);
+                        }
+                    }
+                    
+                    addVirtualFragment(fragment);
                     io.systemOutput("Content captured from output");
                 } else {
                     io.toolErrorRaw("No content to capture");
@@ -1452,8 +1469,9 @@ public class ContextManager implements IContextManager
     @Override
     public void addToHistory(List<ChatMessage> messages, Map<RepoFile, String> originalContents, String action)
     {
-        var parsed = new ParsedOutput(io.getLlmOutputText(), new ContextFragment.StringFragment(io.getLlmOutputText(), ""));
-        pushContext(ctx -> ctx.addHistory(messages, originalContents, parsed, submitSummarizeTaskForConversation(action)));
+        var future = submitSummarizeTaskForConversation(action);
+        var parsed = new ParsedOutput(io.getLlmOutputText(), new ContextFragment.StringFragment(io.getLlmOutputText(), ""), future);
+        pushContext(ctx -> ctx.addHistory(messages, originalContents, parsed, future));
     }
 
     public List<Context> getContextHistory() {
