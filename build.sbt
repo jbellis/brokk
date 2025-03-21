@@ -1,5 +1,5 @@
-import sbt._
-import sbt.Keys._
+import sbt.*
+import sbt.Keys.*
 
 scalaVersion := "3.5.2"
 version := "0.6.3-SNAPSHOT"
@@ -57,6 +57,8 @@ libraryDependencies ++= Seq(
   "com.vladsch.flexmark" % "flexmark" % "0.64.8",
   "com.vladsch.flexmark" % "flexmark-html2md-converter" % "0.64.8",
   "org.jsoup" % "jsoup" % "1.19.1",
+  "com.jgoodies" % "jgoodies-forms" % "1.9.0",
+
 
   // Testing
   "org.junit.jupiter" % "junit-jupiter" % "5.10.2" % Test,
