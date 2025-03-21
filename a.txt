@@ -1,0 +1,16 @@
+                public class AccountManager {
+                    private String name;
+                    private double outstanding;
+                    private int unused;
+
+                    void printOwing() {
+                        // Print banner
+                        System.out.println("Details of account");
+                        System.out.println("-----");
+                        System.out.println("");
+
+                        // Print details
+                        System.out.println("name: " + name);
+                        System.out.println("amount: " + outstanding);
+                    }
+                }
