@@ -42,6 +42,7 @@ libraryDependencies ++= Seq(
   // Joern dependencies
   "io.joern" %% "x2cpg" % "4.0.265",
   "io.joern" %% "javasrc2cpg" % "4.0.265",
+  "io.joern" %% "jssrc2cpg" % "4.0.265",
   "io.joern" %% "pysrc2cpg" % "4.0.265",
   "io.joern" %% "joern-cli" % "4.0.265",
   "io.joern" %% "semanticcpg" % "4.0.265",

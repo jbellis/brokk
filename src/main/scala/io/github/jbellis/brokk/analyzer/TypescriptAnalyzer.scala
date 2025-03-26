@@ -8,6 +8,8 @@ import io.shiftleft.codepropertygraph.generated.nodes.Method
 import io.shiftleft.semanticcpg.language._
 import io.shiftleft.semanticcpg.layers.LayerCreatorContext
 import io.joern.dataflowengineoss.layers.dataflows.OssDataFlow
+import io.shiftleft.semanticcpg.language.*
+import io.joern.jssrc2cpg.{Config, JsSrc2Cpg}
 
 import java.io.IOException
 import java.nio.file.Path
@@ -35,24 +37,57 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
    * TypeScript-specific method signature builder.
    */
   override protected def methodSignature(m: Method): String = {
-    // Basic placeholder implementation
-    s"function ${m.name}() { /* TypeScript method */ }"
+    val modifiers = m.modifier.map(_.modifierType.toLowerCase).filter(_.nonEmpty).mkString(" ")
+    val modString = if (modifiers.nonEmpty) modifiers + " " else ""
+    
+    val returnType = sanitizeType(m.methodReturn.typeFullName)
+    val returnTypeStr = if (returnType == "any") "" else s": $returnType"
+    
+    val paramList = m.parameter
+      .sortBy(_.order)
+      .filterNot(_.name == "this")
+      .l
+      .map { p => 
+        val paramType = sanitizeType(p.typeFullName)
+        val typeAnnotation = if (paramType == "any") "" else s": $paramType"
+        s"${p.name}${typeAnnotation}"
+      }
+      .mkString(", ")
+
+    s"${modString}${m.name}(${paramList})${returnTypeStr}"
   }
 
   /**
    * TypeScript-specific logic for resolving method names.
    */
   override private[brokk] def resolveMethodName(methodName: String): String = {
-    // Simple implementation - will need enhancement
-    methodName
+    // Remove anonymous function suffixes like <anonymous>-X.Y.Z
+    val anonymousPattern = "<anonymous>-.*$".r
+    val withoutAnonymous = anonymousPattern.replaceFirstIn(methodName, "")
+    
+    // Remove numeric suffixes like .123 that sometimes appear in JS/TS CPGs
+    val numericSuffix = "\\.[0-9]+$".r
+    numericSuffix.replaceFirstIn(withoutAnonymous, "")
   }
 
   /**
    * TypeScript-specific type sanitization.
    */
   override private[brokk] def sanitizeType(t: String): String = {
-    // Simple implementation - will need enhancement
-    t.split("\\.").lastOption.getOrElse(t)
+    // In TypeScript, we want to simplify complex types
+    if (t == "<empty>" || t == "<global>" || t.isEmpty) "any"
+    else {
+      val typeName = t.split("\\.").lastOption.getOrElse(t)
+      // Handle basic TypeScript types
+      typeName match {
+        case "NUMBER" => "number"
+        case "STRING" => "string"
+        case "BOOLEAN" => "boolean"
+        case "ANY" => "any"
+        case "VOID" => "void"
+        case other => other.toLowerCase
+      }
+    }
   }
 
   /**
@@ -65,20 +100,22 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
 }
 
 object TypescriptAnalyzer {
-  // This will need to be implemented with TypeScript-specific CPG creation logic
   private def createNewCpgForSource(sourcePath: Path): Cpg = {
     val absPath = sourcePath.toAbsolutePath.toRealPath()
     require(absPath.toFile.isDirectory, s"Source path must be a directory: $absPath")
 
-    // For now, create an empty CPG as placeholder
-    // In the future, this would use a TypeScript-specific CPG generator
-    val newCpg = Cpg.empty
-
-    // Apply default overlays similar to JavaAnalyzer
+    // Use jssrc2cpg for TypeScript analysis
+    val config = Config()
+      .withInputPath(absPath.toString)
+    
+    val newCpg = JsSrc2Cpg().createCpg(config).getOrElse {
+      throw new IOException("Failed to create TypeScript CPG")
+    }
+    
     X2Cpg.applyDefaultOverlays(newCpg)
     val context = new LayerCreatorContext(newCpg)
     new OssDataFlow(OssDataFlow.defaultOpts).create(context)
-
+    
     newCpg
   }
 }
