@@ -2,7 +2,7 @@ package io.github.jbellis.brokk.gui;
 
 import io.github.jbellis.brokk.analyzer.BrokkFile;
 import io.github.jbellis.brokk.Completions;
-import io.github.jbellis.brokk.GitRepo;
+import io.github.jbellis.brokk.git.GitRepo;
 import io.github.jbellis.brokk.Project;
 import io.github.jbellis.brokk.analyzer.ExternalFile;
 import io.github.jbellis.brokk.analyzer.RepoFile;
@@ -27,7 +27,6 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
-import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -38,7 +37,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**

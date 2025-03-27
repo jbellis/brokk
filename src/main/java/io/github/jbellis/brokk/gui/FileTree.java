@@ -1,6 +1,6 @@
 package io.github.jbellis.brokk.gui;
 
-import io.github.jbellis.brokk.GitRepo;
+import io.github.jbellis.brokk.git.GitRepo;
 import io.github.jbellis.brokk.Project;
 import io.github.jbellis.brokk.analyzer.RepoFile;
 import org.apache.logging.log4j.LogManager;
@@ -13,7 +13,6 @@ import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeCellRenderer;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.ExpandVetoException;
-import javax.swing.tree.TreeNode;
 import javax.swing.tree.TreePath;
 import javax.swing.tree.TreeSelectionModel;
 import java.awt.*;

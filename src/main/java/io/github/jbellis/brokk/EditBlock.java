@@ -2,6 +2,8 @@ package io.github.jbellis.brokk;
 
 import com.google.common.annotations.VisibleForTesting;
 import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.git.GitRepo;
+import io.github.jbellis.brokk.git.IGitRepo;
 
 import java.io.File;
 import java.io.IOException;

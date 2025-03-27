@@ -2,7 +2,7 @@ package io.github.jbellis.brokk.gui;
 
 import io.github.jbellis.brokk.analyzer.BrokkFile;
 import io.github.jbellis.brokk.Completions;
-import io.github.jbellis.brokk.GitRepo;
+import io.github.jbellis.brokk.git.GitRepo;
 import io.github.jbellis.brokk.Project;
 import io.github.jbellis.brokk.analyzer.ExternalFile;
 import io.github.jbellis.brokk.analyzer.RepoFile;
@@ -29,7 +29,6 @@ import java.awt.event.WindowEvent;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
