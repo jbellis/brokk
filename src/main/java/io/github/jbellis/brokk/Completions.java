@@ -5,7 +5,7 @@ import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.ExternalFile;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
 import io.github.jbellis.brokk.analyzer.RepoFile;
-import io.github.jbellis.brokk.git.GitRepo;
+import io.github.jbellis.brokk.git.IGitRepo;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
@@ -82,7 +82,7 @@ public class Completions {
     /**
      * Expand paths that may contain wildcards (*, ?), returning all matches.
      */
-    public static List<? extends BrokkFile> expandPath(GitRepo repo, String pattern) {
+    public static List<? extends BrokkFile> expandPath(IGitRepo repo, String pattern) {
         // First check if this is a single file
         var file = maybeExternalFile(repo.getRoot(), pattern);
         if (file.exists()) {

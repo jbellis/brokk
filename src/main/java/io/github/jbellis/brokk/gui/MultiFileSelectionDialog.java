@@ -6,6 +6,7 @@ import io.github.jbellis.brokk.git.GitRepo;
 import io.github.jbellis.brokk.Project;
 import io.github.jbellis.brokk.analyzer.ExternalFile;
 import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.git.IGitRepo;
 import org.fife.ui.autocomplete.AutoCompletion;
 import org.fife.ui.autocomplete.ShorthandCompletion;
 import org.fife.ui.autocomplete.Completion;
@@ -52,7 +53,7 @@ public class MultiFileSelectionDialog extends JDialog { // Renamed class
     private final AutoCompletion autoCompletion;
     private final JButton okButton;
     private final JButton cancelButton;
-    private final GitRepo repo;
+    private final IGitRepo repo;
     private final boolean allowExternalFiles;
 
     // The selected files
@@ -91,7 +92,6 @@ public class MultiFileSelectionDialog extends JDialog { // Renamed class
                                                             InputEvent.CTRL_DOWN_MASK));
         autoCompletion.install(fileInput);
 
-        // Instantiate the FileTree directly
         if (project.isDependency()) {
             fileTree = new FileTree(project.getRoot().toAbsolutePath(), null, allowExternalFiles, f -> true);
         } else {

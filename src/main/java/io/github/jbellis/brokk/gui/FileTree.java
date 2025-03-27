@@ -1,8 +1,8 @@
 package io.github.jbellis.brokk.gui;
 
-import io.github.jbellis.brokk.git.GitRepo;
 import io.github.jbellis.brokk.Project;
 import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.git.IGitRepo;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -59,7 +59,7 @@ public class FileTree extends JTree {
      * @param allowExternalFiles If true, shows the full file system; otherwise, shows project files (from repo or filesystem walk).
      * @param fileFilter         Optional predicate to filter files shown in the tree (external mode only).
      */
-    public FileTree(Path projectPath, GitRepo repo, boolean allowExternalFiles, Predicate<File> fileFilter) {
+    public FileTree(Path projectPath, IGitRepo repo, boolean allowExternalFiles, Predicate<File> fileFilter) {
         this.projectPath = projectPath;
 
         if (!allowExternalFiles && projectPath == null) {
@@ -139,7 +139,7 @@ public class FileTree extends JTree {
     /**
      * Sets up the tree to display the project's file hierarchy (from Git or file system walk).
      */
-    private void setupProjectFileSystem(Path projectRootPath, GitRepo repo) {
+    private void setupProjectFileSystem(Path projectRootPath, IGitRepo repo) {
         logger.debug("Setting up project file system view for: {}", projectRootPath);
         String rootDisplayName = projectRootPath.getFileName() != null ? projectRootPath.getFileName().toString() : projectRootPath.toString();
         DefaultMutableTreeNode rootNode = new DefaultMutableTreeNode(rootDisplayName);

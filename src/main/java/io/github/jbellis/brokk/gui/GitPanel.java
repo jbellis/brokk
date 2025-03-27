@@ -349,9 +349,9 @@ public class GitPanel extends JPanel {
                 try {
                     if (selectedFiles.isEmpty()) {
                         var allDirtyFiles = getRepo().getModifiedFiles();
-                        contextManager.getProject().getRepo().commitFiles(allDirtyFiles, msg);
+                        getRepo().commitFiles(allDirtyFiles, msg);
                     } else {
-                        contextManager.getProject().getRepo().commitFiles(selectedFiles, msg);
+                        getRepo().commitFiles(selectedFiles, msg);
                     }
                     SwingUtilities.invokeLater(() -> {
                         try {
@@ -409,11 +409,6 @@ public class GitPanel extends JPanel {
     }
 
     /**
-     * Builds the Stash tab.
-     */
-
-
-    /**
      * Returns the current GitRepo from ContextManager.
      */
     private GitRepo getRepo() {
@@ -421,7 +416,7 @@ public class GitPanel extends JPanel {
         if (repo == null) {
             logger.error("getRepo() returned null - no Git repository available");
         }
-        return repo;
+        return (GitRepo) repo;
     }
 
     /**

@@ -234,9 +234,9 @@ public class ContextPanel extends JPanel {
 
                         } else {
                             // Otherwise, show "View History" if it's a RepoPathFragment and not a dependency
-                            boolean isDependency = contextManager != null && contextManager.getProject() != null 
-                                    && contextManager.getProject().isDependency();
-                            if (!isDependency && chrome.getGitPanel() != null) {
+                            boolean hasGit = contextManager != null && contextManager.getProject() != null
+                                    && contextManager.getProject().hasGit();
+                            if (hasGit) {
                                 JMenuItem viewHistoryItem = new JMenuItem("View History");
                                 viewHistoryItem.addActionListener(ev -> {
                                     int selectedRow = contextTable.getSelectedRow();
@@ -351,9 +351,8 @@ public class ContextPanel extends JPanel {
         editMenuItem.addActionListener(e -> {
                                            chrome.currentUserTask = contextManager.performContextActionAsync(Chrome.ContextAction.EDIT, List.of());
                                        });
-        // Only add Edit Files for non-dependency projects
-        if (contextManager != null && contextManager.getProject() != null 
-                && !contextManager.getProject().isDependency()) {
+        // Only add Edit Files when git is present
+        if (contextManager != null && contextManager.getProject() != null && contextManager.getProject().hasGit()) {
             addMenu.add(editMenuItem);
         }
 
@@ -639,8 +638,8 @@ public class ContextPanel extends JPanel {
      * Build "Add file" menu item for a single file reference
      */
     private JMenuItem buildAddMenuItem(FileReferenceData fileRef) {
-        JMenuItem addItem = new JMenuItem("Edit " + fileRef.getFullPath());
-        addItem.addActionListener(e -> {
+        JMenuItem editItem = new JMenuItem("Edit " + fileRef.getFullPath());
+        editItem.addActionListener(e -> {
             if (fileRef.getRepoFile() != null) {
                 chrome.currentUserTask = chrome.getContextManager().performContextActionAsync(
                         Chrome.ContextAction.EDIT,
@@ -651,12 +650,11 @@ public class ContextPanel extends JPanel {
             }
         });
         // Disable for dependency projects
-        if (contextManager != null && contextManager.getProject() != null 
-                && contextManager.getProject().isDependency()) {
-            addItem.setEnabled(false);
-            addItem.setToolTipText("Editing not available for dependencies");
+        if (contextManager != null && contextManager.getProject() != null && !contextManager.getProject().hasGit()) {
+            editItem.setEnabled(false);
+            editItem.setToolTipText("Editing not available without Git");
         }
-        return addItem;
+        return editItem;
     }
 
     /**

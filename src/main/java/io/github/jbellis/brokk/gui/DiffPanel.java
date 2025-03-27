@@ -76,7 +76,7 @@ public class DiffPanel extends JPanel {
         
         contextManager.submitBackgroundTask("Loading diff for " + file.getFileName(), () -> {
             try {
-                GitRepo repo = contextManager.getProject().getRepo();
+                GitRepo repo = (GitRepo) contextManager.getProject().getRepo();
                 
                 String diff;
                 if (commitId.equals("UNCOMMITTED")) {

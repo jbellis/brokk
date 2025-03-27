@@ -1,24 +1,22 @@
 package io.github.jbellis.brokk.gui;
 
-import io.github.jbellis.brokk.analyzer.BrokkFile;
 import io.github.jbellis.brokk.Completions;
-import io.github.jbellis.brokk.git.GitRepo;
 import io.github.jbellis.brokk.Project;
+import io.github.jbellis.brokk.analyzer.BrokkFile;
 import io.github.jbellis.brokk.analyzer.ExternalFile;
 import io.github.jbellis.brokk.analyzer.RepoFile;
-import org.fife.ui.autocomplete.AutoCompletion;
-import org.fife.ui.autocomplete.ShorthandCompletion;
-import org.fife.ui.autocomplete.Completion;
-import org.fife.ui.autocomplete.DefaultCompletionProvider;
+import io.github.jbellis.brokk.git.IGitRepo;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
+import org.fife.ui.autocomplete.AutoCompletion;
+import org.fife.ui.autocomplete.Completion;
+import org.fife.ui.autocomplete.DefaultCompletionProvider;
+import org.fife.ui.autocomplete.ShorthandCompletion;
 
 import javax.swing.*;
 import javax.swing.text.JTextComponent;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreePath;
-
 import java.awt.*;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
@@ -50,7 +48,7 @@ public class FileSelectionDialog extends JDialog {
     private final AutoCompletion autoCompletion;
     private final JButton okButton;
     private final JButton cancelButton;
-    private final GitRepo repo;
+    private final IGitRepo repo;
     private final boolean allowExternalFiles;
     private final Future<List<Path>> autocompletePaths; // For pre-filled options
 

@@ -61,12 +61,7 @@ public class Brokk {
             // If a command line argument is provided, use it as project path
             if (args.length > 0) {
                 var projectPath = Path.of(args[0]);
-                if (GitRepo.hasGitRepo(projectPath)) {
-                    openProject(projectPath);
-                } else {
-                    System.err.println("No git project found at " + projectPath);
-                    System.exit(1);
-                }
+                openProject(projectPath);
             } else {
                 // No argument provided - attempt to load open projects if any
                 var openProjects = Project.getOpenProjects();
@@ -79,9 +74,7 @@ public class Brokk {
                     // Open all previously open projects
                     logger.info("Opening {} previously open projects", openProjects.size());
                     for (var projectPath : openProjects) {
-                        if (GitRepo.hasGitRepo(projectPath)) {
-                            openProject(projectPath);
-                        }
+                        openProject(projectPath);
                     }
                 }
             }
@@ -95,12 +88,6 @@ public class Brokk {
     public static void openProject(Path path) {
         // Normalize the path to handle potential inconsistencies (e.g., trailing slashes)
         final Path projectPath = path.toAbsolutePath().normalize();
-
-        if (!GitRepo.hasGitRepo(projectPath)) {
-            // FIXME should only happen from cmdline
-            System.out.println("Not a valid git project: " + projectPath);
-            return;
-        }
 
         // Check if this project is already open
         var existingWindow = openProjectWindows.get(projectPath);
@@ -167,7 +154,6 @@ public class Brokk {
             openProjectWindows.remove(EMPTY_PROJECT).close();
         }
     }
-
 
     /**
      * Prompts the user to select a JAR file using FileSelectionDialog,
@@ -246,8 +232,6 @@ public class Brokk {
 
                 if (choice == JOptionPane.YES_OPTION) {
                     logger.debug("Opening previously decompiled dependency at {}", outputDir);
-                    // Ensure the dummy .git dir exists before opening
-                    DecompileHelper.ensureGitDirectory(outputDir);
                     openProject(outputDir);
                     return;
                 } else if (choice == JOptionPane.NO_OPTION) {
@@ -355,11 +339,6 @@ public class Brokk {
                     try {
                         get(); // Check for exceptions from doInBackground()
                         io.systemOutput("Decompilation completed. Opening decompiled project.");
-
-                        // Create a simple .git folder so it's recognized as a git project by openProject
-                        DecompileHelper.ensureGitDirectory(outputDir);
-
-
                         // Log final directory structure for troubleshooting
                         logger.debug("Final contents of {} after decompilation:", outputDir);
                         try (var pathStream = Files.walk(outputDir, 1)) { // Walk only one level deep for brevity

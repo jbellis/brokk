@@ -7,6 +7,7 @@ import io.github.jbellis.brokk.ContextManager;
 import io.github.jbellis.brokk.IConsoleIO;
 import io.github.jbellis.brokk.Models;
 import io.github.jbellis.brokk.Project;
+import io.github.jbellis.brokk.git.GitRepo;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
@@ -150,15 +151,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
 
             // DO NOT removeAll() here. Instead, add the correct component to the CENTER.
 
-            if (getProject().isDependency()) {
-                // For dependency projects, just add the context panel directly to the center
-                gitPanel = null;
-                // Ensure contextPanel is created if buildMainPanel didn't already
-                if (contextPanel == null) {
-                    contextPanel = new ContextPanel(this, contextManager);
-                }
-                bottomPanel.add(contextPanel, BorderLayout.CENTER);
-            } else {
+            if (getProject().hasGit()) {
                 // For main projects, create a split pane with both panels for the center
                 this.contextGitSplitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
                 // Ensure contextPanel is created if buildMainPanel didn't already
@@ -180,6 +173,14 @@ public class Chrome implements AutoCloseable, IConsoleIO {
                 // Update git panel state
                 updateCommitPanel();
                 gitPanel.updateRepo();
+            } else {
+                // For dependency projects, just add the context panel directly to the center
+                gitPanel = null;
+                // Ensure contextPanel is created if buildMainPanel didn't already
+                if (contextPanel == null) {
+                    contextPanel = new ContextPanel(this, contextManager);
+                }
+                bottomPanel.add(contextPanel, BorderLayout.CENTER);
             }
 
             // Force layout update for the bottom panel
@@ -197,7 +198,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
         commandInputField.requestFocusInWindow();
 
         // Check if .gitignore is set and prompt user to update if needed
-        if (getProject() != null && !getProject().isDependency()) {
+        if (getProject() != null && getProject().hasGit()) {
             contextManager.submitBackgroundTask("Checking .gitignore", () -> {
                 if (!getProject().isGitIgnoreSet()) {
                     SwingUtilities.invokeLater(() -> {
@@ -225,7 +226,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
     private void setupGitIgnore() {
         contextManager.submitUserTask("Updating .gitignore", () -> {
             try {
-                var gitRepo = getProject().getRepo();
+                var gitRepo = (GitRepo) getProject().getRepo();
                 var root = getProject().getRoot();
                 
                 // Update .gitignore
