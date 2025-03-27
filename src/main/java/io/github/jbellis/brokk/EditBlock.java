@@ -196,6 +196,22 @@ public class EditBlock {
         // utility class
     }
 
+    static ParseResult findOriginalUpdateBlocks(String content,
+                                                       Set<RepoFile> filesInContext)
+    {
+        return findOriginalUpdateBlocks(content, filesInContext, new IGitRepo() {
+            @Override
+            public Path getRoot() {
+                return Path.of("");
+            }
+
+            @Override
+            public List<RepoFile> getTrackedFiles() {
+                return List.of();
+            }
+        });
+    }
+    
     /**
      * Parses the given content and yields either (filename, before, after, null)
      * or (null, null, null, shellCommand).
@@ -204,8 +220,9 @@ public class EditBlock {
      * parameter is only used to help find possible filename matches in poorly formed blocks.
      */
     public static ParseResult findOriginalUpdateBlocks(String content,
-                                                       String[] fence,
-                                                       Set<RepoFile> filesInContext) {
+                                                       Set<RepoFile> filesInContext,
+                                                       IGitRepo repo) 
+    {
         List<SearchReplaceBlock> blocks = new ArrayList<>();
         String[] lines = content.split("\n", -1);
         int i = 0;
@@ -219,7 +236,7 @@ public class EditBlock {
             if (HEAD.matcher(trimmed).matches()) {
                 try {
                     // Attempt to find a filename in the preceding ~3 lines
-                    currentFilename = findFileNameNearby(lines, i, fence, filesInContext, currentFilename);
+                    currentFilename = findFileNameNearby(lines, i, DEFAULT_FENCE, filesInContext, currentFilename, (GitRepo) repo);
 
                     // gather "before" lines until divider
                     i++;
@@ -245,8 +262,8 @@ public class EditBlock {
                         return new ParseResult(blocks, "Expected >>>>>>> REPLACE or =======");
                     }
 
-                    var beforeJoined = stripQuotedWrapping(String.join("\n", beforeLines), currentFilename, fence);
-                    var afterJoined = stripQuotedWrapping(String.join("\n", afterLines), currentFilename, fence);
+                    var beforeJoined = stripQuotedWrapping(String.join("\n", beforeLines), currentFilename, DEFAULT_FENCE);
+                    var afterJoined = stripQuotedWrapping(String.join("\n", afterLines), currentFilename, DEFAULT_FENCE);
 
                     // Append trailing newline if not present
                     if (!beforeJoined.isEmpty() && !beforeJoined.endsWith("\n")) {
@@ -270,14 +287,7 @@ public class EditBlock {
 
         return new ParseResult(blocks, null);
     }
-
-    /**
-     * Overload that uses DEFAULT_FENCE and no fence parameter in the signature, for convenience.
-     */
-    public static ParseResult findOriginalUpdateBlocks(String content, Set<RepoFile> filesInContext) {
-        return findOriginalUpdateBlocks(content, DEFAULT_FENCE, filesInContext);
-    }
-
+    
     /**
      * Attempt to locate beforeText in content and replace it with afterText.
      * If beforeText is empty, just append afterText. If no match found, return null.
@@ -669,7 +679,9 @@ public class EditBlock {
                                      int headIndex,
                                      String[] fence,
                                      Set<RepoFile> validFiles,
-                                     String currentPath) {
+                                     String currentPath, 
+                                     GitRepo repo) 
+    {
         // Search up to 3 lines above headIndex
         int start = Math.max(0, headIndex - 3);
         var candidates = new ArrayList<String>();
@@ -696,26 +708,39 @@ public class EditBlock {
             }
         }
 
-        // 2) Case-insensitive match by basename
-        for (var c : candidates) {
-            String cLower = Path.of(c).getFileName().toString().toLowerCase();
-            var matched = validFiles.stream()
-                    .filter(f -> f.getFileName().toLowerCase().equals(cLower))
-                    .toList();
-            if (!matched.isEmpty()) {
-                // we don't have a good way to tell which is better if there are multiple options that differ only by case
-                return matched.getFirst().toString();
-            }
+        // 2) Case-insensitive match by basename against validFiles
+        var matches = candidates.stream()
+                .map(c -> Path.of(c).getFileName().toString().toLowerCase())
+                .flatMap(cLower -> validFiles.stream()
+                        .filter(f -> f.getFileName().toLowerCase().equals(cLower))
+                        .findFirst()
+                        .stream())
+                .map(RepoFile::toString)
+                .toList();
+        if (!matches.isEmpty()) {
+            return matches.getFirst();
         }
-
-        // 3) If the candidate has an extension and no better match found, just return that.
+        
+        // 3) substring match vs repo
+        matches = candidates.stream()
+                .flatMap(c -> repo.getTrackedFiles().stream()
+                        .filter(f -> f.toString().contains(c))
+                        .findFirst()
+                        .stream())
+                .map(RepoFile::toString)
+                .toList();
+        if (!matches.isEmpty()) {
+            return matches.getFirst();
+        }
+        
+        // 4) If the candidate has an extension and no better match found, just return that.
         for (var c : candidates) {
             if (c.contains(".")) {
                 return c;
             }
         }
 
-        // 4) Fallback to the first candidate
+        // 5) Fallback to the first raw candidate
         return candidates.getFirst();
     }
 

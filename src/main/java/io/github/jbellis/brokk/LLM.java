@@ -97,7 +97,7 @@ public class LLM {
             requestMessages.add(llmResponse.aiMessage());
 
             // Gather all edit blocks in the reply
-            var parseResult = EditBlock.findOriginalUpdateBlocks(llmText, coder.contextManager.getEditableFiles());
+            var parseResult = EditBlock.findOriginalUpdateBlocks(llmText, coder.contextManager.getEditableFiles(), coder.contextManager.getRepo());
             blocks.addAll(parseResult.blocks());
             logger.debug("{} total unapplied blocks", blocks.size());
             if (parseResult.parseError() != null) {
