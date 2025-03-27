@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
 import io.github.jbellis.brokk.analyzer.Language;
 import io.github.jbellis.brokk.git.GitRepo;
+import io.github.jbellis.brokk.git.IGitRepo;
 import io.github.jbellis.brokk.util.AtomicWrites;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -91,15 +92,9 @@ public class Project implements IProject {
             }
         }
     }
-
-    public static void removeRecentProject(Path path) {
-        var currentMap = loadRecentProjects();
-        currentMap.remove(path.toAbsolutePath().toString());
-        saveRecentProjects(currentMap);
-    }
-
+    
     @Override
-    public GitRepo getRepo() {
+    public IGitRepo getRepo() {
         return repo;
     }
 

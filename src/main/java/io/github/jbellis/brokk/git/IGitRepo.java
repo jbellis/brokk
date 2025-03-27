@@ -9,4 +9,11 @@ public interface IGitRepo {
     Path getRoot();
 
     List<RepoFile> getTrackedFiles();
+
+    default String diff() {
+        return "";
+    }
+
+    default void refresh() {
+    }
 }

@@ -7,6 +7,7 @@ import io.github.jbellis.brokk.ContextManager;
 import io.github.jbellis.brokk.IConsoleIO;
 import io.github.jbellis.brokk.Models;
 import io.github.jbellis.brokk.Project;
+import io.github.jbellis.brokk.git.GitRepo;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
@@ -225,7 +226,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
     private void setupGitIgnore() {
         contextManager.submitUserTask("Updating .gitignore", () -> {
             try {
-                var gitRepo = getProject().getRepo();
+                var gitRepo = (GitRepo) getProject().getRepo();
                 var root = getProject().getRoot();
                 
                 // Update .gitignore

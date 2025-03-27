@@ -1374,7 +1374,7 @@ public class GitLogPanel extends JPanel {
     // ==================================================================
 
     private GitRepo getRepo() {
-        return contextManager.getProject().getRepo();
+        return (GitRepo) contextManager.getProject().getRepo();
     }
 
     private String getOldHeadId() {

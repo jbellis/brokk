@@ -15,6 +15,7 @@ import io.github.jbellis.brokk.analyzer.CallSite;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.CodeUnitType;
 import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.git.GitRepo;
 import io.github.jbellis.brokk.gui.CallGraphDialog;
 import io.github.jbellis.brokk.gui.Chrome;
 import io.github.jbellis.brokk.gui.LoggingExecutorService;
@@ -1568,7 +1569,7 @@ public class ContextManager implements IContextManager
 
     @Override
     public void addToGit(String filename) throws IOException {
-        project.getRepo().add(List.of(toFile(filename)));
+        ((GitRepo) project.getRepo()).add(List.of(toFile(filename)));
     }
 
     // Convert a throwable to a string with full stack trace

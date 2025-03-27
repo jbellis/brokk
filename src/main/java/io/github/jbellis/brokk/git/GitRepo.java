@@ -41,7 +41,7 @@ public class GitRepo implements Closeable, IGitRepo {
     /**
      * Returns true if the directory has a .git folder.
      */
-    static boolean hasGitRepo(Path dir) {
+    public static boolean hasGitRepo(Path dir) {
         assert dir != null;
         return dir.resolve(".git").toFile().isDirectory();
     }
@@ -73,6 +73,7 @@ public class GitRepo implements Closeable, IGitRepo {
         return root;
     }
 
+    @Override
     public synchronized void refresh() {
         repository.getRefDatabase().refresh();
         trackedFilesCache = null;
@@ -193,6 +194,7 @@ public class GitRepo implements Closeable, IGitRepo {
         }
     }
 
+    @Override
     public synchronized String diff() {
         try (var out = new ByteArrayOutputStream()) {
             var status = git.status().call();
