@@ -42,7 +42,7 @@ public class Project implements IProject {
     private static final Path LLM_KEYS_PATH = BROKK_CONFIG_DIR.resolve("keys.properties");
 
     public Project(Path root, AnalyzerWrapper.TaskRunner runner, AnalyzerListener analyzerListener) {
-        this.repo = new GitRepo(root);
+        this.repo = GitRepo.hasGitRepo(root) ? new GitRepo(root) : null;
         this.root = root;
         this.propertiesFile = root.resolve(".brokk").resolve("project.properties");
         this.workspacePropertiesFile = root.resolve(".brokk").resolve("workspace.properties");
@@ -773,7 +773,7 @@ public class Project implements IProject {
             try {
                 var path = Path.of(pathStr);
                 // Only include paths that still exist and have git repos
-                if (Files.isDirectory(path) && GitRepo.hasGitRepo(path)) {
+                if (Files.isDirectory(path)) {
                     result.add(path);
                 } else {
                     // Mark for removal if invalid

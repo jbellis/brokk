@@ -61,12 +61,7 @@ public class Brokk {
             // If a command line argument is provided, use it as project path
             if (args.length > 0) {
                 var projectPath = Path.of(args[0]);
-                if (GitRepo.hasGitRepo(projectPath)) {
-                    openProject(projectPath);
-                } else {
-                    System.err.println("No git project found at " + projectPath);
-                    System.exit(1);
-                }
+                openProject(projectPath);
             } else {
                 // No argument provided - attempt to load open projects if any
                 var openProjects = Project.getOpenProjects();
@@ -79,9 +74,7 @@ public class Brokk {
                     // Open all previously open projects
                     logger.info("Opening {} previously open projects", openProjects.size());
                     for (var projectPath : openProjects) {
-                        if (GitRepo.hasGitRepo(projectPath)) {
-                            openProject(projectPath);
-                        }
+                        openProject(projectPath);
                     }
                 }
             }
@@ -95,12 +88,6 @@ public class Brokk {
     public static void openProject(Path path) {
         // Normalize the path to handle potential inconsistencies (e.g., trailing slashes)
         final Path projectPath = path.toAbsolutePath().normalize();
-
-        if (!GitRepo.hasGitRepo(projectPath)) {
-            // FIXME should only happen from cmdline
-            System.out.println("Not a valid git project: " + projectPath);
-            return;
-        }
 
         // Check if this project is already open
         var existingWindow = openProjectWindows.get(projectPath);
