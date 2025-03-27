@@ -5,6 +5,7 @@ import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.ExternalFile;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
 import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.git.GitRepo;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;

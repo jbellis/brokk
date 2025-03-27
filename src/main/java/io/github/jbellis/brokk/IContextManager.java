@@ -3,6 +3,7 @@ package io.github.jbellis.brokk;
 import dev.langchain4j.data.message.ChatMessage;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
 import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.git.IGitRepo;
 
 import java.io.IOException;
 import java.util.Collection;
