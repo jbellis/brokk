@@ -6,6 +6,7 @@ import io.github.jbellis.brokk.analyzer.IAnalyzer;
 import io.github.jbellis.brokk.analyzer.Language;
 import io.github.jbellis.brokk.git.GitRepo;
 import io.github.jbellis.brokk.git.IGitRepo;
+import io.github.jbellis.brokk.git.LocalFileRepo;
 import io.github.jbellis.brokk.util.AtomicWrites;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -29,7 +30,7 @@ public class Project implements IProject {
     private final Properties workspaceProps;
     private final Path styleGuidePath;
     private final AnalyzerWrapper analyzerWrapper;
-    private final GitRepo repo;
+    private final IGitRepo repo;
 
     private static final int DEFAULT_AUTO_CONTEXT_FILE_COUNT = 10;
     private static final int DEFAULT_WINDOW_WIDTH = 800;
@@ -44,7 +45,7 @@ public class Project implements IProject {
     private static final Path LLM_KEYS_PATH = BROKK_CONFIG_DIR.resolve("keys.properties");
 
     public Project(Path root, AnalyzerWrapper.TaskRunner runner, AnalyzerListener analyzerListener) {
-        this.repo = GitRepo.hasGitRepo(root) ? new GitRepo(root) : null;
+        this.repo = GitRepo.hasGitRepo(root) ? new GitRepo(root) : new LocalFileRepo(root);
         this.root = root;
         this.propertiesFile = root.resolve(".brokk").resolve("project.properties");
         this.workspacePropertiesFile = root.resolve(".brokk").resolve("workspace.properties");

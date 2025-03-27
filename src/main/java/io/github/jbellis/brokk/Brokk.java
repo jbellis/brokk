@@ -155,7 +155,6 @@ public class Brokk {
         }
     }
 
-
     /**
      * Prompts the user to select a JAR file using FileSelectionDialog,
      * then decompiles it to a project directory (.brokk/dependencies/[jarname])
@@ -233,8 +232,6 @@ public class Brokk {
 
                 if (choice == JOptionPane.YES_OPTION) {
                     logger.debug("Opening previously decompiled dependency at {}", outputDir);
-                    // Ensure the dummy .git dir exists before opening
-                    DecompileHelper.ensureGitDirectory(outputDir);
                     openProject(outputDir);
                     return;
                 } else if (choice == JOptionPane.NO_OPTION) {
@@ -342,11 +339,6 @@ public class Brokk {
                     try {
                         get(); // Check for exceptions from doInBackground()
                         io.systemOutput("Decompilation completed. Opening decompiled project.");
-
-                        // Create a simple .git folder so it's recognized as a git project by openProject
-                        DecompileHelper.ensureGitDirectory(outputDir);
-
-
                         // Log final directory structure for troubleshooting
                         logger.debug("Final contents of {} after decompilation:", outputDir);
                         try (var pathStream = Files.walk(outputDir, 1)) { // Walk only one level deep for brevity

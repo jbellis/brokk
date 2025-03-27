@@ -1228,18 +1228,17 @@ public class ContextManager implements IContextManager
             - Editor model: %s
             - Apply model: %s
             - Quick model: %s
-            - Git repo at %s with %d files
+            - %s at %s with %d files
             - Analyzer language: %s
-            """.formatted(
-                welcomeMarkdown,
-                version,
-                models.editModelName(),
-                models.applyModelName(),
-                models.quickModelName(),
-                project.getRoot(),
-                trackedFiles.size(),
-                project.getAnalyzerLanguage()
-            );
+            """.formatted(welcomeMarkdown,
+                          version,
+                          models.editModelName(),
+                          models.applyModelName(),
+                          models.quickModelName(),
+                          getRepo() instanceof GitRepo ? "Git repo" : "Project",
+                          project.getRoot(),
+                          trackedFiles.size(),
+                          project.getAnalyzerLanguage());
     }
 
     /**

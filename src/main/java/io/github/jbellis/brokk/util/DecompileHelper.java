@@ -1,6 +1,5 @@
 package io.github.jbellis.brokk.util;
 
-import io.github.jbellis.brokk.Brokk;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -149,21 +148,5 @@ public class DecompileHelper {
         long duration = System.currentTimeMillis() - startTime;
         logger.info("Found {} JAR files in common dependency locations in {} ms", jarFiles.size(), duration);
         return jarFiles;
-    }
-
-    /** Creates a dummy .git directory if it doesn't exist. */
-    public static void ensureGitDirectory(Path projectDir) {
-        Path gitDir = projectDir.resolve(".git");
-        if (!Files.exists(gitDir)) {
-            try {
-                Files.createDirectories(gitDir);
-                // Optionally create a dummy HEAD file or config to make it look more like a repo
-                // Files.writeString(gitDir.resolve("HEAD"), "ref: refs/heads/main\n");
-                logger.debug("Created dummy .git directory in {}", projectDir);
-            } catch (IOException e) {
-                logger.warn("Failed to create dummy .git directory in {}: {}", projectDir, e.getMessage());
-                // openProject might fail if it strictly requires .git
-            }
-        }
     }
 }
