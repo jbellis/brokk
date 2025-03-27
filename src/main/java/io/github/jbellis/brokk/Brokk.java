@@ -154,6 +154,9 @@ public class Brokk {
             @Override
             public void windowClosed(java.awt.event.WindowEvent e) {
                 openProjectWindows.remove(projectPath).close();
+                if (openProjectWindows.isEmpty()) {
+                    System.exit(0);
+                }
                 Project.removeFromOpenProjects(projectPath);
                 logger.debug("Removed project from open windows map: {}", projectPath);
             }
