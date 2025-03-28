@@ -527,27 +527,51 @@ public class SearchAgent {
     }
 
     /**
-     * Checks if a tool call is a duplicate and if so, replaces it with a getRelatedClasses call
+     * Checks if a tool call is a duplicate.
+     * If it is, and if getRelatedClasses is allowed and not itself a duplicate,
+     * replaces the call with getRelatedClasses.
+     * Otherwise (if the original call is a duplicate but replacement isn't possible/allowed),
+     * enables Beast Mode for the next iteration.
      */
     private ToolCall replaceDuplicateCallIfNeeded(ToolCall call)
     {
-        // Get signatures for this call
-        List<String> callSignatures = createToolCallSignatures(call);
+        // Don't interfere if we are already forcing beast mode
+        if (beastMode) {
+            return call;
+        }
 
-        // If we already have seen any of these signatures, forge a replacement call
+        var callSignatures = createToolCallSignatures(call);
+
+        // Check if we have already seen any of these signatures
         if (toolCallSignatures.stream().anyMatch(callSignatures::contains)) {
-            logger.debug("Duplicate tool call detected: {}. Forging a getRelatedClasses call instead.", callSignatures);
-            call = createRelatedClassesCall();
+            // Duplicate detected. Can we replace it with pagerank?
+            if (allowPagerank) {
+                logger.debug("Duplicate tool call detected: {}. Trying to forge a getRelatedClasses call instead.", callSignatures);
+                var forgedCall = createRelatedClassesCall();
+                var forgedSignatures = createToolCallSignatures(forgedCall);
 
-            // if the forged call is itself a duplicate, use the original request but force Beast Mode next
-            if (toolCallSignatures.containsAll(createToolCallSignatures(call))) {
-                logger.debug("Pagerank would be duplicate too!  Switching to Beast Mode.");
+                // Check if the forged call would ALSO be a duplicate
+                if (toolCallSignatures.containsAll(forgedSignatures)) {
+                    // Pagerank is also a duplicate. Give up and force Beast Mode next time.
+                    logger.debug("Forged getRelatedClasses call would also be a duplicate! Switching to Beast Mode.");
+                    beastMode = true;
+                    // Return the ORIGINAL duplicate call (don't execute the doubly-duplicate pagerank)
+                    return call;
+                } else {
+                    // Forged call is not a duplicate, use it instead of the original.
+                    logger.debug("Replacing duplicate call with forged getRelatedClasses call.");
+                    return forgedCall;
+                }
+            } else {
+                // Duplicate detected, but pagerank is not allowed. Force Beast Mode next time.
+                logger.debug("Duplicate tool call detected: {}. Pagerank is disallowed. Switching to Beast Mode.", callSignatures);
                 beastMode = true;
+                // Return the ORIGINAL duplicate call
                 return call;
             }
         }
 
-        // Return the call (original if no duplication, or the replacement)
+        // No duplicate detected, return the original call
         return call;
     }
 
