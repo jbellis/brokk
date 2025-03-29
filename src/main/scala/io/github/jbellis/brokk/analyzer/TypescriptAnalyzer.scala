@@ -34,7 +34,8 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
     this(sourcePath, preloadedPath)
 
   override def isClassInProject(className: String): Boolean = {
-    val td = cpg.typeDecl.name(className).l
+    val fqClassName = applyJsSrc2CpgNamespaceSyntax(className)
+    val td = cpg.typeDecl.fullNameExact(fqClassName).l
     td.nonEmpty && !(td.member.isEmpty && td.method.isEmpty && td.derivedTypeDecl.isEmpty)
   }
 
@@ -66,13 +67,7 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
    * TypeScript-specific logic for resolving method names.
    */
   override private[brokk] def resolveMethodName(methodName: String): String = {
-    // Remove anonymous function suffixes like <anonymous>-X.Y.Z
-    val anonymousPattern = "<anonymous>-.*$".r
-    val withoutAnonymous = anonymousPattern.replaceFirstIn(methodName, "")
-
-    // Remove numeric suffixes like .123 that sometimes appear in JS/TS CPGs
-    val numericSuffix = "\\.[0-9]+$".r
-    numericSuffix.replaceFirstIn(withoutAnonymous, "")
+    applyJsSrc2CpgNamespaceSyntax(methodName)
   }
 
   /**
@@ -101,6 +96,26 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
   override protected def methodsFromName(resolvedMethodName: String): List[Method] = {
     val escaped = Regex.quote(resolvedMethodName)
     cpg.method.fullName(escaped + ".*").l
+  }
+
+  /**
+   * TypeScript-specific logic for extracting the full class name.
+   * Handles cases like:
+   * - "A/B/C/A.ts::A" -> "A/B/C/A.ts::program:A"
+   * - "A/B/C/A.ts::program:A" -> "A/B/C/A.ts::program:A"
+   */
+  private[brokk] def applyJsSrc2CpgNamespaceSyntax(className: String): String = {
+    if (className.contains("::program:")) {
+      // Already has the full format
+      className
+    } else if (className.contains("::")) {
+      // Has path::name format, need to add program:
+      val parts = className.split("::")
+      s"${parts(0)}::program:${parts(1).replace(".", ":")}"
+    } else {
+      // Just a class name, can't determine full path
+      className
+    }
   }
 }
 

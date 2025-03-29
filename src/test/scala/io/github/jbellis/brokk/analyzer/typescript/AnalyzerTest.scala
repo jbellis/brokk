@@ -20,10 +20,25 @@ class AnalyzerTest {
   @Test
   def isClassInProjectTest(): Unit = {
     val analyzer = getAnalyzer
-    Assertions.assertTrue(analyzer.isClassInProject("A"))
-    
+    Assertions.assertTrue(analyzer.isClassInProject("A.ts::A"))
+
     Assertions.assertFalse(analyzer.isClassInProject("NonExistentClass"))
     Assertions.assertFalse(analyzer.isClassInProject("console"))
+  }
+
+  @Test
+  def extractMethodSource(): Unit = {
+    val analyzer = getAnalyzer
+    val source = analyzer.getMethodSource("A.ts::A.method2").get
+
+    val expected =
+      """    public method2(input: string, otherInput?: number): string {
+        |        return otherInput !== undefined
+        |            ? `prefix_${input} ${otherInput}`
+        |            : `prefix_${input}`;
+        |    }""".stripMargin
+
+    Assertions.assertEquals(expected, source)
   }
 
   private def getAnalyzer = {
