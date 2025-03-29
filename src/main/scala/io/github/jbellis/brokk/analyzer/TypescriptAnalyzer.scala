@@ -14,6 +14,7 @@ import io.joern.jssrc2cpg.{Config, JsSrc2Cpg}
 import java.io.IOException
 import java.nio.file.Path
 import scala.util.matching.Regex
+import scala.io.Source
 
 /**
  * A concrete analyzer for TypeScript source code, extending AbstractAnalyzer
@@ -117,6 +118,36 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
       // Just a class name, can't determine full path
       className
     }
+  }
+
+  /**
+   * Gets the source code for the entire file containing a class.
+   * Overrides AbstractAnalyzer implementation to handle TypeScript-specific class names.
+   */
+  override def getClassSource(className: String): String = {
+    // Transform the class name to TypeScript CPG format
+    val transformedClassName = applyJsSrc2CpgNamespaceSyntax(className)
+    var classNodes = cpg.typeDecl.fullNameExact(transformedClassName).l
+
+    // Similar fallback strategy as in JavaAnalyzer
+    if (classNodes.isEmpty) {
+      // Try simple name
+      val simpleClassName = className.split("::").last.split("[:]|\\.").last
+      val nameMatches = cpg.typeDecl.name(simpleClassName).l
+
+      if (nameMatches.size == 1) {
+        classNodes = nameMatches
+      }
+    }
+
+    if (classNodes.isEmpty) return null
+
+    val td = classNodes.head
+    val fileOpt = toFile(td.filename)
+    if (fileOpt.isEmpty) return null
+
+    val file = fileOpt.get
+    scala.util.Using(Source.fromFile(file.absPath().toFile))(_.mkString).toOption.orNull
   }
 }
 
