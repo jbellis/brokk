@@ -103,6 +103,7 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
    * Handles cases like:
    * - "A/B/C/A.ts::A" -> "A/B/C/A.ts::program:A"
    * - "A/B/C/A.ts::program:A" -> "A/B/C/A.ts::program:A"
+   * - "A.ts::A.AInner.AInnerInner.method7" -> "A.ts::program:A:AInner:AInnerInner:method7"
    */
   private[brokk] def applyJsSrc2CpgNamespaceSyntax(className: String): String = {
     if (className.contains("::program:")) {

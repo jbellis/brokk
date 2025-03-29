@@ -41,6 +41,19 @@ class AnalyzerTest {
     Assertions.assertEquals(expected, source)
   }
 
+  @Test
+  def extractMethodSourceNested(): Unit = {
+    val analyzer = getAnalyzer
+    val source = analyzer.getMethodSource("A.ts::A.<anon-class>0:method7").get
+
+    val expected =
+      """        public method7(): void {
+        |            console.log("hello");
+        |        }""".stripMargin
+
+    Assertions.assertEquals(expected, source)
+  }
+
   private def getAnalyzer = {
     TypescriptAnalyzer(Path.of("src/test/resources/testcode/typescript"))
   }

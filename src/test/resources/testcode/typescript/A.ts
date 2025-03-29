@@ -33,13 +33,9 @@ export class A {
     }
 
     // In TypeScript, nested classes are defined differently
-    public AInner = class {
-        public AInnerInner = class {
-            public method7(): void {
-                console.log("hello");
-            }
+    static Inner = class {
+        public method7(): void {
+            console.log("hello");
         }
-    }
-
-    public static AInnerStatic = class {}
+    };
 }
