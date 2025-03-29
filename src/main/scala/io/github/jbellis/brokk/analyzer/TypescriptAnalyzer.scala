@@ -35,40 +35,70 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
     this(sourcePath, preloadedPath)
 
   override def isClassInProject(className: String): Boolean = {
-    val fqClassName = applyJsSrc2CpgNamespaceSyntax(className)
-    val td = cpg.typeDecl.fullNameExact(fqClassName).l
+    val td = cpg.typeDecl.fullNameExact(className).l
     td.nonEmpty && !(td.member.isEmpty && td.method.isEmpty && td.derivedTypeDecl.isEmpty)
+  }
+
+  private def filterModifiers(modifiers: List[String]): List[String] = {
+    // Define the conventional order for TypeScript modifiers
+    val modifierOrder = Map(
+      "public" -> 0,
+      "private" -> 0,
+      "protected" -> 0,
+      "static" -> 1,
+      "readonly" -> 2,
+      "abstract" -> 3
+    )
+
+    // Filter out unwanted modifiers and sort by conventional order
+    modifiers.filterNot(mod => mod == "virtual")
+      .sortBy(mod => modifierOrder.getOrElse(mod, 99))
   }
 
   /**
    * TypeScript-specific method signature builder.
    */
   override protected def methodSignature(m: Method): String = {
-    val modifiers = m.modifier.map(_.modifierType.toLowerCase).filter(_.nonEmpty).mkString(" ")
-    val modString = if (modifiers.nonEmpty) modifiers + " " else ""
+    // Helper function to filter out unwanted modifiers
 
-    val returnType = sanitizeType(m.methodReturn.typeFullName)
-    val returnTypeStr = if (returnType == "any") "" else s": $returnType"
+    val modifiers = filterModifiers(m.modifier.map(_.modifierType.toLowerCase)
+      .filter(_.nonEmpty).toList).mkString(" ")
+    var modString = if (modifiers.nonEmpty) modifiers + " " else ""
 
+    // Check if the method has a void return type by examining only the first line of code
+    val firstLine = m.code.split("\n").headOption.getOrElse("")
+    val isVoidReturn = firstLine.matches(".*\\)\\s*:\\s*void.*")
+    val returnType = sanitizeType(makeSimpleType(extractType(m.methodReturn.properties)))
+    var returnTypeStr = if (isVoidReturn) ": void"
+    else if (returnType == "any") ""
+    else ": " + returnType
+
+    // Build the parameter list
     val paramList = m.parameter
-      .sortBy(_.order)
-      .filterNot(_.name == "this")
-      .l
+      .sortBy(_.order).filterNot(_.name == "this").l
       .map { p =>
-        val paramType = sanitizeType(p.typeFullName)
-        val typeAnnotation = if (paramType == "any") "" else s": $paramType"
-        s"${p.name}${typeAnnotation}"
+//        val paramType = sanitizeType(makeSimpleType(extractType(p.properties)))
+//        val typeAnnotation = if (paramType == "any") "" else s": $paramType"
+//        s"${p.name}${typeAnnotation}"
+          s"${p.code}" // this has more information and parameters are always in one line
       }
       .mkString(", ")
 
-    s"${modString}${m.name}(${paramList})${returnTypeStr}"
+    // Handle constructor methods
+    var methodName = m.name
+    if (methodName == "<init>") {
+      methodName = ""
+      returnTypeStr = ""
+      modString = modString.trim()
+    }
+    s"${modString}${methodName}(${paramList})${returnTypeStr}"
   }
 
   /**
    * TypeScript-specific logic for resolving method names.
    */
   override private[brokk] def resolveMethodName(methodName: String): String = {
-    applyJsSrc2CpgNamespaceSyntax(methodName)
+    methodName
   }
 
   /**
@@ -78,16 +108,13 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
     // In TypeScript, we want to simplify complex types
     if (t == "<empty>" || t == "<global>" || t.isEmpty) "any"
     else {
-      val typeName = t.split("\\.").lastOption.getOrElse(t)
-      // Handle basic TypeScript types
-      typeName match {
-        case "NUMBER" => "number"
-        case "STRING" => "string"
-        case "BOOLEAN" => "boolean"
-        case "ANY" => "any"
-        case "VOID" => "void"
-        case other => other.toLowerCase
-      }
+      // Replace common TypeScript type patterns
+      val result = t.replace("__ecma.Number", "number")
+        .replace("__ecma.String", "string")
+        .replace("__ecma.Boolean", "boolean")
+        .replace("ANY", "any")
+        .replace("VOID", "void")
+      result
     }
   }
 
@@ -100,39 +127,17 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
   }
 
   /**
-   * TypeScript-specific logic for extracting the full class name.
-   * Handles cases like:
-   * - "A/B/C/A.ts::A" -> "A/B/C/A.ts::program:A"
-   * - "A/B/C/A.ts::program:A" -> "A/B/C/A.ts::program:A"
-   * - "A.ts::A.AInner.AInnerInner.method7" -> "A.ts::program:A:AInner:AInnerInner:method7"
-   */
-  private[brokk] def applyJsSrc2CpgNamespaceSyntax(className: String): String = {
-    if (className.contains("::program:")) {
-      // Already has the full format
-      className
-    } else if (className.contains("::")) {
-      // Has path::name format, need to add program:
-      val parts = className.split("::")
-      s"${parts(0)}::program:${parts(1).replace(".", ":")}"
-    } else {
-      // Just a class name, can't determine full path
-      className
-    }
-  }
-
-  /**
    * Gets the source code for the entire file containing a class.
    * Overrides AbstractAnalyzer implementation to handle TypeScript-specific class names.
    */
   override def getClassSource(className: String): String = {
     // Transform the class name to TypeScript CPG format
-    val transformedClassName = applyJsSrc2CpgNamespaceSyntax(className)
-    var classNodes = cpg.typeDecl.fullNameExact(transformedClassName).l
+    var classNodes = cpg.typeDecl.fullNameExact(className).l
 
     // Similar fallback strategy as in JavaAnalyzer
     if (classNodes.isEmpty) {
       // Try simple name
-      val simpleClassName = className.split("::").last.split("[:]|\\.").last
+      val simpleClassName = makeSimpleType(className)
       val nameMatches = cpg.typeDecl.name(simpleClassName).l
 
       if (nameMatches.size == 1) {
@@ -149,6 +154,112 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
     val file = fileOpt.get
     scala.util.Using(Source.fromFile(file.absPath().toFile))(_.mkString).toOption.orNull
   }
+
+  /**
+   * Extracts a simple class name from a fully qualified name.
+   * Only splits the name when it contains "::program:".
+   */
+  private def makeSimpleType(className: String): String = {
+    if (className.contains("::program:")) {
+      className.split("::program:").last
+    } else {
+      className
+    }
+  }
+
+  /**
+   * Recursively builds a structural "skeleton" for a given TypeDecl.
+   * Override to handle TypeScript specific formatting.
+   */
+  private def outlineTypeDecl(td: io.shiftleft.codepropertygraph.generated.nodes.TypeDecl, indent: Int = 0): String = {
+    val sb = new StringBuilder
+
+    val className = sanitizeType(td.name)
+    sb.append("  " * indent).append(s"// ${td.fullName}\n")
+    sb.append("  " * indent).append("class ").append(className).append(" {\n")
+
+    // Methods: skip any whose name starts with "<clinit>"
+    td.method
+      .filterNot(_.name.startsWith("<clinit>")) // skip static constructors
+      .filterNot(_.name.startsWith("<lambda>")) // skip lambdas which are arrow functions, these will covered by fields
+      .foreach { m =>
+      sb.append("  " * (indent + 1))
+        .append(methodSignature(m))
+        .append(" {...}\n")
+    }
+    // Fields
+    td.member.filterNot(m => m.astParent.astChildren.isMethod.name.contains(m.name)).foreach { f =>
+      val modifiers = f.modifier.map(_.modifierType.toLowerCase).filter(_.nonEmpty)
+      val modString = if (modifiers.nonEmpty) filterModifiers(modifiers.toList).mkString(" ") + " " else ""
+      sb.append("  " * (indent + 1))
+        .append(s"${modString}${f.name}: ${sanitizeType(makeSimpleType(extractType(f.properties)))};\n")
+    }
+    sb.append("  " * indent).append("}")
+    sb.toString
+  }
+
+  /**
+   * Override getSkeleton to handle TypeScript specific class structure.
+   */
+  override def getSkeleton(className: String): Option[String] = {
+    val decls = cpg.typeDecl.fullNameExact(className).l
+    if (decls.isEmpty) None else Some(outlineTypeDecl(decls.head))
+  }
+
+  /**
+   * Extracts the most specific type from a properties map.
+   * Prioritizes types in this order:
+   * 1. Types containing "::program:" (most specific)
+   * 2. Other non-empty types that aren't "ANY" or "any"
+   * 3. Defaults to "any" if no specific type found
+   */
+  private def extractType(properties: Map[String, Any]): String = {
+    // Collect all types from different sources
+    val allTypes = scala.collection.mutable.ListBuffer[String]()
+
+    // Add DYNAMIC_TYPE_HINT_FULL_NAME types
+    properties.get("DYNAMIC_TYPE_HINT_FULL_NAME") match {
+      case Some(types: IndexedSeq[_]) =>
+        allTypes ++= types.map(_.toString)
+      case _ => // Do nothing
+    }
+
+    // Add POSSIBLE_TYPES
+    properties.get("POSSIBLE_TYPES") match {
+      case Some(types: IndexedSeq[_]) =>
+        allTypes ++= types.map(_.toString)
+      case _ => // Do nothing
+    }
+
+    // Add TYPE_FULL_NAME
+    properties.get("TYPE_FULL_NAME") match {
+      case Some(t: String) if t.nonEmpty =>
+        allTypes += t
+      case _ => // Do nothing
+    }
+
+    // Filter out empty strings
+    val validTypes = allTypes.filter(_.nonEmpty).toList
+
+    if (validTypes.isEmpty) {
+      return "any"
+    }
+
+    // First priority: find types containing "::program:"
+    val programTypes = validTypes.filter(_.contains("::program:"))
+    if (programTypes.nonEmpty) {
+      return programTypes.head
+    }
+
+    // Second priority: find non-ANY types
+    val nonAnyTypes = validTypes.filterNot(t => t == "ANY" || t == "any")
+    if (nonAnyTypes.nonEmpty) {
+      return nonAnyTypes.head
+    }
+
+    // Default to "any"
+    "any"
+  }
 }
 
 object TypescriptAnalyzer {
@@ -160,14 +271,9 @@ object TypescriptAnalyzer {
     val config = Config()
       .withInputPath(absPath.toString)
 
-    val newCpg = JsSrc2Cpg().createCpg(config).getOrElse {
+    val newCpg = JsSrc2Cpg().createCpgWithAllOverlays(config).getOrElse {
       throw new IOException("Failed to create TypeScript CPG")
     }
-
-    X2Cpg.applyDefaultOverlays(newCpg)
-    val context = new LayerCreatorContext(newCpg)
-    new OssDataFlow(OssDataFlow.defaultOpts).create(context)
-
     newCpg
   }
 }

@@ -1,4 +1,4 @@
-import {A} from "./A";
+import {A} from "../A";
 
 export class B {
     constructor() {

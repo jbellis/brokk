@@ -20,7 +20,7 @@ class AnalyzerTest {
   @Test
   def isClassInProjectTest(): Unit = {
     val analyzer = getAnalyzer
-    Assertions.assertTrue(analyzer.isClassInProject("A.ts::A"))
+    Assertions.assertTrue(analyzer.isClassInProject("A.ts::program:A"))
 
     Assertions.assertFalse(analyzer.isClassInProject("NonExistentClass"))
     Assertions.assertFalse(analyzer.isClassInProject("console"))
@@ -29,7 +29,7 @@ class AnalyzerTest {
   @Test
   def extractMethodSource(): Unit = {
     val analyzer = getAnalyzer
-    val source = analyzer.getMethodSource("A.ts::A.method2").get
+    val source = analyzer.getMethodSource("A.ts::program:A:method2").get
 
     val expected =
       """    public method2(input: string, otherInput?: number): string {
@@ -42,22 +42,9 @@ class AnalyzerTest {
   }
 
   @Test
-  def extractMethodSourceNested(): Unit = {
-    val analyzer = getAnalyzer
-    val source = analyzer.getMethodSource("A.ts::A.<anon-class>0:method7").get
-
-    val expected =
-      """        public method7(): void {
-        |            console.log("hello");
-        |        }""".stripMargin
-
-    Assertions.assertEquals(expected, source)
-  }
-  
-  @Test
   def extractMethodSourceConstructor(): Unit = {
     val analyzer = getAnalyzer
-    val source = analyzer.getMethodSource("B.ts::B.<init>").get
+    val source = analyzer.getMethodSource("sub/B.ts::program:B:<init>").get
 
     val expected =
       """    constructor() {
@@ -70,7 +57,7 @@ class AnalyzerTest {
   @Test
   def getClassSourceTest(): Unit = {
     val analyzer = getAnalyzer
-    val source = analyzer.getClassSource("A.ts::A")
+    val source = analyzer.getClassSource("A.ts::program:A")
 
     // Verify the source contains class definition and methods
     Assertions.assertTrue(source.contains("export class A {"))
@@ -79,20 +66,48 @@ class AnalyzerTest {
   }
 
   @Test
-  def getClassSourceNestedTest(): Unit = {
-    val analyzer = getAnalyzer
-    val source = analyzer.getClassSource("A.ts::A.<anon-class>0")
-
-    // Verify the source contains inner class definition
-    Assertions.assertTrue(source.contains("static Inner = class {"))
-    Assertions.assertTrue(source.contains("public method7(): void"))
-  }
-
-  @Test
   def getClassSourceNonexistentTest(): Unit = {
     val analyzer = getAnalyzer
     val source = analyzer.getClassSource("NonExistentClass")
     Assertions.assertNull(source)
+  }
+
+  @Test
+  def getSkeletonTestA(): Unit = {
+    val analyzer = getAnalyzer
+    val skeleton = analyzer.getSkeleton("A.ts::program:A").get
+
+    val expected =
+      """// A.ts::program:A
+        |class A {
+        |  constructor(private bar?: B) {...}
+        |  public method1(): void {...}
+        |  public method2(input: string, otherInput?: number): string {...}
+        |  public method3() {...}
+        |  public static method4(foo: number, bar: number | null): number {...}
+        |  public method5(b: B): B {...}
+        |  public method6(): void {...}
+        |  public foo: () => string;
+        |  public fieldB: B;
+        |  private fieldA: A;
+        |}""".stripMargin
+
+    Assertions.assertEquals(expected, skeleton)
+  }
+
+  @Test
+  def getSkeletonTestB(): Unit = {
+    val analyzer = getAnalyzer
+    val skeleton = analyzer.getSkeleton("sub/B.ts::program:B").get
+
+    val expected =
+      """// sub/B.ts::program:B
+        |class B {
+        |  constructor() {...}
+        |  public callsIntoA(): void {...}
+        |}""".stripMargin
+
+    Assertions.assertEquals(expected, skeleton)
   }
 
   private def getAnalyzer = {

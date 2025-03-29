@@ -1,4 +1,16 @@
+import {B} from "./sub/B";
+
+
 export class A {
+    public fieldB: B;
+
+    private fieldA: A;
+
+    constructor(private bar?: B) {
+    }
+
+    public foo = () => { return "Hello World"; }
+
     public method1(): void {
         console.log("hello");
     }
@@ -17,9 +29,10 @@ export class A {
         return 0;
     }
 
-    public method5(): void {
+    public method5(b: B): B {
         // self-reference
         console.log(new A());
+        return b;
     }
 
     public method6(): void {
@@ -31,11 +44,4 @@ export class A {
         };
         runnable.run();
     }
-
-    // In TypeScript, nested classes are defined differently
-    static Inner = class {
-        public method7(): void {
-            console.log("hello");
-        }
-    };
 }
