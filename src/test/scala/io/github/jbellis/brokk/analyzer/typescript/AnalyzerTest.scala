@@ -53,6 +53,19 @@ class AnalyzerTest {
 
     Assertions.assertEquals(expected, source)
   }
+  
+  @Test
+  def extractMethodSourceConstructor(): Unit = {
+    val analyzer = getAnalyzer
+    val source = analyzer.getMethodSource("B.ts::B.<init>").get
+
+    val expected =
+      """    constructor() {
+        |        console.log("B constructor");
+        |    }""".stripMargin
+
+    Assertions.assertEquals(expected, source)
+  }
 
   private def getAnalyzer = {
     TypescriptAnalyzer(Path.of("src/test/resources/testcode/typescript"))
