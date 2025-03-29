@@ -19,3 +19,4 @@ Coding Style Guide
 1. **Use asserts to validate assumptions**: Use `assert` to validate assumptions, and prefer making reasonable assumptions backed by assert to defensive `if` checks.
 1. **It's okay to let exceptions bubble up**: If you can't handle an exception, let it bubble up. Don't try to handle it unless we can actually do something about it.
 1. **DRY**: Don't Repeat Yourself. Refactor similar code into a common method. But feature flag parameters are a design smell; if you would need to add flags, write separate methods instead.
+1. **Live in the present**: comment on the final version of the code, not on deltas. Deltas live in Git.

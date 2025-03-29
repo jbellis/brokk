@@ -141,34 +141,14 @@ public class SymbolSelectionPanel extends JPanel {
             // Convert to RSTA completions, filtering by the requested types
             var L = completions.stream()
                     .filter(c -> typeFilter.contains(c.kind()))
-                    .map(c -> (Completion) new ShorthandCompletion(this, c.shortName(), c.fqName()))
+                    .map(c -> new ShorthandCompletion(this, c.shortName(), c.fqName()))
                     .limit(maxResults)
                     .toList();
 
-            if (L.isEmpty()) {
-                autoCompletion.setShowDescWindow(false);
-                return L;
-            }
+            // Dynamically size the popup windows
+            AutoCompleteUtil.sizePopupWindows(autoCompletion, symbolInput, L);
 
-            // Dynamically size the description window based on the longest shortNae
-            var tooltipFont = UIManager.getFont("ToolTip.font");
-            var fontMetrics = symbolInput.getFontMetrics(tooltipFont);
-            int maxWidth = L.stream()
-                    .mapToInt(c -> fontMetrics.stringWidth(c.getInputText()))
-                    .max()
-                    .orElseThrow();
-            // this doesn't seem to work at all, maybe it's hardcoded at startup
-            autoCompletion.setChoicesWindowSize(maxWidth + 10, 3 * fontMetrics.getHeight() + 10); // 5px margin on each side
-
-            autoCompletion.setShowDescWindow(true);
-            int maxDescWidth = L.stream()
-                    .mapToInt(c -> fontMetrics.stringWidth(c.getReplacementText()))
-                    .max()
-                    .orElseThrow();
-            // Desc uses a different (monospaced) font but I'm not sure how to infer which
-            // So, hack in a 1.2 factor
-            autoCompletion.setDescriptionWindowSize((int) (1.2 * maxDescWidth + 10), 3 * fontMetrics.getHeight() + 10);
-            return L;
+            return L.stream().map(c -> (Completion) c).toList();
         }
     }
 }

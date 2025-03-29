@@ -1,10 +1,20 @@
-0.6.4
+0.7.0
+
+## Features
+- "Decompile Dependency" allows you to easily add the source code of a dependency to Code Intelligence
+- Basic context management and Search works better in the absence of Code Intelligence
+- Multiple projects may be open concurrently
+- Better prompting when copying to an external LLM
+- Incremental output parsing improves responsiveness of the UI with fewer flickers
+- Add default models for Google Gemini
+- Multiple improvements to Git functionality
 
 ## Fixes
 - Git push works with SSH remotes
 - Partial stashing works as intended
-- Symbol usage now includes references in return types
+- Symbol usage now includes references in return types and references to subclasses
 - Fixed regression to undoing changes on filesystem
+- Keyboard-hotkey paste into context table works as intended
 
 
 0.6.3

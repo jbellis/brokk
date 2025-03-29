@@ -1,6 +1,6 @@
 package io.github.jbellis.brokk;
 
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -216,7 +216,7 @@ public class ContextHistory {
      * Inverts changes from a popped context to revert to prior state, returning a new context for re-inversion
      */
     private Context undoAndInvertChanges(Context original, IConsoleIO io) {
-        var redoContents = new HashMap<RepoFile,String>();
+        var redoContents = new HashMap<ProjectFile,String>();
         original.originalContents.forEach((file, oldText) -> {
             try {
                 logger.debug("Reading current content for file: " + file.absPath());
@@ -229,7 +229,7 @@ public class ContextHistory {
         });
 
         // restore
-        var changedFiles = new ArrayList<RepoFile>();
+        var changedFiles = new ArrayList<ProjectFile>();
         original.originalContents.forEach((file, oldText) -> {
             try {
                 logger.debug("Restoring file: " + file.absPath() + " with old content length: " + oldText.length());

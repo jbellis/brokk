@@ -10,7 +10,6 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
 import dev.langchain4j.model.anthropic.AnthropicTokenUsage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ChatRequestParameters;
@@ -34,6 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 public class Coder {
     private final Logger logger = LogManager.getLogger(Coder.class);
@@ -66,78 +66,9 @@ public class Coder {
      * @return The final response from the LLM as a string
      */
     public StreamingResult sendStreaming(StreamingChatLanguageModel model, List<ChatMessage> messages, boolean echo) {
-        return sendStreamingWithRetry(model, messages, echo, MAX_ATTEMPTS);
+        return sendMessageWithRetry(model, messages, List.of(), echo, MAX_ATTEMPTS);
     }
 
-    /**
-     * Wrapper for streaming calls with retry logic and exponential backoff
-     */
-    private StreamingResult sendStreamingWithRetry(StreamingChatLanguageModel model,
-                                                  List<ChatMessage> messages,
-                                                  boolean echo,
-                                                  int maxAttempts) {
-        int attempt = 0;
-        while (attempt < maxAttempts) {
-            logger.debug("Streaming request to LLM attempt {} [only last message shown]: {}", attempt, messages.getLast());
-            attempt++;
-            var result = doSingleStreamingCall(model, messages, echo);
-
-            // If user cancelled during streaming, stop immediately
-            if (result.cancelled()) {
-                return result;
-            }
-
-            // If there's an error or the final ChatResponse is null or empty, handle a retry
-            if (result.error() != null
-                || result.chatResponse() == null
-                || result.chatResponse().aiMessage().text().isBlank())
-            {
-                logger.debug("LLM error", result.error());
-                // If out of attempts, return whatever we have
-                if (attempt == maxAttempts) {
-                    return result;
-                }
-
-                // Exponential backoff up to 16s
-                long backoffSeconds = 1L << (attempt - 1);
-                backoffSeconds = Math.min(backoffSeconds, 16);
-
-                io.systemOutput(String.format("LLM issue on attempt %d of %d (will retry in %.1f seconds).",
-                                  attempt, maxAttempts, (double)backoffSeconds));
-                
-                // Busywait with countdown
-                long startTime = System.currentTimeMillis();
-                long endTime = startTime + (backoffSeconds * 1000L);
-                try {
-                    while (System.currentTimeMillis() < endTime) {
-                        double remainingSeconds = (endTime - System.currentTimeMillis()) / 1000.0;
-                        if (remainingSeconds <= 0) break;
-                        io.actionOutput(String.format("Retrying in %.1f seconds...", remainingSeconds));
-                        //noinspection BusyWait
-                        Thread.sleep(100); // Update every 100ms
-                    }
-                } catch (InterruptedException e) {
-                    io.systemOutput("Session interrupted during backoff");
-                    // Mark as cancelled
-                    return new StreamingResult(null, true, null);
-                }
-                // TODO restore the previous description
-                io.actionComplete();
-                // Retry
-                continue;
-            }
-
-            // -- If we reach here, we have a valid ChatResponse with non-empty text --
-            return result;
-        }
-
-        // Should never get here if the logic above returns, but just in case:
-        return new StreamingResult(null, false, new RuntimeException("Unexpected retry logic exit"));
-    }
-
-    /**
-     * Performs a single streaming call without retries
-     */
     /**
      * Transcribes an audio file using the STT model (OpenAI Whisper if available).
      * Returns the transcribed text or an error message on failure.
@@ -158,7 +89,7 @@ public class Coder {
     }
     
     private StreamingResult doSingleStreamingCall(StreamingChatLanguageModel model,
-                                                 List<ChatMessage> messages,
+                                                 ChatRequest request,
                                                  boolean echo)
     {
         // latch for awaiting the complete response
@@ -178,10 +109,9 @@ public class Coder {
         });
 
         // Write request with tools to history
-        writeRequestToHistory(messages, List.of());
+        writeRequestToHistory(request.messages(), request.toolSpecifications());
 
         AtomicReference<ChatResponse> atomicResponse = new AtomicReference<>();
-        var request = ChatRequest.builder().messages(messages).build();
 
         model.chat(request, new StreamingChatResponseHandler() {
             @Override
@@ -250,10 +180,10 @@ public class Coder {
      */
     public String sendMessage(List<ChatMessage> messages) {
         var R = sendMessage(models.quickModel(), messages, List.of());
-        return R.aiMessage().text().trim();
+        return R.chatResponse.aiMessage().text().trim();
     }
 
-    public ChatResponse sendMessage(ChatLanguageModel model, List<ChatMessage> messages) {
+    public StreamingResult sendMessage(StreamingChatLanguageModel model, List<ChatMessage> messages) {
         return sendMessage(model, messages, List.of());
     }
     
@@ -261,20 +191,21 @@ public class Coder {
     /**
      * Send a message to a specific model with tool support
      *
-     * @param model       The model to use
-     * @param messages    The messages to send
-     * @param tools       List of tools to enable for the LLM
+     * @param model    The model to use
+     * @param messages The messages to send
+     * @param tools    List of tools to enable for the LLM
      * @return The LLM response as a string
      */
-    public ChatResponse sendMessage(ChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools) {
+    public StreamingResult sendMessage(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools) {
 
-        var response = sendMessageInternal(model, messages, tools, false);
+        var result = sendMessageWithRetry(model, messages, tools, false, MAX_ATTEMPTS);
+        var cr = result.chatResponse();
         // poor man's ToolChoice.REQUIRED (not supported by langchain4j for Anthropic)
         // Also needed for our DeepSeek emulation if it returns a response without a tool call
-        while (!tools.isEmpty() && !response.aiMessage().hasToolExecutionRequests()) {
+        while (!result.cancelled && result.error == null && !tools.isEmpty() && !cr.aiMessage().hasToolExecutionRequests()) {
             io.systemOutput("Enforcing tool selection");
             var extraMessages = new ArrayList<>(messages);
-            extraMessages.add(response.aiMessage());
+            extraMessages.add(cr.aiMessage());
 
             // Add a stronger instruction for DeepSeek models
             if (model.toString().toLowerCase().contains("deepseek")) {
@@ -283,115 +214,101 @@ public class Coder {
                 extraMessages.add(new UserMessage("At least one tool execution request is required"));
             }
 
-            response = sendMessageInternal(model, extraMessages, tools, true);
+            result = sendMessageWithRetry(model, extraMessages, tools, false, MAX_ATTEMPTS);
         }
 
         if (model instanceof AnthropicChatModel) {
-            var tu = (AnthropicTokenUsage) response.tokenUsage();
+            var tu = (AnthropicTokenUsage) cr.tokenUsage();
             writeToHistory("Cache usage", "%s, %s".formatted(tu.cacheCreationInputTokens(), tu.cacheReadInputTokens()));
         }
 
-        return response;
-    }
-
-    private ChatResponse sendMessageInternal(ChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools, boolean isRetry) {
-        return sendMessageWithRetry(model, messages, tools, isRetry, MAX_ATTEMPTS);
+        return result;
     }
 
     /**
      * Wrapper for chat calls with retry logic and exponential backoff
      */
-    private ChatResponse sendMessageWithRetry(ChatLanguageModel model,
+    private StreamingResult sendMessageWithRetry(StreamingChatLanguageModel model,
                                               List<ChatMessage> messages,
                                               List<ToolSpecification> tools,
-                                              boolean isRetry,
-                                              int maxAttempts) {
+                                              boolean echo,
+                                              int maxAttempts)
+    {
+        Throwable error = null;
         int attempt = 0;
-        while (attempt < maxAttempts) {
-            attempt++;
-            ChatResponse response = null;
-            Throwable error = null;
+        while (attempt++ < maxAttempts) {
+            logger.debug("Sending request to LLM attempt {} [only last message shown]: {}", attempt, messages.getLast());
+            var response = doSingleSendMessage(model, messages, tools, echo);
+            if (response.cancelled) {
+                writeToHistory("Cancelled", "LLM request cancelled by user");
+                return response;
+            }
 
+            error = response.error;
+            if (error == null) {
+                var cr = response.chatResponse;
+                boolean isEmpty = (cr.aiMessage().text() == null || cr.aiMessage().text().isBlank())
+                        && !cr.aiMessage().hasToolExecutionRequests();
+                if (!isEmpty) {
+                    writeToHistory("Response", cr.aiMessage().text());
+                    return response;
+                }
+            }
+
+            // wait between retries
+            logger.debug("LLM error / empty message in {}", response);
+            if (attempt == maxAttempts) {
+                // don't sleep if this is the last attempt
+                break;
+            }
+
+            // Exponential backoff
+            long backoffSeconds = 1L << (attempt - 1);
+            backoffSeconds = Math.min(backoffSeconds, 16);
+
+            io.systemOutput(String.format("LLM issue on attempt %d of %d (will retry in %.1f seconds).",
+                                  attempt, maxAttempts, (double) backoffSeconds));
+
+            // Busywait with countdown
+            long startTime = System.currentTimeMillis();
+            long endTime = startTime + (backoffSeconds * 1000L);
             try {
-                logger.debug("Sending request to LLM attempt {} [only last message shown]: {}", attempt, messages.getLast());
-                response = doSingleSendMessage(model, messages, tools, isRetry);
-            } catch (Throwable t) {
-                error = t;
-            }
-
-            boolean isEmpty = (response == null
-                               || response.aiMessage() == null
-                               || response.aiMessage().text().isBlank());
-
-            if (error != null || isEmpty) {
-                logger.debug("LLM error", error);
-                if (attempt == maxAttempts) {
-                    // Return the final error or a dummy ChatResponse
-                    if (error != null) {
-                        writeToHistory("Error", error.getClass() + ": " + error.getMessage());
-                        // Return a minimal ChatResponse with an error text so caller knows
-                        return ChatResponse.builder()
-                            .aiMessage(new AiMessage("Error: " + error.getMessage()))
-                            .build();
-                    } else {
-                        // Return a minimal ChatResponse indicating empty
-                        writeToHistory("Error", "LLM returned empty or null after max retries");
-                        return ChatResponse.builder()
-                            .aiMessage(new AiMessage("Empty response after max retries"))
-                            .build();
-                    }
+                while (System.currentTimeMillis() < endTime) {
+                    double remainingSeconds = (endTime - System.currentTimeMillis()) / 1000.0;
+                    if (remainingSeconds <= 0) break;
+                    io.actionOutput(String.format("Retrying in %.1f seconds...", remainingSeconds));
+                    Thread.sleep(100); // Update every 100ms
                 }
-
-                // Exponential backoff
-                long backoffSeconds = 1L << (attempt - 1);
-                backoffSeconds = Math.min(backoffSeconds, 16);
-
-                io.systemOutput(
-                    String.format("LLM issue on attempt %d of %d (will retry in %.1f seconds).",
-                                  attempt, maxAttempts, (double)backoffSeconds)
-                );
-                
-                // Busywait with countdown
-                long startTime = System.currentTimeMillis();
-                long endTime = startTime + (backoffSeconds * 1000L);
-                try {
-                    while (System.currentTimeMillis() < endTime) {
-                        double remainingSeconds = (endTime - System.currentTimeMillis()) / 1000.0;
-                        if (remainingSeconds <= 0) break;
-                        io.actionOutput(String.format("Retrying in %.1f seconds...", remainingSeconds));
-                        Thread.sleep(100); // Update every 100ms
-                    }
-                } catch (InterruptedException e) {
-                    io.systemOutput("Session interrupted during backoff");
-                    // Return a dummy with cancellation
-                    return ChatResponse.builder()
-                        .aiMessage(new AiMessage("Cancelled during backoff"))
-                        .build();
-                }
-                continue; // next attempt
+            } catch (InterruptedException e) {
+                io.systemOutput("Interrupted!");
+                return new StreamingResult(null, true, null);
             }
-
-            // If no error & not empty => success
-            return response;
         }
 
-        // Should not reach here
-        return ChatResponse.builder()
-            .aiMessage(new AiMessage("Unexpected retry logic exit"))
-            .build();
+        // Return the final result
+        if (error == null) {
+            // Return a minimal ChatResponse indicating empty
+            writeToHistory("Error", "LLM returned empty or null after max retries");
+            var cr = ChatResponse.builder().aiMessage(new AiMessage("Empty response after max retries")).build();
+            return new StreamingResult(cr, false, new IllegalStateException("LLM returned empty or null"));
+        }
+        writeToHistory("Error", error.getClass() + ": " + error.getMessage());
+        // Return a minimal ChatResponse with an error text so caller knows
+        var cr = ChatResponse.builder().aiMessage(new AiMessage("Error: " + error.getMessage())).build();
+        return new StreamingResult(cr, false, error);
     }
 
     /**
      * Performs a single message call without retries
      */
-    private ChatResponse doSingleSendMessage(ChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools, boolean isRetry) {
+    private StreamingResult doSingleSendMessage(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools, boolean echo) {
         writeRequestToHistory(messages, tools);
         var builder = ChatRequest.builder().messages(messages);
 
         if (!tools.isEmpty()) {
             // Check if this is a DeepSeek model that needs function calling emulation
             if (models.nameOf(model).toLowerCase().contains("deepseek")) {
-                return emulateToolsUsingStructuredOutput(model, messages, tools, isRetry);
+                return emulateToolsUsingStructuredOutput(model, messages, tools);
             }
 
             // For models with native function calling
@@ -402,45 +319,51 @@ public class Coder {
         }
 
         var request = builder.build();
-        var response = model.chat(request);
+        var response = doSingleStreamingCall(model, request, echo);
         writeToHistory("Response", response.toString());
         return response;
     }
-    
+
     /**
      * Emulates function calling for models that support structured output but not native function calling
      * Used primarily for DeepSeek models
      */
-    private ChatResponse emulateToolsUsingStructuredOutput(ChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools, boolean isRetry) {
+    private StreamingResult emulateToolsUsingStructuredOutput(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools) {
+        assert !tools.isEmpty();
+        for (var tool: tools) {
+            assert tool.parameters() != null;
+            assert tool.parameters().properties() != null;
+        }
+
         ObjectMapper mapper = new ObjectMapper();
 
-        logger.debug("sending {} messages with {}", messages.size(), isRetry);
-        if (!isRetry) {
+        var instructionsPresent = messages.stream().anyMatch(m -> {
+            var t = Models.getText(m);
+            return t.contains("tool_calls") && t.contains("Available tools:") && t.contains("Response format:");
+        });
+        logger.debug("sending {} messages with {}", messages.size(), instructionsPresent);
+        if (!instructionsPresent) {
             // Inject  instructions for the model re how to format function calls
             messages = new ArrayList<>(messages); // so we can modify it
             String toolsDescription = tools.stream()
                     .map(tool -> {
-                        StringBuilder sb = new StringBuilder();
-                        sb.append("- ").append(tool.name()).append(": ").append(tool.description());
-
-                        // Add parameters information if available
-                        if (tool.parameters() != null && tool.parameters().properties() != null) {
-                            sb.append("\n  Parameters:");
-                            for (var entry : tool.parameters().properties().entrySet()) {
-                                sb.append("\n    - ").append(entry.getKey());
-
-                                // Try to extract description if available
-                                try {
-                                    JsonNode node = mapper.valueToTree(entry.getValue());
-                                    if (node.has("description")) {
-                                        sb.append(": ").append(node.get("description").asText());
+                        var parametersInfo = tool.parameters().properties().entrySet().stream()
+                                .map(entry -> {
+                                    try {
+                                        var node = mapper.valueToTree(entry.getValue());
+                                        var description = node.has("description") ? ": " + node.get("description").asText() : "";
+                                        return "    - %s%s".formatted(entry.getKey(), description);
+                                    } catch (Exception e) {
+                                        return "    - %s".formatted(entry.getKey());
                                     }
-                                } catch (Exception e) {
-                                    // Ignore, just don't add the description
-                                }
-                            }
-                        }
-                        return sb.toString();
+                                })
+                                .collect(Collectors.joining("\n"));
+    
+                        return """
+                               - %s: %s
+                                 Parameters:
+                               %s
+                               """.formatted(tool.name(), tool.description(), parametersInfo);
                     })
                     .reduce((a, b) -> a + "\n" + b)
                     .orElse("");
@@ -480,11 +403,11 @@ public class Coder {
                 .parameters(requestParams)
                 .build();
 
-        var response = model.chat(request);
+        var response = doSingleStreamingCall(model, request, false);
 
         // Parse the JSON response and convert it to a tool execution request
         try {
-            String jsonResponse = response.aiMessage().text();
+            String jsonResponse = response.chatResponse.aiMessage().text();
             logger.debug("Raw JSON response from model: {}", jsonResponse);
                         JsonNode root = mapper.readTree(jsonResponse);
 
@@ -530,8 +453,8 @@ public class Coder {
 
                 // Create a properly formatted AiMessage with tool execution requests
                 var aiMessage = new AiMessage("[json]", toolExecutionRequests);
-
-                return ChatResponse.builder().aiMessage(aiMessage).build();
+                var cr = ChatResponse.builder().aiMessage(aiMessage).build();
+                return new StreamingResult(cr, false, null);
             }
             // If no tool_call found, return original response
             logger.debug("No tool calls found in response, returning original");
@@ -550,7 +473,7 @@ public class Coder {
                 .reduce((a, b) -> a + "\n" + b)
                 .orElse("");
                 
-        if (!tools.isEmpty()) {
+        if (tools != null && !tools.isEmpty()) {
             requestText += "\nTools:\n" + tools.stream()
                 .map(t -> "- %s: %s".formatted(t.name(), t.description()))
                 .reduce((a, b) -> a + "\n" + b)
@@ -571,6 +494,12 @@ public class Coder {
         }
     }
 
-    // Represents the outcome of a streaming request.
-    public record StreamingResult(ChatResponse chatResponse, boolean cancelled, Throwable error) {}
+    /**
+     * Represents the outcome of a streaming request.
+     */
+    public record StreamingResult(ChatResponse chatResponse, boolean cancelled, Throwable error) {
+        public StreamingResult {
+            assert cancelled || error != null || chatResponse != null;
+        }
+    }
 }

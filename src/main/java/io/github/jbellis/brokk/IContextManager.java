@@ -2,7 +2,8 @@ package io.github.jbellis.brokk;
 
 import dev.langchain4j.data.message.ChatMessage;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
+import io.github.jbellis.brokk.git.IGitRepo;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -17,11 +18,11 @@ import java.util.concurrent.Future;
  * Interface for context manager functionality
  */
 public interface IContextManager {
-    default RepoFile toFile(String relName) {
+    default ProjectFile toFile(String relName) {
         throw new UnsupportedOperationException();
     }
 
-    default Set<RepoFile> getEditableFiles() {
+    default Set<ProjectFile> getEditableFiles() {
         throw new UnsupportedOperationException();
     }
 
@@ -37,27 +38,23 @@ public interface IContextManager {
         // no-op
     }
 
-    default void addToHistory(List<ChatMessage> messages, Map<RepoFile, String> originalContents, String action) {
+    default void addToHistory(List<ChatMessage> messages, Map<ProjectFile, String> originalContents, String action) {
     }
 
     default IAnalyzer getAnalyzer() {
         return getProject().getAnalyzer();
     }
 
-    default IAnalyzer getAnalyzerNonBlocking() {
-        return getProject().getAnalyzerNonBlocking();
-    }
-
     default IGitRepo getRepo() {
         return getProject().getRepo();
     }
 
-    default void editFiles(Collection<RepoFile> path) {
+    default void editFiles(Collection<ProjectFile> path) {
         throw new UnsupportedOperationException();
     }
 
-    default Project getProject() {
-        return null;
+    default IProject getProject() {
+        return new IProject() {};
     }
 
     default void addToGit(String string) throws IOException {}

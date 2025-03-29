@@ -4,11 +4,11 @@ import dev.langchain4j.data.message.ChatMessage;
 import io.github.jbellis.brokk.analyzer.BrokkFile;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.ExternalFile;
-import io.github.jbellis.brokk.analyzer.IAnalyzer;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -25,32 +25,52 @@ public interface ContextFragment extends Serializable {
     /** content formatted for LLM */
     String format() throws IOException;
 
-    /** code sources found in this fragment */
-    default Set<CodeUnit> sources(IProject project) {
-        return sources(project.getAnalyzer(), project.getRepo());
-    }
+    /**
+     * code sources found in this fragment
+     */
+    Set<CodeUnit> sources(IProject project);
 
-    /** for when you don't want analyzer to change out from under you */
-    Set<CodeUnit> sources(IAnalyzer analyzer, IGitRepo repo);
+    /**
+     * Returns all repo files referenced by this fragment.
+     * This is used when we *just* want to manipulate or show actual files,
+     * rather than the code units themselves.
+     */
+    Set<ProjectFile> files(IProject project);
 
-    /** should classes found in this fragment be included in AutoContext? */
+    /**
+     * should classes found in this fragment be included in AutoContext?
+     */
     boolean isEligibleForAutoContext();
 
-    public static Set<RepoFile> parseRepoFiles(String text, IGitRepo repo) {
-        return repo.getTrackedFiles().stream().parallel()
+    static Set<ProjectFile> parseRepoFiles(String text, IProject project) {
+        var exactMatches = project.getFiles().stream().parallel()
                 .filter(f -> text.contains(f.toString()))
+                .collect(Collectors.toSet());
+        if (!exactMatches.isEmpty()) {
+            return exactMatches;
+        }
+
+        return project.getFiles().stream().parallel()
+                .filter(f -> text.contains(f.getFileName()))
                 .collect(Collectors.toSet());
     }
 
-    sealed interface PathFragment extends ContextFragment 
-        permits RepoPathFragment, ExternalPathFragment
+    sealed interface PathFragment extends ContextFragment
+            permits RepoPathFragment, ExternalPathFragment
     {
         BrokkFile file();
 
+        @Override
+        default Set<ProjectFile> files(IProject project) {
+            return Set.of();
+        }
+
+        @Override
         default String text() throws IOException {
             return file().read();
         }
 
+        @Override
         default String format() throws IOException {
             return """
             <file path="%s">
@@ -60,11 +80,17 @@ public interface ContextFragment extends Serializable {
         }
     }
 
-    record RepoPathFragment(RepoFile file) implements PathFragment {
+    record RepoPathFragment(ProjectFile file) implements PathFragment {
         private static final long serialVersionUID = 1L;
+
         @Override
         public String shortDescription() {
             return file().getFileName();
+        }
+
+        @Override
+        public Set<ProjectFile> files(IProject project) {
+            return Set.of(file);
         }
 
         @Override
@@ -76,8 +102,8 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
-        public Set<CodeUnit> sources(IAnalyzer analyzer, IGitRepo repo) {
-            return analyzer.getClassesInFile(file);
+        public Set<CodeUnit> sources(IProject project) {
+            return project.getAnalyzer().getClassesInFile(file);
         }
 
         @Override
@@ -93,6 +119,7 @@ public interface ContextFragment extends Serializable {
 
     record ExternalPathFragment(ExternalFile file) implements PathFragment {
         private static final long serialVersionUID = 1L;
+
         @Override
         public String shortDescription() {
             return description();
@@ -104,7 +131,7 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
-        public Set<CodeUnit> sources(IAnalyzer analyzer, IGitRepo repo) {
+        public Set<CodeUnit> sources(IProject project) {
             return Set.of();
         }
 
@@ -115,7 +142,7 @@ public interface ContextFragment extends Serializable {
     }
 
     static PathFragment toPathFragment(BrokkFile bf) {
-        if (bf instanceof RepoFile repo) {
+        if (bf instanceof ProjectFile repo) {
             return new RepoPathFragment(repo);
         } else if (bf instanceof ExternalFile ext) {
             return new ExternalPathFragment(ext);
@@ -141,14 +168,19 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
-        public Set<CodeUnit> sources(IAnalyzer analyzer, IGitRepo repo) {
-            return parseRepoFiles(text(), repo).stream()
-                    .flatMap(f -> analyzer.getClassesInFile(f).stream())
+        public Set<ProjectFile> files(IProject project) {
+            return parseRepoFiles(text(), project);
+        }
+
+        @Override
+        public Set<CodeUnit> sources(IProject project) {
+            return files(project).stream()
+                    .flatMap(f -> project.getAnalyzer().getClassesInFile(f).stream())
                     .collect(java.util.stream.Collectors.toSet());
         }
-        
+
         @Override
-        public abstract String text(); // no exceptions
+        public abstract String text();
     }
 
     class StringFragment extends VirtualFragment {
@@ -207,8 +239,13 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
-        public Set<CodeUnit> sources(IAnalyzer analyzer, IGitRepo repo) {
+        public Set<CodeUnit> sources(IProject project) {
             return sources;
+        }
+
+        @Override
+        public Set<ProjectFile> files(IProject project) {
+            return sources.stream().map(CodeUnit::source).collect(java.util.stream.Collectors.toSet());
         }
 
         @Override
@@ -266,28 +303,26 @@ public interface ContextFragment extends Serializable {
         public String toString() {
             return "PasteFragment('%s')".formatted(description());
         }
-        
+
         private void writeObject(java.io.ObjectOutputStream out) throws IOException {
             out.defaultWriteObject();
-            // Serialize the description as a String
-            String description;
+            String desc;
             if (descriptionFuture.isDone()) {
                 try {
-                    description = descriptionFuture.get();
+                    desc = descriptionFuture.get();
                 } catch (Exception e) {
-                    description = "(Error summarizing paste)";
+                    desc = "(Error summarizing paste)";
                 }
             } else {
-                description = "(Paste summary incomplete)";
+                desc = "(Paste summary incomplete)";
             }
-            out.writeObject(description);
+            out.writeObject(desc);
         }
-        
+
         private void readObject(java.io.ObjectInputStream in) throws IOException, ClassNotFoundException {
             in.defaultReadObject();
-            // Read the description and convert it back to a CompletableFuture
-            String description = (String) in.readObject();
-            this.descriptionFuture = java.util.concurrent.CompletableFuture.completedFuture(description);
+            String desc = (String) in.readObject();
+            this.descriptionFuture = java.util.concurrent.CompletableFuture.completedFuture(desc);
         }
     }
 
@@ -316,8 +351,13 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
-        public Set<CodeUnit> sources(IAnalyzer analyzer, IGitRepo repo) {
+        public Set<CodeUnit> sources(IProject project) {
             return sources;
+        }
+
+        @Override
+        public Set<ProjectFile> files(IProject project) {
+            return sources.stream().map(CodeUnit::source).collect(java.util.stream.Collectors.toSet());
         }
 
         @Override
@@ -343,18 +383,18 @@ public interface ContextFragment extends Serializable {
         private static final long serialVersionUID = 1L;
         private final String type;
         private final String targetIdentifier;
-        private final Set<CodeUnit> classnames;
+        private final Set<CodeUnit> classes;
         private final String code;
 
-        public UsageFragment(String type, String targetIdentifier, Set<CodeUnit> classnames, String code) {
+        public UsageFragment(String type, String targetIdentifier, Set<CodeUnit> classes, String code) {
             super();
             assert type != null;
             assert targetIdentifier != null;
-            assert classnames != null;
+            assert classes != null;
             assert code != null;
             this.type = type;
             this.targetIdentifier = targetIdentifier;
-            this.classnames = classnames;
+            this.classes = classes;
             this.code = code;
         }
 
@@ -364,8 +404,13 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
-        public Set<CodeUnit> sources(IAnalyzer analyzer, IGitRepo repo) {
-            return classnames;
+        public Set<CodeUnit> sources(IProject project) {
+            return classes;
+        }
+
+        @Override
+        public Set<ProjectFile> files(IProject project) {
+            return classes.stream().map(CodeUnit::source).collect(java.util.stream.Collectors.toSet());
         }
 
         @Override
@@ -391,58 +436,58 @@ public interface ContextFragment extends Serializable {
 
         @Override
         public String text() {
-            // autocontext's special empty values should be completely blank and not include the placeholder package name
             if (isEmpty()) {
                 return "";
             }
-
-            // Group skeletons by package name
             var skeletonsByPackage = skeletons.entrySet().stream()
-                .collect(java.util.stream.Collectors.groupingBy(
-                    entry -> {
-                        var packageName = entry.getKey().packageName();
-                        return packageName.isEmpty() ? "(default package)" : packageName;
-                    },
-                    java.util.stream.Collectors.toMap(
-                        Map.Entry::getKey,
-                        Map.Entry::getValue,
-                        (v1, v2) -> v1,
-                        java.util.LinkedHashMap::new
-                    )
-                ));
-                
-            // If map is empty, return empty string
-            if (skeletons.isEmpty()) {
-                return "";
-            }
-            
-            // Build the text with package headers
+                    .collect(Collectors.groupingBy(
+                            e -> {
+                                var pkg = e.getKey().packageName();
+                                return pkg.isEmpty() ? "(default package)" : pkg;
+                            },
+                            Collectors.toMap(
+                                    Map.Entry::getKey,
+                                    Map.Entry::getValue,
+                                    (v1, v2) -> v1,
+                                    java.util.LinkedHashMap::new
+                            )
+                    ));
+            if (skeletons.isEmpty()) return "";
             return skeletonsByPackage.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .map(packageEntry -> {
-                    String packageHeader = "package " + packageEntry.getKey() + ";";
-                    String packageSkeletons = String.join("\n\n", packageEntry.getValue().values());
-                    return packageHeader + "\n\n" + packageSkeletons;
-                })
-                .collect(java.util.stream.Collectors.joining("\n\n"));
+                    .sorted(Map.Entry.comparingByKey())
+                    .map(pkgEntry -> {
+                        var packageHeader = "package " + pkgEntry.getKey() + ";";
+                        var pkgCode = String.join("\n\n", pkgEntry.getValue().values());
+                        return packageHeader + "\n\n" + pkgCode;
+                    })
+                    .collect(Collectors.joining("\n\n"));
+        }
+
+        private Set<CodeUnit> nonDummy() {
+            return skeletons.keySet().stream().filter(k -> k.source() != AutoContext.DUMMY).collect(Collectors.toSet());
         }
 
         private boolean isEmpty() {
-            return skeletons.size() == 1 && skeletons.values().iterator().next().isEmpty();
+            return nonDummy().isEmpty();
         }
 
         @Override
-        public Set<CodeUnit> sources(IAnalyzer analyzer, IGitRepo repo) {
-            return skeletons.keySet();
+        public Set<CodeUnit> sources(IProject project) {
+            return nonDummy();
+        }
+
+        @Override
+        public Set<ProjectFile> files(IProject project) {
+            return nonDummy().stream().map(CodeUnit::source).collect(java.util.stream.Collectors.toSet());
         }
 
         @Override
         public String description() {
-            assert !isEmpty(); // skeleton in autocontext can be empty, but doesn't call this
-            return "Summary of " + String.join(", ", skeletons.keySet().stream()
-                                                      .map(CodeUnit::name)
-                                                      .sorted()
-                                                      .toList());
+            assert !isEmpty();
+            return "Summary of " + skeletons.keySet().stream()
+                    .map(CodeUnit::name)
+                    .sorted()
+                    .collect(Collectors.joining(", "));
         }
 
         @Override
@@ -452,12 +497,18 @@ public interface ContextFragment extends Serializable {
 
         @Override
         public String format() {
-            assert !isEmpty(); // skeleton in autocontext can be empty, but doesn't call this
+            assert !isEmpty();
             return """
             <summary classes="%s">
             %s
             </summary>
-            """.formatted(String.join(", ", skeletons.keySet().stream().map(CodeUnit::fqName).sorted().toList()), text()).stripIndent();
+            """.formatted(
+                    skeletons.keySet().stream()
+                            .map(CodeUnit::fqName)
+                            .sorted()
+                            .collect(Collectors.joining(", ")),
+                    text()
+            ).stripIndent();
         }
 
         @Override
@@ -466,10 +517,6 @@ public interface ContextFragment extends Serializable {
         }
     }
 
-    /**
-     * A context fragment that holds a list of short class names and a text
-     * representation (e.g. skeletons) of those classes.
-     */
     class ConversationFragment extends VirtualFragment {
         private static final long serialVersionUID = 1L;
         private final List<ChatMessage> messages;
@@ -483,13 +530,18 @@ public interface ContextFragment extends Serializable {
         @Override
         public String text() {
             return messages.stream()
-                .map(m -> m.type() + ": " + Models.getText(m))
-                .collect(java.util.stream.Collectors.joining("\n\n"));
+                    .map(m -> m.type() + ": " + Models.getText(m))
+                    .collect(Collectors.joining("\n\n"));
         }
 
         @Override
-        public Set<CodeUnit> sources(IAnalyzer analyzer, IGitRepo repo) {
-            return Set.of(); // Conversation history doesn't contain code sources
+        public Set<CodeUnit> sources(IProject project) {
+            return Set.of();
+        }
+
+        @Override
+        public Set<ProjectFile> files(IProject project) {
+            return Set.of();
         }
 
         @Override
@@ -523,14 +575,14 @@ public interface ContextFragment extends Serializable {
 
     record AutoContext(SkeletonFragment fragment) implements ContextFragment {
         private static final long serialVersionUID = 2L;
-        public static final AutoContext EMPTY = new AutoContext(new SkeletonFragment(Map.of(CodeUnit.cls("Enabled, but no references found"), "")));
-        public static final AutoContext DISABLED = new AutoContext(new SkeletonFragment(Map.of(CodeUnit.cls("Disabled"), "")));
-        public static final AutoContext REBUILDING = new AutoContext(new SkeletonFragment(Map.of(CodeUnit.cls("Updating"), "")));
+        private static final ProjectFile DUMMY = new ProjectFile(Path.of("/dummy"), Path.of("dummy"));
+        public static final AutoContext EMPTY =
+                new AutoContext(new SkeletonFragment(Map.of(CodeUnit.cls(DUMMY, "Enabled, but no references found"), "")));
+        public static final AutoContext DISABLED =
+                new AutoContext(new SkeletonFragment(Map.of(CodeUnit.cls(DUMMY, "Disabled"), "")));
+        public static final AutoContext REBUILDING =
+                new AutoContext(new SkeletonFragment(Map.of(CodeUnit.cls(DUMMY, "Updating"), "")));
 
-        public AutoContext {
-            assert fragment != null;
-        }
-        
         public boolean isEmpty() {
             return fragment.isEmpty();
         }
@@ -541,30 +593,30 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
-        public Set<CodeUnit> sources(IAnalyzer analyzer, IGitRepo repo) {
-            return fragment.sources(analyzer, repo);
+        public Set<CodeUnit> sources(IProject project) {
+            return fragment.sources(project);
         }
 
-        /**
-         * Returns a comma-separated list of short class names (no package).
-         * Used in UI and also in the Workspace summary provided to the LLM.
-         */
+        @Override
+        public Set<ProjectFile> files(IProject project) {
+            return fragment.files(project);
+        }
+
         @Override
         public String description() {
             return "[Auto] " + fragment.skeletons.keySet().stream()
                     .map(CodeUnit::name)
-                    .collect(java.util.stream.Collectors.joining(", "));
+                    .collect(Collectors.joining(", "));
         }
-
 
         @Override
         public String shortDescription() {
             if (isEmpty()) {
-                return "Autosummary " + fragment.skeletons.keySet().stream().findFirst().orElseThrow();
+                return "Autosummary " + fragment.skeletons.keySet().stream().findFirst().orElse(CodeUnit.cls(null, "None"));
             }
             return "Autosummary of " + fragment.skeletons.keySet().stream()
                     .map(CodeUnit::name)
-                    .collect(java.util.stream.Collectors.joining(", "));
+                    .collect(Collectors.joining(", "));
         }
 
         @Override

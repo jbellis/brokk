@@ -45,7 +45,6 @@ public class VoiceInputButton extends JButton {
                             Consumer<String> onError)
     {
         assert targetTextArea != null;
-        assert contextManager != null;
 
         this.targetTextArea = targetTextArea;
         this.contextManager = contextManager;
@@ -94,6 +93,8 @@ public class VoiceInputButton extends JButton {
                 putClientProperty("isRecording", true);
             }
         });
+
+        model.setEnabled(contextManager != null);
     }
     
     /**
@@ -158,6 +159,8 @@ public class VoiceInputButton extends JButton {
      * Stops capturing and sends to STT on a background thread.
      */
     private void stopMicCaptureAndTranscribe() {
+        assert contextManager != null;
+
         // stop capturing
         if (micLine != null) {
             micLine.stop();

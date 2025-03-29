@@ -3,7 +3,7 @@ package io.github.jbellis.brokk.gui;
 import io.github.jbellis.brokk.Context;
 import io.github.jbellis.brokk.ContextFragment;
 import io.github.jbellis.brokk.ContextManager;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 import io.github.jbellis.brokk.Models;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -12,13 +12,13 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.*;
 import java.util.stream.Collectors;
 
 public class ContextPanel extends JPanel {
@@ -232,19 +232,23 @@ public class ContextPanel extends JPanel {
                             contextMenu.add(setAutoContextCustomItem);
 
                         } else {
-                            // Otherwise, show "View History" if it's a RepoPathFragment
-                            JMenuItem viewHistoryItem = new JMenuItem("View History");
-                            viewHistoryItem.addActionListener(ev -> {
-                                int selectedRow = contextTable.getSelectedRow();
-                                if (selectedRow >= 0) {
-                                    var selectedFragment = (ContextFragment) contextTable.getModel().getValueAt(selectedRow, FRAGMENT_COLUMN);
-                                    if (selectedFragment instanceof ContextFragment.RepoPathFragment(RepoFile f)) {
-                                        chrome.getGitPanel().addFileHistoryTab(f);
+                            // Otherwise, show "View History" if it's a RepoPathFragment and not a dependency
+                            boolean hasGit = contextManager != null && contextManager.getProject() != null
+                                    && contextManager.getProject().hasGit();
+                            if (hasGit) {
+                                JMenuItem viewHistoryItem = new JMenuItem("View History");
+                                viewHistoryItem.addActionListener(ev -> {
+                                    int selectedRow = contextTable.getSelectedRow();
+                                    if (selectedRow >= 0) {
+                                        var selectedFragment = (ContextFragment) contextTable.getModel().getValueAt(selectedRow, FRAGMENT_COLUMN);
+                                        if (selectedFragment instanceof ContextFragment.RepoPathFragment(ProjectFile f)) {
+                                            chrome.getGitPanel().addFileHistoryTab(f);
+                                        }
                                     }
-                                }
-                            });
-                            contextMenu.add(viewHistoryItem);
-                            viewHistoryItem.setEnabled(fragment instanceof ContextFragment.RepoPathFragment);
+                                });
+                                contextMenu.add(viewHistoryItem);
+                                viewHistoryItem.setEnabled(fragment instanceof ContextFragment.RepoPathFragment);
+                            }
                         }
 
                         // If the user right-clicked on the references column, show reference options
@@ -329,6 +333,13 @@ public class ContextPanel extends JPanel {
         // Set selection mode to allow multiple selection
         contextTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
 
+        // Add Ctrl+V shortcut for paste in the table
+        contextTable.registerKeyboardAction(
+                e -> chrome.getContextManager().performContextActionAsync(Chrome.ContextAction.PASTE, List.of()),
+                KeyStroke.getKeyStroke(KeyEvent.VK_V, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()),
+                JComponent.WHEN_FOCUSED
+        );
+
         // Setup right-click popup menu for when no rows are selected
         tablePopupMenu = new JPopupMenu();
 
@@ -339,7 +350,10 @@ public class ContextPanel extends JPanel {
         editMenuItem.addActionListener(e -> {
                                            chrome.currentUserTask = contextManager.performContextActionAsync(Chrome.ContextAction.EDIT, List.of());
                                        });
-        addMenu.add(editMenuItem);
+        // Only add Edit Files when git is present
+        if (contextManager != null && contextManager.getProject() != null && contextManager.getProject().hasGit()) {
+            addMenu.add(editMenuItem);
+        }
 
         JMenuItem readMenuItem = new JMenuItem("Read Files");
         readMenuItem.addActionListener(e -> {
@@ -474,11 +488,11 @@ public class ContextPanel extends JPanel {
         add(tablePanel, BorderLayout.CENTER);
 
         add(contextSummaryPanel, BorderLayout.SOUTH);
-
-        addMouseListener(new MouseAdapter() {
+        
+        tableScrollPane.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                requestFocusInWindow();
+                contextTable.requestFocusInWindow();
             }
         });
     }
@@ -513,7 +527,6 @@ public class ContextPanel extends JPanel {
             return;
         }
 
-        var analyzer = contextManager.getAnalyzerNonBlocking();
         var allFragments = ctx.getAllFragmentsInDisplayOrder();
         int totalLines = 0;
         StringBuilder fullText = new StringBuilder();
@@ -532,19 +545,10 @@ public class ContextPanel extends JPanel {
 
             // Build file references
             List<FileReferenceData> fileReferences = new ArrayList<>();
-            if (analyzer != null && !(frag instanceof ContextFragment.RepoPathFragment)) {
-                fileReferences = frag.sources(analyzer, contextManager.getProject().getRepo())
+            if (!(frag instanceof ContextFragment.RepoPathFragment)) {
+                fileReferences = frag.files(contextManager.getProject())
                         .stream()
-                        .map(source -> {
-                            var pathOpt = analyzer.pathOf(source);
-                            return pathOpt.isDefined()
-                                    ? new FileReferenceData(pathOpt.get().getFileName(),
-                                                            pathOpt.get().toString(),
-                                                            pathOpt.get(),
-                                                            source)
-                                    : null;
-                        })
-                        .filter(Objects::nonNull)
+                        .map(file -> new FileReferenceData(file.getFileName(), file.toString(), file))
                         .distinct()
                         .sorted(Comparator.comparing(FileReferenceData::getFileName))
                         .collect(Collectors.toList());
@@ -632,8 +636,8 @@ public class ContextPanel extends JPanel {
      * Build "Add file" menu item for a single file reference
      */
     private JMenuItem buildAddMenuItem(FileReferenceData fileRef) {
-        JMenuItem addItem = new JMenuItem("Edit " + fileRef.getFullPath());
-        addItem.addActionListener(e -> {
+        JMenuItem editItem = new JMenuItem("Edit " + fileRef.getFullPath());
+        editItem.addActionListener(e -> {
             if (fileRef.getRepoFile() != null) {
                 chrome.currentUserTask = chrome.getContextManager().performContextActionAsync(
                         Chrome.ContextAction.EDIT,
@@ -643,7 +647,12 @@ public class ContextPanel extends JPanel {
                 chrome.toolErrorRaw("Cannot add file: " + fileRef.getFullPath() + " - no RepoFile available");
             }
         });
-        return addItem;
+        // Disable for dependency projects
+        if (contextManager != null && contextManager.getProject() != null && !contextManager.getProject().hasGit()) {
+            editItem.setEnabled(false);
+            editItem.setToolTipText("Editing not available without Git");
+        }
+        return editItem;
     }
 
     /**
@@ -677,7 +686,7 @@ public class ContextPanel extends JPanel {
     private JMenuItem buildSummarizeMenuItem(FileReferenceData fileRef) {
         JMenuItem summarizeItem = new JMenuItem("Summarize " + fileRef.getFullPath());
         summarizeItem.addActionListener(e -> {
-            if (fileRef.getCodeUnit() != null && fileRef.getRepoFile() != null) {
+            if (fileRef.getRepoFile() != null) {
                 chrome.currentUserTask = chrome.getContextManager().performContextActionAsync(
                         Chrome.ContextAction.SUMMARIZE,
                         List.of(new ContextFragment.RepoPathFragment(fileRef.getRepoFile()))

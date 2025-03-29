@@ -192,18 +192,11 @@ class AnalyzerTest {
   }
 
   @Test
-  def getMembersInClassTest(): Unit = {
-    val analyzer = getAnalyzer
-    val members = analyzer.getMembersInClass("D")
-    val expected = Set("D.field1", "D.field2").map(CodeUnit.field) ++ Set("D.methodD1", "D.methodD2").map(CodeUnit.fn) ++ Set("D$DSub", "D$DSubStatic").map(CodeUnit.cls)
-    assertEquals(expected, asScala(members).toSet)
-  }
-
-  @Test
   def getClassesInFilePythonTest(): Unit = {
     val analyzer = JavaAnalyzer(Path.of("src/test/resources/testcode"), Language.Python)
-    val classes = analyzer.getClassesInFile(analyzer.toFile("A.py").get)
-//    val expected = Set("D", "D$DSub", "D$DSubStatic").map(CodeUnit.cls)
+    val file = analyzer.toFile("A.py").get
+    val classes = analyzer.getClassesInFile(file)
+//    val expected = Set("D", "D$DSub", "D$DSubStatic").map(name => CodeUnit.cls(file, name))
 //    assertEquals(expected, asScala(classes).toSet)
   }
   
@@ -246,10 +239,10 @@ class AnalyzerTest {
     val seeds = CollectionConverters.asJava(Map("D" -> (1.0: java.lang.Double)))
     val ranked = analyzer.getPagerank(seeds, 3)
     
-    // A and B should rank highly as they are both called by D
+    // A and B should rank highly as they are both called by D. BaseClass is also included now.
     assert(ranked.size() == 3, ranked)
-    val classes = asScala(ranked).map(_._1).toSet
-    
+    val classes = asScala(ranked).map(_._1.fqName()).toSet // Extract fqName from CodeUnit
+
     // The test code base has changed, so update expected results
     // Now includes BaseClass since we added it to the test code
     assertEquals(Set("A", "B", "BaseClass"), classes)
@@ -258,16 +251,18 @@ class AnalyzerTest {
   @Test
   def getClassesInFileTest(): Unit = {
     val analyzer = getAnalyzer
-    val classes = analyzer.getClassesInFile(analyzer.toFile("D.java").get)
-    val expected = Set("D", "D$DSub", "D$DSubStatic").map(CodeUnit.cls)
+    val file = analyzer.toFile("D.java").get
+    val classes = analyzer.getClassesInFile(file)
+    val expected = Set("D", "D$DSub", "D$DSubStatic").map(name => CodeUnit.cls(file, name))
     assertEquals(expected, asScala(classes).toSet)
   }
 
   @Test
   def classesInPackagedFileTest(): Unit = {
     val analyzer = getAnalyzer
-    val classes = analyzer.getClassesInFile(analyzer.toFile("Packaged.java").get)
-    assertEquals(Set(CodeUnit.cls("io.github.jbellis.brokk.Foo")), asScala(classes).toSet)
+    val file = analyzer.toFile("Packaged.java").get
+    val classes = analyzer.getClassesInFile(file)
+    assertEquals(Set(CodeUnit.cls(file, "io.github.jbellis.brokk.Foo")), asScala(classes).toSet)
   }
 
   @Test
@@ -296,6 +291,7 @@ class AnalyzerTest {
     val symbol = "D.field1" // fully qualified field name
     val usages = analyzer.getUses(symbol)
 
+    val file = analyzer.toFile("D.java").get
     val actualRefs = asScala(usages).map(_.fqName).toSet
     assertEquals(Set("D.methodD2", "E.dMethod"), actualRefs)
   }
@@ -350,7 +346,7 @@ class AnalyzerTest {
     // Find classes matching "*E"
     val classMatches = analyzer.getDefinitions(".*e")
     val classRefs = asScala(classMatches).filter(_.isClass).map(_.fqName).toSet
-    assertEquals(Set("E", "UseE", "AnonymousUsage", "java.lang.Runnable"), classRefs)
+    assertEquals(Set("E", "UseE", "AnonymousUsage"), classRefs)
 
     // Find methods matching "method*"
     val methodMatches = analyzer.getDefinitions("method.*1")

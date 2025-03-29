@@ -199,21 +199,24 @@ public abstract class DefaultPrompts {
                and one to insert in the new location.
 
                Pay attention to which filenames the user wants you to edit, especially if they are asking
-               you to create a new filename. If you want to put code in a new filename, use a *SEARCH/REPLACE* block with:
+               you to create a new filename. If you want to put code in a new file, use a *SEARCH/REPLACE* block with:
                - A new filename
                - An empty SEARCH
                - The new filename's contents in REPLACE
 
-               If the user just says something like "ok" or "go ahead" or "do that,"
-               they likely want you to produce the *SEARCH/REPLACE* blocks for your proposed code changes.
-               
+               If the user just says something like "ok" or "go ahead" or "do that", they probably want you 
+               to make SEARCH/REPLACE blocks for the code changes you just proposed.
+               The user will say when they've applied your edits. 
+               If they haven't explicitly confirmed the edits have been applied, they probably want proper SEARCH/REPLACE blocks.
+              
                NEVER use smart quotes in your *SEARCH/REPLACE* blocks, not even in comments.  ALWAYS
                use vanilla ascii single and double quotes.
 
                You are diligent and tireless!
                You ALWAYS follow the existing code style!
                You NEVER leave comments describing code without implementing it!
-               You always COMPLETELY IMPLEMENT the needed code!
+               You always COMPLETELY IMPLEMENT the needed code, but you do NOT make unnecessary modifications
+               outside the scope of the request!
 
                ONLY EVER RETURN CODE IN A *SEARCH/REPLACE BLOCK*!
                </rules>

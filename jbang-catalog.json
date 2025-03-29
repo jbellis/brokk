@@ -1,0 +1,10 @@
+{
+  "catalogs": {},
+  "aliases": {
+    "brokk": {
+      "script-ref": "https://github.com/jbellis/brokk/releases/download/0.7.0/brokk-assembly-0.7.0.jar",
+      "java": "21"
+    }
+  },
+  "templates": {}
+}

@@ -1,22 +1,19 @@
 package io.github.jbellis.brokk;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.StreamingResponseHandler;
-import dev.langchain4j.model.anthropic.AnthropicChatModel;
 import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
-import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
-import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiTokenizer;
 import dev.langchain4j.model.output.Response;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.MediaType;
 import okhttp3.MultipartBody;
 import okhttp3.OkHttpClient;
@@ -28,7 +25,6 @@ import org.yaml.snakeyaml.Yaml;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -42,8 +38,8 @@ import java.util.function.Consumer;
  */
 public record Models(StreamingChatLanguageModel editModel,
                      StreamingChatLanguageModel applyModel,
-                     ChatLanguageModel quickModel,
-                     ChatLanguageModel searchModel,
+                     StreamingChatLanguageModel quickModel,
+                     StreamingChatLanguageModel searchModel,
                      String editModelName,
                      String applyModelName,
                      String quickModelName,
@@ -51,7 +47,7 @@ public record Models(StreamingChatLanguageModel editModel,
                      SpeechToTextModel sttModel,
                      String sttModelName)
 {
-    public static String[] defaultKeyNames = { "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY" };
+    public static String[] defaultKeyNames = { "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "GEMINI_API_KEY" };
 
     /**
      * Returns the name of the given model.
@@ -79,7 +75,7 @@ public record Models(StreamingChatLanguageModel editModel,
       key: OPENAI_API_KEY
       name: o3-mini
       maxTokens: 100000
-    
+
     search_model:
       provider: openai
       key: OPENAI_API_KEY
@@ -99,6 +95,32 @@ public record Models(StreamingChatLanguageModel editModel,
       key: OPENAI_API_KEY
       name: gpt-4o-mini
       maxTokens: 16384
+    """;
+    
+    private static final String GOOGLE_DEFAULTS = """
+    edit_model:
+      provider: google
+      key: GEMINI_API_KEY
+      name: gemini-2.5-pro-exp-03-25
+      maxTokens: 1000000
+
+    search_model:
+      provider: google
+      key: GEMINI_API_KEY
+      name: gemini-1.5-pro
+      maxTokens: 2000000
+
+    apply_model:
+      provider: google
+      key: GEMINI_API_KEY
+      name: gemini-2.0-flash
+      maxTokens: 1000000
+
+    quick_model:
+      provider: google
+      key: GEMINI_API_KEY
+      name: gemini-2.0-flash-lite
+      maxTokens: 1000000
     """;
 
     private static final String ANTHROPIC_DEFAULTS = """
@@ -223,6 +245,11 @@ public record Models(StreamingChatLanguageModel editModel,
         if (deepseekKey != null && !deepseekKey.isBlank()) {
             return buildModelsFromYaml(DEEPSEEK_DEFAULTS);
         }
+        
+        String googleKey = getKey("GEMINI_API_KEY");
+        if (googleKey != null && !googleKey.isBlank()) {
+            return buildModelsFromYaml(GOOGLE_DEFAULTS);
+        }
 
         // If no API keys are available, return disabled models
         return disabled();
@@ -262,10 +289,10 @@ public record Models(StreamingChatLanguageModel editModel,
             Map<String, Object> top = yaml.load(yamlStr);
 
             // Build each model
-            var editModel = buildStreamingModel(top, "edit_model", true);
-            var applyModel = buildStreamingModel(top, "apply_model", false);
-            var quickModel = buildChatModel(top, "quick_model", false);
-            var searchModel = buildChatModel(top, "search_model", false);
+            var editModel = buildStreamingModel(top, "edit_model");
+            var applyModel = buildStreamingModel(top, "apply_model");
+            var quickModel = buildStreamingModel(top, "quick_model");
+            var searchModel = buildStreamingModel(top, "search_model");
 
             String editModelName = readModelName(top, "edit_model");
             String applyModelName = readModelName(top, "apply_model");
@@ -297,8 +324,8 @@ public record Models(StreamingChatLanguageModel editModel,
     public static Models disabled() {
         return new Models(new UnavailableStreamingModel(),
                           new UnavailableStreamingModel(),
-                          new UnavailableModel(),
-                          new UnavailableModel(),
+                          new UnavailableStreamingModel(),
+                          new UnavailableStreamingModel(),
                           "disabled",
                           "disabled",
                           "disabled",
@@ -308,33 +335,21 @@ public record Models(StreamingChatLanguageModel editModel,
     }
 
     /**
-     * Build a non-streaming ChatLanguageModel.
+     * Build a streaming StreamingChatLanguageModel.
      */
     @SuppressWarnings("unchecked")
-    private static ChatLanguageModel buildChatModel(Map<String, Object> top, String key, boolean streaming) {
+    private static StreamingChatLanguageModel buildStreamingModel(Map<String, Object> top, String key) {
         if (!top.containsKey(key)) {
             return null;
         }
         Map<String, Object> map = (Map<String, Object>) top.get(key);
-        return (ChatLanguageModel) buildModelFromMap(map, false);
+        return (StreamingChatLanguageModel) buildModelFromMap(map);
     }
 
     /**
-     * Build a streaming ChatLanguageModel.
+     * Internal helper: build either StreamingChatLanguageModel or StreamingChatLanguageModel from the map.
      */
-    @SuppressWarnings("unchecked")
-    private static StreamingChatLanguageModel buildStreamingModel(Map<String, Object> top, String key, boolean streaming) {
-        if (!top.containsKey(key)) {
-            return null;
-        }
-        Map<String, Object> map = (Map<String, Object>) top.get(key);
-        return (StreamingChatLanguageModel) buildModelFromMap(map, true);
-    }
-
-    /**
-     * Internal helper: build either ChatLanguageModel or StreamingChatLanguageModel from the map.
-     */
-    private static Object buildModelFromMap(Map<String, Object> modelMap, boolean streaming) {
+    private static Object buildModelFromMap(Map<String, Object> modelMap) {
         // Read common fields
         String provider = (String) modelMap.get("provider"); // optional
         String url = (String) modelMap.get("url");           // optional
@@ -350,6 +365,10 @@ public record Models(StreamingChatLanguageModel editModel,
             provider = null;
             url = "https://api.deepseek.com";
         }
+        if (provider != null && provider.equalsIgnoreCase("google")) {
+            provider = null;
+            url = "https://generativelanguage.googleapis.com/v1beta/openai/";
+        }
 
         if ((provider == null || provider.isBlank()) && url == null) {
             throw new IllegalArgumentException("Either provider or url must be specified");
@@ -360,84 +379,42 @@ public record Models(StreamingChatLanguageModel editModel,
 
         // No provider => use openai client with url
         if (provider == null || provider.isBlank()) {
-            if (streaming) {
-                var builder = OpenAiStreamingChatModel.builder()
-                        .apiKey(resolvedKey)
-                        .baseUrl(url)
-                        .modelName(modelName)
-                        .maxCompletionTokens(maxTokens);
-                maybeSetDouble(temperature, builder::temperature);
-                return builder.build();
-            } else {
-                var builder = OpenAiChatModel.builder()
-                        .apiKey(resolvedKey)
-                        .baseUrl(url)
-                        .modelName(modelName)
-                        .maxCompletionTokens(maxTokens);
-                maybeSetDouble(temperature, builder::temperature);
-                return builder.build();
-            }
+            var builder = OpenAiStreamingChatModel.builder()
+                    .apiKey(resolvedKey)
+                    .baseUrl(url)
+                    .modelName(modelName)
+                    .maxCompletionTokens(maxTokens);
+            maybeSetDouble(temperature, builder::temperature);
+            return builder.build();
         }
 
         // Otherwise, provider is set: handle openai or anthropic
         return switch (provider.toLowerCase()) {
             case "openai" -> {
-                if (streaming) {
-                    var builder = OpenAiStreamingChatModel.builder()
-                            .apiKey(resolvedKey)
-                            .modelName(modelName)
-                            .maxCompletionTokens(maxTokens);
-                    maybeSetDouble(temperature, builder::temperature);
-                    if (modelMap.get("reasoning_effort") != null) {
-                        var reasoningEffort = OpenAiChatRequestParameters.builder()
-                                .reasoningEffort(modelMap.get("reasoning_effort").toString())
-                                .build();
-                        if (modelMap.get("reasoning_effort").toString().equals("high")) {
-                            // tolerate longer delays
-                            builder = builder.defaultRequestParameters(reasoningEffort)
-                                    .timeout(Duration.of(3, java.time.temporal.ChronoUnit.MINUTES));
-                        }
+                var builder = OpenAiStreamingChatModel.builder()
+                        .apiKey(resolvedKey)
+                        .modelName(modelName)
+                        .maxCompletionTokens(maxTokens);
+                maybeSetDouble(temperature, builder::temperature);
+                if (modelMap.get("reasoning_effort") != null) {
+                    var reasoningEffort = OpenAiChatRequestParameters.builder()
+                            .reasoningEffort(modelMap.get("reasoning_effort").toString())
+                            .build();
+                    if (modelMap.get("reasoning_effort").toString().equals("high")) {
+                        // tolerate longer delays
+                        builder = builder.defaultRequestParameters(reasoningEffort)
+                                .timeout(Duration.of(3, java.time.temporal.ChronoUnit.MINUTES));
                     }
-                    yield builder.build();
-                } else {
-                    var builder = OpenAiChatModel.builder()
-                            .apiKey(resolvedKey)
-                            .modelName(modelName)
-                            .maxCompletionTokens(maxTokens);
-                    maybeSetDouble(temperature, builder::temperature);
-                    if (modelMap.get("reasoning_effort") != null) {
-                        var reasoningEffort = OpenAiChatRequestParameters.builder()
-                                .reasoningEffort(modelMap.get("reasoning_effort").toString())
-                                .build();
-                        builder = builder.defaultRequestParameters(reasoningEffort);
-                    }
-                    yield builder.build();
                 }
+                yield builder.build();
             }
             case "anthropic" -> {
-                if (streaming) {
-                    var builder = AnthropicStreamingChatModel.builder()
-                            .apiKey(resolvedKey)
-                            .modelName(modelName)
-                            .maxTokens(maxTokens);
-                    maybeSetDouble(temperature, builder::temperature);
-                    yield builder.build();
-                } else {
-                    var builder = AnthropicChatModel.builder()
-                            .apiKey(resolvedKey)
-                            .modelName(modelName)
-                            .maxTokens(maxTokens);
-                    maybeSetDouble(temperature, builder::temperature);
-                    
-                    // Enable caching for search model if specified
-                    if (modelMap.containsKey("enableCaching") && (boolean)modelMap.get("enableCaching")) {
-                        builder = builder
-                            .cacheSystemMessages(true);
-                        // don't cache tools b/c each one is considered a separate "block" and anthropic only allows 4 cached blocks
-                        //    .cacheTools(true);
-                    }
-                    yield builder.build();
-                }
+                var builder = AnthropicStreamingChatModel.builder()
+                        .apiKey(resolvedKey)
+                        .modelName(modelName)
+                        .maxTokens(maxTokens);
+                maybeSetDouble(temperature, builder::temperature);
+                yield builder.build();
             }
             default -> throw new IllegalArgumentException("Unknown provider: " + provider);
         };
@@ -496,31 +473,6 @@ public record Models(StreamingChatLanguageModel editModel,
 
     public static int getApproximateTokens(String text) {
         return tokenizer.encode(text).size();
-    }
-
-    public static class UnavailableModel implements ChatLanguageModel {
-        public UnavailableModel() {
-        }
-
-        public String generate(String userMessage) {
-            return UNAVAILABLE;
-        }
-
-        public Response<AiMessage> generate(ChatMessage... messages) {
-            return new Response<>(new AiMessage(UNAVAILABLE));
-        }
-
-        public Response<AiMessage> generate(List<ChatMessage> messages) {
-            return new Response<>(new AiMessage(UNAVAILABLE));
-        }
-
-        public Response<AiMessage> generate(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications) {
-            return new Response<>(new AiMessage(UNAVAILABLE));
-        }
-
-        public Response<AiMessage> generate(List<ChatMessage> messages, ToolSpecification toolSpecification) {
-            return new Response<>(new AiMessage(UNAVAILABLE));
-        }
     }
 
     public static class UnavailableStreamingModel implements StreamingChatLanguageModel {

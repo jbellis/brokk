@@ -5,7 +5,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 import io.github.jbellis.brokk.prompts.BuildPrompts;
 import io.github.jbellis.brokk.prompts.DefaultPrompts;
 import io.github.jbellis.brokk.prompts.QuickEditPrompts;
@@ -30,7 +30,7 @@ public class LLM {
      */
     public static void runSession(Coder coder, IConsoleIO io, StreamingChatLanguageModel model, String userInput) {
         // Track original contents of files before any changes
-        var originalContents = new HashMap<RepoFile, String>();
+        var originalContents = new HashMap<ProjectFile, String>();
 
         // `messages` is everything we send to the LLM;
         // `pendingHistory` contains user instructions + llm response but omits the Context messages
@@ -97,7 +97,7 @@ public class LLM {
             requestMessages.add(llmResponse.aiMessage());
 
             // Gather all edit blocks in the reply
-            var parseResult = EditBlock.findOriginalUpdateBlocks(llmText, coder.contextManager.getEditableFiles());
+            var parseResult = EditBlock.findOriginalUpdateBlocks(llmText, coder.contextManager.getEditableFiles(), coder.contextManager.getRepo());
             blocks.addAll(parseResult.blocks());
             logger.debug("{} total unapplied blocks", blocks.size());
             if (parseResult.parseError() != null) {
@@ -203,7 +203,7 @@ public class LLM {
      */
     public static void runQuickSession(ContextManager cm,
                                        IConsoleIO io,
-                                       RepoFile file,
+                                       ProjectFile file,
                                        String oldText,
                                        String instructions)
     {
@@ -235,7 +235,7 @@ public class LLM {
         var instructionsMsg = QuickEditPrompts.instance.formatInstructions(oldText, instructions);
         messages.add(new UserMessage(instructionsMsg));
 
-        // Non-streaming model for quick application
+        // No echo for Quick Edit
         var result = coder.sendStreaming(coder.models.applyModel(), messages, false);
         var responseText = result.chatResponse().aiMessage().text();
         if (responseText.isBlank()) {
@@ -275,14 +275,14 @@ public class LLM {
         }
 
         // Record the original content so we can undo if necessary
-        var originalContents = Map.<RepoFile,String>of(file, fileContents);
+        var originalContents = Map.<ProjectFile,String>of(file, fileContents);
 
         // Save to context history
         var pendingHistory = List.of(
                 new UserMessage(instructionsMsg),
                 new AiMessage(responseText)
         );
-        cm.addToHistory(pendingHistory, originalContents, "Quick Edit: " + file.getFileName());
+        cm.addToHistory(pendingHistory, originalContents, "Quick Edit: " + file.getFileName(), responseText);
     }
 
     /**

@@ -13,7 +13,7 @@ import java.util.Optional;
  * that different filename objects can be meaningfully compared, unlike bare Paths which may
  * or may not be absolute, or may be relative to the jvm root rather than the repo root.
  */
-public class RepoFile implements BrokkFile {
+public class ProjectFile implements BrokkFile {
     private static final long serialVersionUID = 1L;
     private transient Path root;
     private transient Path relPath;
@@ -21,7 +21,7 @@ public class RepoFile implements BrokkFile {
     /**
      * root must be pre-normalized; we will normalize relPath if it is not already
      */
-    public RepoFile(Path root, Path relPath) {
+    public ProjectFile(Path root, Path relPath) {
         // We can't rely on these being set until after deserialization
         if (root != null && relPath != null) {
             if (!root.isAbsolute()) {
@@ -39,7 +39,7 @@ public class RepoFile implements BrokkFile {
         this.relPath = relPath;
     }
 
-    public RepoFile(Path root, String relName) {
+    public ProjectFile(Path root, String relName) {
         this(root, Path.of(relName));
     }
 
@@ -75,10 +75,10 @@ public class RepoFile implements BrokkFile {
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof RepoFile)) return false;
-        RepoFile repoFile = (RepoFile) o;
-        return Objects.equals(root, repoFile.root) && 
-               Objects.equals(relPath, repoFile.relPath);
+        if (!(o instanceof ProjectFile)) return false;
+        ProjectFile projectFile = (ProjectFile) o;
+        return Objects.equals(root, projectFile.root) &&
+               Objects.equals(relPath, projectFile.relPath);
     }
 
     @Override

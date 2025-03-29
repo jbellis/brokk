@@ -3,9 +3,12 @@ package io.github.jbellis.brokk;
 import io.github.jbellis.brokk.Project.CpgRefresh;
 import java.awt.KeyboardFocusManager;
 
+import io.github.jbellis.brokk.analyzer.DisabledAnalyzer;
+import io.github.jbellis.brokk.analyzer.IAnalyzer;
 import io.github.jbellis.brokk.analyzer.JavaAnalyzer;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.Language;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -20,16 +23,14 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
-public class AnalyzerWrapper {
+public class AnalyzerWrapper implements AutoCloseable {
     private final Logger logger = LogManager.getLogger(AnalyzerWrapper.class);
 
     private static final long DEBOUNCE_DELAY_MS = 500;
@@ -38,34 +39,21 @@ public class AnalyzerWrapper {
 
     private final AnalyzerListener listener; // can be null if no one is listening
     private final Path root;
-    private final TaskRunner runner;
+    private final ContextManager.TaskRunner runner;
     private final Project project;
 
     private volatile boolean running = true;
 
-    private volatile Future<JavaAnalyzer> future;
-    private volatile JavaAnalyzer currentAnalyzer = null;
+    private volatile Future<IAnalyzer> future;
+    private volatile IAnalyzer currentAnalyzer = null;
     private volatile boolean rebuildInProgress = false;
     private volatile boolean externalRebuildRequested = false;
     private volatile boolean rebuildPending = false;
 
-    @FunctionalInterface
-    public interface TaskRunner {
-        /**
-         * Submits a background task with the given description.
-         *
-         * @param taskDescription a description of the task
-         * @param task the task to execute
-         * @param <T> the result type of the task
-         * @return a {@link Future} representing pending completion of the task
-         */
-        <T> Future<T> submit(String taskDescription, Callable<T> task);
-    }
-
     /**
      * Create a new orchestrator. (We assume the analyzer executor is provided externally.)
      */
-    public AnalyzerWrapper(Project project, TaskRunner runner, AnalyzerListener listener) {
+    public AnalyzerWrapper(Project project, ContextManager.TaskRunner runner, AnalyzerListener listener) {
         this.project = project;
         this.root = project.getRoot();
         this.runner = runner;
@@ -150,7 +138,7 @@ public class AnalyzerWrapper {
 
         // 2) Check if any *tracked* files changed
         Set<Path> trackedPaths = project.getRepo().getTrackedFiles().stream()
-                .map(RepoFile::absPath)
+                .map(ProjectFile::absPath)
                 .collect(Collectors.toSet());
 
         boolean needsAnalyzerRefresh = batch.stream()
@@ -174,8 +162,12 @@ public class AnalyzerWrapper {
      *   1) If the .brokk/joern.cpg file is up to date, reuse it;
      *   2) Otherwise, rebuild a fresh Analyzer.
      */
-    private JavaAnalyzer loadOrCreateAnalyzer() {
-        logger.debug("Loading/creating analyzer");
+    private IAnalyzer loadOrCreateAnalyzer() {
+        logger.debug("Loading/creating analyzer for {}", project.getAnalyzerLanguage());
+        if (project.getAnalyzerLanguage() == Language.None) {
+            return new DisabledAnalyzer();
+        }
+
         Path analyzerPath = root.resolve(".brokk").resolve("joern.cpg");
         if (project.getCpgRefresh() == CpgRefresh.UNSET) {
             logger.debug("First startup: timing CPG creation");
@@ -188,18 +180,23 @@ public class AnalyzerWrapper {
             } else if (duration > 5000) {
                 project.setCpgRefresh(CpgRefresh.MANUAL);
                 var msg = """
-                CPG creation was slow (%,d ms); code intelligence will only refresh when explicitly requested via File menu.
+                Code Intelligence found %d classes in %,d ms.
+                Since this was slow, code intelligence will only refresh when explicitly requested via File menu.
                 (Code intelligence will still refresh once automatically at startup.)
-                You can change this with the cpg_refresh parameter in .brokk/project.properties.
-                """.stripIndent().formatted(duration);
+                You can change this with the code_intelligence_refresh parameter in .brokk/project.properties.
+                """.stripIndent().formatted(analyzer.getAllClasses().size(), duration);
                 listener.afterFirstBuild(msg);
                 logger.info(msg);
             } else {
                 project.setCpgRefresh(CpgRefresh.AUTO);
                 var msg = """
-                CPG creation was fast (%,d ms); code intelligence will refresh automatically when changes are made to tracked files.
-                You can change this with the cpg_refresh parameter in .brokk/project.properties.
-                """.stripIndent().formatted(duration);
+                Code Intelligence found %d classes in %,d ms.
+                If this is fewer than expected, it's probably because Brokk only looks for %s files.
+                If this is not a useful subset of your project, the best option is to disable
+                Code Intelligence by setting code_intelligence_language=%s in .brokk/project.properties.
+                Otherwise, Code Intelligence will refresh automatically when changes are made to tracked files.
+                You can change this with the code_intelligence_refresh parameter in .brokk/project.properties.
+                """.stripIndent().formatted(analyzer.getAllClasses().size(), duration, Language.Java, Language.None);
                 listener.afterFirstBuild(msg);
                 logger.info(msg);
                 startWatcher();
@@ -231,7 +228,7 @@ public class AnalyzerWrapper {
             return null;
         }
 
-        List<RepoFile> trackedFiles = project.getRepo().getTrackedFiles();
+        var trackedFiles = project.getFiles();
         long cpgMTime;
         try {
             cpgMTime = Files.getLastModifiedTime(analyzerPath).toMillis();
@@ -239,7 +236,7 @@ public class AnalyzerWrapper {
             throw new RuntimeException("Error reading analyzer file timestamp", e);
         }
         long maxTrackedMTime = 0L;
-        for (RepoFile rf : trackedFiles) {
+        for (ProjectFile rf : trackedFiles) {
             try {
                 long fileMTime = Files.getLastModifiedTime(rf.absPath()).toMillis();
                 maxTrackedMTime = Math.max(maxTrackedMTime, fileMTime);
@@ -297,7 +294,7 @@ public class AnalyzerWrapper {
     /**
      * Get the analyzer, showing a spinner UI while waiting if requested.
      */
-    private JavaAnalyzer get(boolean notifyWhenBlocked) {
+    private IAnalyzer get(boolean notifyWhenBlocked) {
         if (SwingUtilities.isEventDispatchThread()) {
             throw new UnsupportedOperationException("Never call blocking get() from EDT");
         }
@@ -317,7 +314,7 @@ public class AnalyzerWrapper {
         }
         try {
             // Block until the future analyzer finishes building
-            JavaAnalyzer built = future.get();
+            var built = future.get();
             currentAnalyzer = built;
             return built;
         } catch (InterruptedException e) {
@@ -332,14 +329,14 @@ public class AnalyzerWrapper {
      * Get the analyzer, showing a spinner UI while waiting.
      * For use in user-facing operations.
      */
-    public JavaAnalyzer get() {
+    public IAnalyzer get() {
         return get(true);
     }
 
     /**
      * @return null if analyzer is not ready yet
      */
-    public JavaAnalyzer getNonBlocking() {
+    public IAnalyzer getNonBlocking() {
         try {
             // Try to get with zero timeout - returns null if not done
             return future.get(0, TimeUnit.MILLISECONDS);
@@ -443,6 +440,11 @@ public class AnalyzerWrapper {
                       }
                   });
         }
+    }
+
+    @Override
+    public void close() {
+        running = false;
     }
 
     public record CodeWithSource(String code, Set<CodeUnit> sources) {

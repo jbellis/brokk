@@ -61,7 +61,7 @@ public class StackTrace {
      *
      * @return the original stack trace
      */
-    public String getOriginalStackTrace() {
+    public String getOriginalText() {
         return originalStackTrace;
     }
 

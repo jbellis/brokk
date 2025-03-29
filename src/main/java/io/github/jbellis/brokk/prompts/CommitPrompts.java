@@ -4,11 +4,8 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import io.github.jbellis.brokk.ContextManager;
-import io.github.jbellis.brokk.GitRepo;
-import io.github.jbellis.brokk.Models;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 public class CommitPrompts extends DefaultPrompts {
     public static final CommitPrompts instance = new CommitPrompts() {};

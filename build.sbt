@@ -2,7 +2,7 @@ import sbt._
 import sbt.Keys._
 
 scalaVersion := "3.5.2"
-version := "0.6.3"
+version := "0.8.0-SNAPSHOT"
 organization := "io.github.jbellis"
 name := "brokk"
 
@@ -24,7 +24,10 @@ scalacOptions ++= Seq(
 )
 
 // Additional repositories
-resolvers += "Gradle Libs" at "https://repo.gradle.org/gradle/libs-releases"
+resolvers ++= Seq(
+  "Gradle Libs" at "https://repo.gradle.org/gradle/libs-releases",
+  "IntelliJ Releases" at "https://www.jetbrains.com/intellij-repository/releases"
+)
 
 libraryDependencies ++= Seq(
   // File watching
@@ -51,7 +54,6 @@ libraryDependencies ++= Seq(
   "com.formdev" % "flatlaf" % "3.5.4",
   "com.fifesoft" % "rsyntaxtextarea" % "3.5.4",
   "com.fifesoft" % "autocomplete" % "3.3.2",
-  "io.github.java-diff-utils" % "java-diff-utils" % "4.15",
   "org.yaml" % "snakeyaml" % "2.3",
   "org.eclipse.jgit" % "org.eclipse.jgit" % "7.1.0.202411261347-r",
   "org.eclipse.jgit" % "org.eclipse.jgit.ssh.apache" % "7.1.0.202411261347-r",
@@ -64,6 +66,9 @@ libraryDependencies ++= Seq(
   "org.junit.jupiter" % "junit-jupiter" % "5.10.2" % Test,
   "org.junit.jupiter" % "junit-jupiter-engine"  % "5.10.2" % Test,
   "com.github.sbt.junit" % "jupiter-interface"  % "0.13.3" % Test,
+  
+  // Java Decompiler
+  "com.jetbrains.intellij.java" % "java-decompiler-engine" % "243.25659.59",
 )
 
 Compile / unmanagedResources := {
@@ -94,3 +99,4 @@ assembly / mainClass := Some("io.github.jbellis.brokk.Brokk")
 testFrameworks += new TestFramework("com.github.sbt.junit.JupiterFramework")
 
 Compile / run / fork := true
+javaOptions ++= Seq("-ea")

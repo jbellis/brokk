@@ -1,6 +1,6 @@
 package io.github.jbellis.brokk;
 
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -18,20 +18,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class EditBlockTest {
     static class TestContextManager implements IContextManager {
         private final Path root;
-        private final Set<RepoFile> validFiles;
+        private final Set<ProjectFile> validFiles;
 
         public TestContextManager(Path root, Set<String> validFiles) {
             this.root = root;
-            this.validFiles = validFiles.stream().map(f -> new RepoFile(root, Path.of(f))).collect(Collectors.toSet());
+            this.validFiles = validFiles.stream().map(f -> new ProjectFile(root, Path.of(f))).collect(Collectors.toSet());
         }
 
         @Override
-        public RepoFile toFile(String relName) {
-            return new RepoFile(root, Path.of(relName));
+        public ProjectFile toFile(String relName) {
+            return new ProjectFile(root, Path.of(relName));
         }
 
         @Override
-        public Set<RepoFile> getEditableFiles() {
+        public Set<ProjectFile> getEditableFiles() {
             return validFiles;
         }
     }
@@ -478,7 +478,7 @@ class EditBlockTest {
                 oops! no trailing >>>>>> REPLACE
                 """;
 
-        var files = Set.of("foo.txt").stream().map(f -> new RepoFile(Path.of("/"), Path.of(f))).collect(Collectors.toSet());
+        var files = Set.of("foo.txt").stream().map(f -> new ProjectFile(Path.of("/"), Path.of(f))).collect(Collectors.toSet());
         var result = EditBlock.findOriginalUpdateBlocks(edit, files);
         assertNotEquals(null, result.parseError());
     }
@@ -598,7 +598,7 @@ class EditBlockTest {
         var result = EditBlock.applyEditBlocks(ctx, io, blocks);
 
         // Verify original content is preserved
-        var fileA = new RepoFile(tempDir, Path.of("fileA.txt"));
+        var fileA = new ProjectFile(tempDir, Path.of("fileA.txt"));
         assertEquals(originalContent, result.originalContents().get(fileA));
 
         // Verify file was actually changed
@@ -620,7 +620,7 @@ class EditBlockTest {
     // Helper methods
     // ----------------------------------------------------
     private EditBlock.SearchReplaceBlock[] parseBlocks(String fullResponse, Set<String> validFilenames) {
-        var files = validFilenames.stream().map(f -> new RepoFile(Path.of("/"), Path.of(f))).collect(Collectors.toSet());
+        var files = validFilenames.stream().map(f -> new ProjectFile(Path.of("/"), Path.of(f))).collect(Collectors.toSet());
         var blocks = EditBlock.findOriginalUpdateBlocks(fullResponse, files).blocks();
         return blocks.toArray(new EditBlock.SearchReplaceBlock[0]);
     }

@@ -21,6 +21,10 @@ public class SwingUtil {
      */
     public static <T> T runOnEDT(Callable<T> task, T defaultValue) {
         try {
+            if (SwingUtilities.isEventDispatchThread()) {
+                return task.call();
+            }
+
             final CompletableFuture<T> future = new CompletableFuture<>();
 
             SwingUtilities.invokeAndWait(() -> {
@@ -36,7 +40,7 @@ public class SwingUtil {
             Thread.currentThread().interrupt();
             logger.warn("Thread interrupted", e);
             return defaultValue;
-        } catch (InvocationTargetException | ExecutionException e) {
+        } catch (Exception e) {
             logger.warn("Execution error", e);
             return defaultValue;
         }
@@ -45,7 +49,11 @@ public class SwingUtil {
     /** Executes a Runnable on the EDT and handles exceptions properly.  Use this instead of Swingutilities.invokeAndWait. */
     public static boolean runOnEDT(Runnable task) {
         try {
-            SwingUtilities.invokeAndWait(task);
+            if (SwingUtilities.isEventDispatchThread()) {
+                task.run();
+            } else {
+                SwingUtilities.invokeAndWait(task);
+            }
             return true;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

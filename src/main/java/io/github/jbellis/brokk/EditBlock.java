@@ -1,7 +1,10 @@
 package io.github.jbellis.brokk;
 
 import com.google.common.annotations.VisibleForTesting;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
+import io.github.jbellis.brokk.git.IGitRepo;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.File;
 import java.io.IOException;
@@ -25,6 +28,8 @@ import static java.lang.Math.min;
  * Utility for extracting and applying before/after search-replace blocks in content.
  */
 public class EditBlock {
+    private static final Logger logger = LogManager.getLogger(EditBlock.class);
+
     /**
      * Helper that returns the first code block found between triple backticks.
      * Returns an empty string if none found.
@@ -49,7 +54,7 @@ public class EditBlock {
         IO_ERROR
     }
 
-    public record EditResult(Map<RepoFile, String> originalContents, List<FailedBlock> failedBlocks) { }
+    public record EditResult(Map<ProjectFile, String> originalContents, List<FailedBlock> failedBlocks) { }
 
     public record FailedBlock(SearchReplaceBlock block, EditBlockFailureReason reason) { }
 
@@ -62,7 +67,7 @@ public class EditBlock {
         List<SearchReplaceBlock> succeeded = new ArrayList<>();
 
         // Track original file contents before any changes
-        Map<RepoFile, String> changedFiles = new HashMap<>();
+        Map<ProjectFile, String> changedFiles = new HashMap<>();
 
         for (SearchReplaceBlock block : blocks) {
             // Shell commands remain unchanged
@@ -72,7 +77,7 @@ public class EditBlock {
             }
 
             // Attempt to apply to the specified file
-            RepoFile file = block.filename() == null ? null : contextManager.toFile(block.filename());
+            ProjectFile file = block.filename() == null ? null : contextManager.toFile(block.filename());
             boolean isCreateNew = block.beforeText().trim().isEmpty();
 
             String finalUpdated = null;
@@ -87,7 +92,7 @@ public class EditBlock {
 
             // Fallback: if finalUpdated is still null and 'before' is not empty, try each known file
             if (finalUpdated == null && !isCreateNew) {
-                for (RepoFile altFile : contextManager.getEditableFiles()) {
+                for (ProjectFile altFile : contextManager.getEditableFiles()) {
                     try {
                         String updatedContent = doReplace(altFile.read(), block.beforeText(), block.afterText());
                         if (updatedContent != null) {
@@ -197,6 +202,15 @@ public class EditBlock {
     }
 
     /**
+     * Uses a fake GitRepo, only for testing
+     */
+    static ParseResult findOriginalUpdateBlocks(String content,
+                                                Set<ProjectFile> filesInContext)
+    {
+        return findOriginalUpdateBlocks(content, filesInContext, Set::of);
+    }
+    
+    /**
      * Parses the given content and yields either (filename, before, after, null)
      * or (null, null, null, shellCommand).
      *
@@ -204,8 +218,9 @@ public class EditBlock {
      * parameter is only used to help find possible filename matches in poorly formed blocks.
      */
     public static ParseResult findOriginalUpdateBlocks(String content,
-                                                       String[] fence,
-                                                       Set<RepoFile> filesInContext) {
+                                                       Set<ProjectFile> filesInContext,
+                                                       IGitRepo repo) 
+    {
         List<SearchReplaceBlock> blocks = new ArrayList<>();
         String[] lines = content.split("\n", -1);
         int i = 0;
@@ -219,7 +234,7 @@ public class EditBlock {
             if (HEAD.matcher(trimmed).matches()) {
                 try {
                     // Attempt to find a filename in the preceding ~3 lines
-                    currentFilename = findFileNameNearby(lines, i, fence, filesInContext, currentFilename);
+                    currentFilename = findFileNameNearby(lines, i, DEFAULT_FENCE, filesInContext, currentFilename, repo);
 
                     // gather "before" lines until divider
                     i++;
@@ -245,8 +260,8 @@ public class EditBlock {
                         return new ParseResult(blocks, "Expected >>>>>>> REPLACE or =======");
                     }
 
-                    var beforeJoined = stripQuotedWrapping(String.join("\n", beforeLines), currentFilename, fence);
-                    var afterJoined = stripQuotedWrapping(String.join("\n", afterLines), currentFilename, fence);
+                    var beforeJoined = stripQuotedWrapping(String.join("\n", beforeLines), currentFilename, DEFAULT_FENCE);
+                    var afterJoined = stripQuotedWrapping(String.join("\n", afterLines), currentFilename, DEFAULT_FENCE);
 
                     // Append trailing newline if not present
                     if (!beforeJoined.isEmpty() && !beforeJoined.endsWith("\n")) {
@@ -261,7 +276,8 @@ public class EditBlock {
                 } catch (Exception e) {
                     // Provide partial context in the error
                     String partial = String.join("\n", Arrays.copyOfRange(lines, 0, min(lines.length, i + 1)));
-                    return new ParseResult(null, partial + "\n^^^ " + e.getMessage());
+                    logger.error("Error parsing edit block", e);
+                    return new ParseResult(blocks, partial + "\n^^^ " + e.getMessage());
                 }
             }
 
@@ -270,19 +286,12 @@ public class EditBlock {
 
         return new ParseResult(blocks, null);
     }
-
-    /**
-     * Overload that uses DEFAULT_FENCE and no fence parameter in the signature, for convenience.
-     */
-    public static ParseResult findOriginalUpdateBlocks(String content, Set<RepoFile> filesInContext) {
-        return findOriginalUpdateBlocks(content, DEFAULT_FENCE, filesInContext);
-    }
-
+    
     /**
      * Attempt to locate beforeText in content and replace it with afterText.
      * If beforeText is empty, just append afterText. If no match found, return null.
      */
-    private static String doReplace(RepoFile file,
+    private static String doReplace(ProjectFile file,
                                     String content,
                                     String beforeText,
                                     String afterText,
@@ -310,7 +319,7 @@ public class EditBlock {
     /**
      * Called by Coder
      */
-    public static String doReplace(RepoFile file, String beforeText, String afterText) throws IOException {
+    public static String doReplace(ProjectFile file, String beforeText, String afterText) throws IOException {
         var content = file.exists() ? file.read() : "";
         return doReplace(file, content, beforeText, afterText, DEFAULT_FENCE);
     }
@@ -668,8 +677,10 @@ public class EditBlock {
     static String findFileNameNearby(String[] lines,
                                      int headIndex,
                                      String[] fence,
-                                     Set<RepoFile> validFiles,
-                                     String currentPath) {
+                                     Set<ProjectFile> validFiles,
+                                     String currentPath, 
+                                     IGitRepo repo)
+    {
         // Search up to 3 lines above headIndex
         int start = Math.max(0, headIndex - 3);
         var candidates = new ArrayList<String>();
@@ -696,26 +707,39 @@ public class EditBlock {
             }
         }
 
-        // 2) Case-insensitive match by basename
-        for (var c : candidates) {
-            String cLower = Path.of(c).getFileName().toString().toLowerCase();
-            var matched = validFiles.stream()
-                    .filter(f -> f.getFileName().toLowerCase().equals(cLower))
-                    .toList();
-            if (!matched.isEmpty()) {
-                // we don't have a good way to tell which is better if there are multiple options that differ only by case
-                return matched.getFirst().toString();
-            }
+        // 2) Case-insensitive match by basename against validFiles
+        var matches = candidates.stream()
+                .map(c -> Path.of(c).getFileName().toString().toLowerCase())
+                .flatMap(cLower -> validFiles.stream()
+                        .filter(f -> f.getFileName().toLowerCase().equals(cLower))
+                        .findFirst()
+                        .stream())
+                .map(ProjectFile::toString)
+                .toList();
+        if (!matches.isEmpty()) {
+            return matches.getFirst();
         }
-
-        // 3) If the candidate has an extension and no better match found, just return that.
+        
+        // 3) substring match vs repo
+        matches = candidates.stream()
+                .flatMap(c -> repo.getTrackedFiles().stream()
+                        .filter(f -> f.toString().contains(c))
+                        .findFirst()
+                        .stream())
+                .map(ProjectFile::toString)
+                .toList();
+        if (!matches.isEmpty()) {
+            return matches.getFirst();
+        }
+        
+        // 4) If the candidate has an extension and no better match found, just return that.
         for (var c : candidates) {
             if (c.contains(".")) {
                 return c;
             }
         }
 
-        // 4) Fallback to the first candidate
+        // 5) Fallback to the first raw candidate
         return candidates.getFirst();
     }
 
@@ -852,7 +876,7 @@ public class EditBlock {
         Path testBlocksPath = Path.of("testblocks.txt");
         var content = new StringBuilder();
         Path cwd = Path.of("").toAbsolutePath();
-        Set<RepoFile> potentialFiles = new HashSet<>();
+        Set<ProjectFile> potentialFiles = new HashSet<>();
 
         // Collect lines while scanning for potential file paths
         try (var scanner = new Scanner(testBlocksPath)) {
@@ -862,7 +886,7 @@ public class EditBlock {
 
                 // Identify lines that look like file paths starting with src/
                 if (line.trim().startsWith("src/")) {
-                    potentialFiles.add(new RepoFile(cwd, line.trim()));
+                    potentialFiles.add(new ProjectFile(cwd, line.trim()));
                 }
             }
         } catch (IOException e) {
@@ -874,13 +898,13 @@ public class EditBlock {
         // Get the context manager from Environment if available, or create one with potential files
         IContextManager contextManager = new IContextManager() {
                 @Override
-                public Set<RepoFile> getEditableFiles() {
+                public Set<ProjectFile> getEditableFiles() {
                     return potentialFiles;
                 }
 
                 @Override
-                public RepoFile toFile(String path) {
-                    return new RepoFile(cwd, path);
+                public ProjectFile toFile(String path) {
+                    return new ProjectFile(cwd, path);
                 }
             };
 

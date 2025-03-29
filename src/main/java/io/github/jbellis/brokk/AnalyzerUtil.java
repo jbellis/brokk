@@ -70,24 +70,24 @@ public class AnalyzerUtil {
         return new AnalyzerWrapper.CodeWithSource(code.toString(), sources);
     }
 
-    public static List<String> combinedPageRankFor(IAnalyzer analyzer, Map<String, Double> weightedSeeds) {
+    public static List<CodeUnit> combinedPagerankFor(IAnalyzer analyzer, Map<String, Double> weightedSeeds) {
         // do forward and reverse pagerank passes
         var forwardResults = analyzer.getPagerank(weightedSeeds, 3 * Context.MAX_AUTO_CONTEXT_FILES, false);
         var reverseResults = analyzer.getPagerank(weightedSeeds, 3 * Context.MAX_AUTO_CONTEXT_FILES, true);
 
         // combine results by summing scores
-        var combinedScores = new HashMap<String, Double>();
-        forwardResults.forEach(pair -> combinedScores.put(pair._1, pair._2));
-        reverseResults.forEach(pair -> combinedScores.merge(pair._1, pair._2, Double::sum));
+        var combinedScores = new HashMap<CodeUnit, Double>();
+        forwardResults.forEach(pair -> combinedScores.put(pair._1(), pair._2()));
+        reverseResults.forEach(pair -> combinedScores.merge(pair._1(), pair._2(), Double::sum));
 
         // sort by combined score
         return combinedScores.entrySet().stream()
-                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                .sorted(Map.Entry.<CodeUnit, Double>comparingByValue().reversed())
                 .map(Map.Entry::getKey)
-                .filter(analyzer::isClassInProject)
+                // isClassInProject filtering is implicitly handled by getPagerank returning CodeUnits
                 .toList();
     }
-    
+
     private record StackEntry(String method, int depth) {}
 
     /**

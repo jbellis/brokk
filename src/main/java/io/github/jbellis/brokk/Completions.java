@@ -4,7 +4,7 @@ import io.github.jbellis.brokk.analyzer.BrokkFile;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.ExternalFile;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
@@ -81,9 +81,9 @@ public class Completions {
     /**
      * Expand paths that may contain wildcards (*, ?), returning all matches.
      */
-    public static List<? extends BrokkFile> expandPath(GitRepo repo, String pattern) {
+    public static List<? extends BrokkFile> expandPath(IProject project, String pattern) {
         // First check if this is a single file
-        var file = maybeExternalFile(repo.getRoot(), pattern);
+        var file = maybeExternalFile(project.getRoot(), pattern);
         if (file.exists()) {
             return List.of(file);
         }
@@ -99,7 +99,7 @@ public class Completions {
                 return stream
                         .filter(Files::isRegularFile)
                         .filter(matcher::matches)
-                        .map(p -> maybeExternalFile(repo.getRoot(), p.toString()))
+                        .map(p -> maybeExternalFile(project.getRoot(), p.toString()))
                         .toList();
             } catch (IOException e) {
                 // part of the path doesn't exist
@@ -109,7 +109,7 @@ public class Completions {
 
         // If not a glob and doesn't exist directly, look for matches in git tracked files
         var filename = Path.of(pattern).getFileName().toString();
-        var matches = repo.getTrackedFiles().stream()
+        var matches = project.getFiles().stream()
                 .filter(p -> p.getFileName().equals(filename))
                 .toList();
         if (matches.size() != 1) {
@@ -122,22 +122,22 @@ public class Completions {
     public static BrokkFile maybeExternalFile(Path root, String pathStr) {
         Path p = Path.of(pathStr);
         if (!p.isAbsolute()) {
-            return new RepoFile(root, p);
+            return new ProjectFile(root, p);
         }
         if (!p.startsWith(root)) {
             return new ExternalFile(p);
         }
         // we have an absolute path that's part of the project
-        return new RepoFile(root, root.relativize(p));
+        return new ProjectFile(root, root.relativize(p));
     }
 
     @NotNull
-    public static List<RepoFile> getFileCompletions(String input, Collection<RepoFile> repoFiles) {
+    public static List<ProjectFile> getFileCompletions(String input, Collection<ProjectFile> projectFiles) {
         String partialLower = input.toLowerCase();
-        Map<String, RepoFile> baseToFullPath = new HashMap<>();
-        var uniqueCompletions = new HashSet<RepoFile>();
+        Map<String, ProjectFile> baseToFullPath = new HashMap<>();
+        var uniqueCompletions = new HashSet<ProjectFile>();
 
-        for (RepoFile p : repoFiles) {
+        for (ProjectFile p : projectFiles) {
             baseToFullPath.put(p.getFileName(), p);
         }
 
@@ -157,7 +157,7 @@ public class Completions {
         });
 
         // Matching full paths (priority 3)
-        for (RepoFile file : repoFiles) {
+        for (ProjectFile file : projectFiles) {
             if (file.toString().toLowerCase().startsWith(partialLower)) {
                 uniqueCompletions.add(file);
             }

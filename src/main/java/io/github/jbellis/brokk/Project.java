@@ -3,6 +3,11 @@ package io.github.jbellis.brokk;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
+import io.github.jbellis.brokk.analyzer.Language;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
+import io.github.jbellis.brokk.git.GitRepo;
+import io.github.jbellis.brokk.git.IGitRepo;
+import io.github.jbellis.brokk.git.LocalFileRepo;
 import io.github.jbellis.brokk.util.AtomicWrites;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -16,9 +21,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.stream.Collectors;
 
-public class Project implements IProject {
+public class Project implements IProject, AutoCloseable {
     private final Path propertiesFile;
     private final Path workspacePropertiesFile;
     private final Path root;
@@ -26,7 +32,8 @@ public class Project implements IProject {
     private final Properties workspaceProps;
     private final Path styleGuidePath;
     private final AnalyzerWrapper analyzerWrapper;
-    private final GitRepo repo;
+    private final IGitRepo repo;
+    private final Set<ProjectFile> dependencyFiles;
 
     private static final int DEFAULT_AUTO_CONTEXT_FILE_COUNT = 10;
     private static final int DEFAULT_WINDOW_WIDTH = 800;
@@ -35,14 +42,20 @@ public class Project implements IProject {
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final Logger logger = LogManager.getLogger(Project.class);
 
-    public Project(Path root, AnalyzerWrapper.TaskRunner runner, AnalyzerListener analyzerListener) {
-        this.repo = new GitRepo(root);
+    // --- Static paths ---
+    private static final Path BROKK_CONFIG_DIR = Path.of(System.getProperty("user.home"), ".config", "brokk");
+    private static final Path PROJECTS_PROPERTIES_PATH = BROKK_CONFIG_DIR.resolve("projects.properties");
+    private static final Path LLM_KEYS_PATH = BROKK_CONFIG_DIR.resolve("keys.properties");
+
+    public Project(Path root, ContextManager.TaskRunner runner, AnalyzerListener analyzerListener) {
+        this.repo = GitRepo.hasGitRepo(root) ? new GitRepo(root) : new LocalFileRepo(root);
         this.root = root;
         this.propertiesFile = root.resolve(".brokk").resolve("project.properties");
         this.workspacePropertiesFile = root.resolve(".brokk").resolve("workspace.properties");
         this.styleGuidePath = root.resolve(".brokk").resolve("style.md");
         this.projectProps = new Properties();
         this.workspaceProps = new Properties();
+        this.dependencyFiles = loadDependencyFiles();
 
         // Load project properties
         if (Files.exists(propertiesFile)) {
@@ -86,12 +99,57 @@ public class Project implements IProject {
     }
 
     @Override
-    public GitRepo getRepo() {
+    public Set<ProjectFile> getFiles() {
+        var trackedFiles = repo.getTrackedFiles();
+        var allFiles = new java.util.HashSet<ProjectFile>(trackedFiles);
+        allFiles.addAll(dependencyFiles);
+        return allFiles;
+    }
+    
+    /**
+     * Loads all files from the .brokk/dependencies directory
+     * @return Set of RepoFile objects for all dependency files
+     */
+    private Set<ProjectFile> loadDependencyFiles() {
+        var dependenciesPath = root.resolve(".brokk").resolve("dependencies");
+        if (!Files.exists(dependenciesPath) || !Files.isDirectory(dependenciesPath)) {
+            return Set.of();
+        }
+        
+        try (var pathStream = Files.walk(dependenciesPath)) {
+            return pathStream
+                .filter(Files::isRegularFile)
+                .map(path -> {
+                    var relPath = root.relativize(path);
+                    return new ProjectFile(root, relPath);
+                })
+                .collect(Collectors.toSet());
+        } catch (IOException e) {
+            logger.error("Error loading dependency files", e);
+            return Set.of();
+        }
+    }
+
+    @Override
+    public IGitRepo getRepo() {
         return repo;
     }
 
+    @Override
     public String getBuildCommand() {
         return projectProps.getProperty("buildCommand");
+    }
+
+    public Language getAnalyzerLanguage() {
+        String lang = projectProps.getProperty("code_intelligence_language");
+        if (lang == null || lang.isBlank()) {
+            return Language.Java;
+        }
+        try {
+            return Language.valueOf(lang.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return Language.None;
+        }
     }
 
     public void setBuildCommand(String command) {
@@ -100,7 +158,7 @@ public class Project implements IProject {
     }
 
     /**
-     * Saves project-specific properties (buildCommand, cpg_refresh)
+     * Saves project-specific properties (buildCommand, code_intelligence_refresh)
      */
     public void saveProjectProperties() {
         saveProperties(propertiesFile, projectProps, "Brokk project configuration");
@@ -160,31 +218,35 @@ public class Project implements IProject {
         return root;
     }
 
-    public enum CpgRefresh {
-    AUTO,
-    MANUAL,
-    UNSET
-}
-
-/**
- * Check if .brokk entries exist in .gitignore
- * @return true if .gitignore contains entries for .brokk
- */
-public boolean isGitIgnoreSet() {
-    try {
-        var gitignorePath = root.resolve(".gitignore");
-        if (Files.exists(gitignorePath)) {
-            var content = Files.readString(gitignorePath);
-            return content.contains(".brokk/") || content.contains(".brokk/**");
-        }
-    } catch (IOException e) {
-        logger.error("Error checking .gitignore: {}", e.getMessage());
+    public boolean hasGit() {
+        return repo instanceof GitRepo;
     }
-    return false;
-}
+
+    public enum CpgRefresh {
+        AUTO,
+        MANUAL,
+        UNSET
+    }
+
+    /**
+     * Check if .brokk entries exist in .gitignore
+     * @return true if .gitignore contains entries for .brokk
+     */
+    public boolean isGitIgnoreSet() {
+        try {
+            var gitignorePath = root.resolve(".gitignore");
+            if (Files.exists(gitignorePath)) {
+                var content = Files.readString(gitignorePath);
+                return content.contains(".brokk/") || content.contains(".brokk/**");
+            }
+        } catch (IOException e) {
+            logger.error("Error checking .gitignore: {}", e.getMessage());
+        }
+        return false;
+    }
 
     public CpgRefresh getCpgRefresh() {
-        String value = projectProps.getProperty("cpg_refresh");
+        String value = projectProps.getProperty("code_intelligence_refresh");
         if (value == null) {
             return CpgRefresh.UNSET;
         }
@@ -197,7 +259,7 @@ public boolean isGitIgnoreSet() {
 
     public void setCpgRefresh(CpgRefresh value) {
         assert value != null;
-        projectProps.setProperty("cpg_refresh", value.name());
+        projectProps.setProperty("code_intelligence_refresh", value.name());
         saveProjectProperties();
     }
 
@@ -246,7 +308,7 @@ public boolean isGitIgnoreSet() {
                 byte[] serialized = java.util.Base64.getDecoder().decode(encoded);
                 return Context.deserialize(serialized, welcomeMessage).withContextManager(contextManager);
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             logger.error("Error loading context: {}", e.getMessage());
             clearSavedContext();
         }
@@ -330,7 +392,7 @@ public boolean isGitIgnoreSet() {
     }
 
     /**
-     * Returns the LLM API keys stored in ~/.brokk/config/keys.properties
+     * Returns the LLM API keys stored in ~/.config/brokk/keys.properties
      * @return Map of key names to values, or empty map if file doesn't exist
      */
     public Map<String, String> getLlmKeys() {
@@ -353,7 +415,7 @@ public boolean isGitIgnoreSet() {
     }
 
     public static Path getLlmKeysPath() {
-        return Path.of(System.getProperty("user.home"), ".config", "brokk", "keys.properties");
+        return LLM_KEYS_PATH;
     }
 
     /**
@@ -473,8 +535,7 @@ public boolean isGitIgnoreSet() {
     /**
      * Store the GitHub token in workspace properties.
      */
-    public void setGitHubToken(String token)
-    {
+    public void setGitHubToken(String token) {
         workspaceProps.setProperty("githubToken", token);
         saveWorkspaceProperties();
     }
@@ -482,8 +543,7 @@ public boolean isGitIgnoreSet() {
     /**
      * Retrieve the GitHub token from workspace properties (may be null).
      */
-    public String getGitHubToken()
-    {
+    public String getGitHubToken() {
         return workspaceProps.getProperty("githubToken");
     }
 
@@ -530,7 +590,7 @@ public boolean isGitIgnoreSet() {
             return -1;
         }
     }
-    
+
     /**
      * Save context/git split pane position
      */
@@ -601,8 +661,34 @@ public boolean isGitIgnoreSet() {
         return analyzerWrapper.getNonBlocking();
     }
 
-    private static final Path RECENT_PROJECTS_PATH = Path.of(System.getProperty("user.home"),
-                                                             ".config", "brokk", "projects.properties");
+    // --- Static methods for managing projects.properties ---
+
+    /**
+     * Reads the projects properties file (~/.config/brokk/projects.properties).
+     * Returns an empty Properties object if the file doesn't exist or can't be read.
+     */
+    private static Properties loadProjectsProperties() {
+        var props = new Properties();
+        if (Files.exists(PROJECTS_PROPERTIES_PATH)) {
+            try (var reader = Files.newBufferedReader(PROJECTS_PROPERTIES_PATH)) {
+                props.load(reader);
+            } catch (IOException e) {
+                logger.warn("Unable to read projects properties file: {}", e.getMessage());
+            }
+        }
+        return props;
+    }
+
+    /**
+     * Atomically saves the given Properties object to ~/.config/brokk/projects.properties.
+     */
+    private static void saveProjectsProperties(Properties props) {
+        try {
+            AtomicWrites.atomicSaveProperties(PROJECTS_PROPERTIES_PATH, props, "Brokk projects: recently opened and currently open");
+        } catch (IOException e) {
+            logger.error("Error saving projects properties: {}", e.getMessage());
+        }
+    }
 
     /**
      * Reads the recent projects list from ~/.config/brokk/projects.properties.
@@ -611,60 +697,147 @@ public boolean isGitIgnoreSet() {
      */
     public static Map<String, Long> loadRecentProjects() {
         var result = new HashMap<String, Long>();
-        if (!Files.exists(RECENT_PROJECTS_PATH)) {
-            return result;
-        }
-
-        var props = new Properties();
-        try (var reader = Files.newBufferedReader(RECENT_PROJECTS_PATH)) {
-            props.load(reader);
-        } catch (IOException e) {
-            logger.warn("Unable to read recent projects file: {}", e.getMessage());
-            return result;
-        }
+        var props = loadProjectsProperties();
 
         for (String key : props.stringPropertyNames()) {
-            try {
-                var value = Long.parseLong(props.getProperty(key));
-                result.put(key, value);
-            } catch (NumberFormatException nfe) {
-                logger.warn("Invalid timestamp for key {} in projects.properties", key);
+            // Only process keys that look like paths (simple heuristic) and ignore the open list
+            if (key.contains(java.io.File.separator) && !key.equals("openProjectsList")) {
+                try {
+                    var value = Long.parseLong(props.getProperty(key));
+                    result.put(key, value);
+                } catch (NumberFormatException nfe) {
+                    logger.warn("Invalid timestamp for key {} in projects.properties", key);
+                }
             }
         }
         return result;
     }
 
     /**
-     * Saves the given map of projectPath -> lastOpenedMillis to
-     * ~/.config/brokk/projects.properties, trimming to the 10 most recent.
+     * Saves the given map of recent projectPath -> lastOpenedMillis to
+     * ~/.config/brokk/projects.properties, trimming recent projects to the 10 most recent.
+     * Preserves the existing 'openProjectsList' property.
      */
     public static void saveRecentProjects(Map<String, Long> projects) {
-        // Sort entries by lastOpened descending
+        // Load existing properties to preserve the open projects list
+        var existingProps = loadProjectsProperties();
+        var openProjectsList = existingProps.getProperty("openProjectsList", ""); // Default to empty if not found
+
+        // Sort recent projects entries by lastOpened descending
         var sorted = projects.entrySet().stream()
                 .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
                 .limit(10)
                 .toList();
 
         var props = new Properties();
+        // Add sorted recent projects
         for (var e : sorted) {
             props.setProperty(e.getKey(), Long.toString(e.getValue()));
         }
+        // Add the (potentially preserved) open projects list
+        props.setProperty("openProjectsList", openProjectsList);
 
-        try {
-            AtomicWrites.atomicSaveProperties(RECENT_PROJECTS_PATH, props, "Recently opened Brokk projects");
-        } catch (IOException e) {
-            logger.error("Error saving recent projects: {}", e.getMessage());
-        }
+        saveProjectsProperties(props);
     }
 
     /**
      * Updates the projects.properties with a single entry for the given directory path,
-     * setting last opened to the current time.
+     * setting last opened to the current time, and adds it to the list of open projects.
      */
     public static void updateRecentProject(Path projectDir) {
         var abs = projectDir.toAbsolutePath().toString();
         var currentMap = loadRecentProjects();
         currentMap.put(abs, System.currentTimeMillis());
-        saveRecentProjects(currentMap);
+        saveRecentProjects(currentMap); // saveRecentProjects preserves the open list now
+
+        // Also add to open projects list within the same properties file
+        addToOpenProjects(projectDir);
+    }
+
+    /**
+     * Adds a project to the 'openProjectsList' property in projects.properties
+     */
+    private static void addToOpenProjects(Path projectDir) {
+        var abs = projectDir.toAbsolutePath().toString();
+        var props = loadProjectsProperties(); // Load current properties
+
+        var openListStr = props.getProperty("openProjectsList", "");
+        var openSet = new java.util.HashSet<>(List.of(openListStr.split(";")));
+        openSet.remove(""); // Remove empty string artifact if list was empty
+
+        if (openSet.add(abs)) { // Add returns true if the set was modified
+            props.setProperty("openProjectsList", String.join(";", openSet));
+            saveProjectsProperties(props); // Save updated properties
+        }
+    }
+
+    /**
+     * Removes a project from the 'openProjectsList' property in projects.properties
+     */
+    public static void removeFromOpenProjects(Path projectDir) {
+        var abs = projectDir.toAbsolutePath().toString();
+        var props = loadProjectsProperties(); // Load current properties
+
+        var openListStr = props.getProperty("openProjectsList", "");
+        var openSet = new java.util.HashSet<>(List.of(openListStr.split(";")));
+        openSet.remove(""); // Remove empty string artifact
+
+        if (openSet.remove(abs)) { // remove returns true if the set was modified
+            props.setProperty("openProjectsList", String.join(";", openSet));
+            saveProjectsProperties(props); // Save updated properties
+        }
+    }
+
+    /**
+     * Gets the list of currently open projects from the 'openProjectsList' property
+     * in projects.properties. Performs validation and cleanup of invalid entries.
+     * @return List of validated paths to currently open projects
+     */
+    public static List<Path> getOpenProjects() {
+        var result = new ArrayList<Path>();
+        var props = loadProjectsProperties();
+        var openListStr = props.getProperty("openProjectsList", "");
+
+        if (openListStr.isEmpty()) {
+            return result;
+        }
+
+        var pathsToRemove = new ArrayList<String>();
+        var openPaths = List.of(openListStr.split(";"));
+
+        for (String pathStr : openPaths) {
+            if (pathStr.isEmpty()) continue; // Skip empty strings from split
+
+            try {
+                var path = Path.of(pathStr);
+                // Only include paths that still exist and have git repos
+                if (Files.isDirectory(path)) {
+                    result.add(path);
+                } else {
+                    // Mark for removal if invalid
+                    logger.warn("Removing invalid or non-existent project from open list: {}", pathStr);
+                    pathsToRemove.add(pathStr);
+                }
+            } catch (Exception e) {
+                logger.warn("Invalid path string in openProjectsList: {}", pathStr, e);
+                pathsToRemove.add(pathStr);
+            }
+        }
+
+        // Clean up entries for non-existent/invalid projects if any were found
+        if (!pathsToRemove.isEmpty()) {
+            var openSet = new java.util.HashSet<>(openPaths);
+            openSet.removeAll(pathsToRemove);
+            openSet.remove(""); // Ensure empty string is not present
+            props.setProperty("openProjectsList", String.join(";", openSet));
+            saveProjectsProperties(props); // Save cleaned-up list
+        }
+
+        return result;
+    }
+
+    @Override
+    public void close() {
+        analyzerWrapper.close();
     }
 }

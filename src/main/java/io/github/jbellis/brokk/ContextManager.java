@@ -9,15 +9,17 @@ import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import io.github.jbellis.brokk.Context.ParsedOutput;
 import io.github.jbellis.brokk.ContextFragment.PathFragment;
 import io.github.jbellis.brokk.ContextFragment.VirtualFragment;
+import io.github.jbellis.brokk.ContextHistory.UndoResult;
 import io.github.jbellis.brokk.analyzer.BrokkFile;
 import io.github.jbellis.brokk.analyzer.CallSite;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.CodeUnitType;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
+import io.github.jbellis.brokk.git.GitRepo;
 import io.github.jbellis.brokk.gui.CallGraphDialog;
 import io.github.jbellis.brokk.gui.Chrome;
-import io.github.jbellis.brokk.gui.FileSelectionDialog;
 import io.github.jbellis.brokk.gui.LoggingExecutorService;
+import io.github.jbellis.brokk.gui.MultiFileSelectionDialog;
 import io.github.jbellis.brokk.gui.SwingUtil;
 import io.github.jbellis.brokk.gui.SymbolSelectionDialog;
 import io.github.jbellis.brokk.prompts.ArchitectPrompts;
@@ -30,11 +32,13 @@ import io.github.jbellis.brokk.util.StackTrace;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
-import scala.Option;
 
 import javax.swing.*;
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -58,8 +62,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-
-import io.github.jbellis.brokk.ContextHistory.UndoResult;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -73,8 +75,7 @@ import java.util.stream.Stream;
  *   - Directly call into Chrome’s UI methods from background tasks (via invokeLater),
  *   - Provide separate async methods for “Go”, “Ask”, “Search”, context additions, etc.
  */
-public class ContextManager implements IContextManager
-{
+public class ContextManager implements IContextManager, AutoCloseable {
     private final Logger logger = LogManager.getLogger(ContextManager.class);
 
     private Chrome io; // for UI feedback
@@ -224,9 +225,9 @@ public class ContextManager implements IContextManager
     }
 
     @Override
-    public RepoFile toFile(String relName)
+    public ProjectFile toFile(String relName)
     {
-        return new RepoFile(root, relName);
+        return new ProjectFile(root, relName);
     }
 
     /**
@@ -336,7 +337,9 @@ public class ContextManager implements IContextManager
 
                 // stream from coder
                 var response = coder.sendStreaming(getCurrentModel(coder.models), messages, true);
-                if (response.chatResponse() != null) {
+                if (response.cancelled()) {
+                    io.systemOutput("Cancelled!");
+                } else if (response.chatResponse() != null) {
                     addToHistory(List.of(messages.getLast(), response.chatResponse().aiMessage()), Map.of(), question);
                 }
             } catch (CancellationException cex) {
@@ -470,11 +473,11 @@ public class ContextManager implements IContextManager
     /**
      * Show the custom file selection dialog
      */
-    private List<BrokkFile> showFileSelectionDialog(String title, boolean allowExternalFiles)
+    private List<BrokkFile> showFileSelectionDialog(String title, boolean allowExternalFiles, Set<ProjectFile> completions)
     {
-        var dialogRef = new AtomicReference<FileSelectionDialog>();
+        var dialogRef = new AtomicReference<MultiFileSelectionDialog>();
         SwingUtil.runOnEDT(() -> {
-            var dialog = new FileSelectionDialog(io.getFrame(), project, title, allowExternalFiles);
+            var dialog = new MultiFileSelectionDialog(io.getFrame(), project, title, allowExternalFiles, completions);
             dialog.setSize((int) (io.getFrame().getWidth() * 0.9), 400);
             dialog.setLocationRelativeTo(io.getFrame());
             dialog.setVisible(true);
@@ -494,9 +497,9 @@ public class ContextManager implements IContextManager
     /**
      * Cast BrokkFile to RepoFile. Will throw if ExternalFiles are present.
      */
-    private List<RepoFile> toRepoFiles(List<BrokkFile> files) {
+    private List<ProjectFile> toRepoFiles(List<BrokkFile> files) {
         return files.stream()
-                .map(f -> (RepoFile) f)
+                .map(f -> (ProjectFile) f)
                 .collect(Collectors.toList());
     }
 
@@ -599,39 +602,35 @@ public class ContextManager implements IContextManager
         });
     }
 
-    private void doEditAction(List<ContextFragment> selectedFragments)
-    {
+    private void doEditAction(List<ContextFragment> selectedFragments) {
         if (selectedFragments.isEmpty()) {
-            // Show a file selection dialog to add new files - editable files must be in the repo
-            var files = toRepoFiles(showFileSelectionDialog("Add Context", false));
+            var files = toRepoFiles(showFileSelectionDialog("Add Context", false, project.getRepo().getTrackedFiles()));
             if (!files.isEmpty()) {
                 editFiles(files);
             } else {
                 io.systemOutput("No files selected.");
             }
         } else {
-            var files = new HashSet<RepoFile>();
+            var files = new HashSet<ProjectFile>();
             for (var fragment : selectedFragments) {
-                files.addAll(getFilesFromFragment(fragment));
+                files.addAll(fragment.files(project));
             }
             editFiles(files);
         }
     }
 
-    private void doReadAction(List<ContextFragment> selectedFragments)
-    {
+    private void doReadAction(List<ContextFragment> selectedFragments) {
         if (selectedFragments.isEmpty()) {
-            // Show a file selection dialog for read-only - can include external files
-            var files = showFileSelectionDialog("Read Context", true);
+            var files = showFileSelectionDialog("Read Context", true, project.getFiles());
             if (!files.isEmpty()) {
                 addReadOnlyFiles(files);
             } else {
                 io.systemOutput("No files selected.");
             }
         } else {
-            var files = new HashSet<RepoFile>();
+            var files = new HashSet<ProjectFile>();
             for (var fragment : selectedFragments) {
-                files.addAll(getFilesFromFragment(fragment));
+                files.addAll(fragment.files(project));
             }
             addReadOnlyFiles(files);
         }
@@ -718,8 +717,7 @@ public class ContextManager implements IContextManager
 
         // Try to parse as stacktrace
         var stacktrace = StackTrace.parse(content);
-        if (stacktrace != null) {
-            addStacktraceFragment(content);
+        if (stacktrace != null && addStacktraceFragment(stacktrace)) {
             return;
         }
 
@@ -728,9 +726,6 @@ public class ContextManager implements IContextManager
 
         // Inform the user about what happened
         String message = wasUrl ? "URL content fetched and added" : "Clipboard content added as text";
-        if (!content.equals(content)) {
-            message += " (converted from HTML)";
-        }
         io.systemOutput(message);
     }
 
@@ -739,7 +734,7 @@ public class ContextManager implements IContextManager
     }
 
     private String fetchUrlContent(String urlString) throws IOException {
-        var url = new java.net.URL(urlString);
+        var url = URI.create(urlString).toURL();
         var connection = url.openConnection();
         // Set a reasonable timeout
         connection.setConnectTimeout(5000);
@@ -802,8 +797,10 @@ public class ContextManager implements IContextManager
 
         if (selectedFragments.isEmpty()) {
             // Show file selection dialog when nothing is selected
-            // Only repo files can be summarized since external files aren't in the analyzer
-            var files = toRepoFiles(showFileSelectionDialog("Summarize Files", false));
+            var completions = project.getFiles().stream()
+                    .filter(f -> !getAnalyzer().getClassesInFile(f).isEmpty())
+                    .collect(Collectors.toSet());
+            var files = toRepoFiles(showFileSelectionDialog("Summarize Files", false, completions));
             if (files.isEmpty()) {
                 io.systemOutput("No files selected for summarization");
                 return;
@@ -840,7 +837,7 @@ public class ContextManager implements IContextManager
 
     /** Add the given files to editable. */
     @Override
-    public void editFiles(Collection<RepoFile> files)
+    public void editFiles(Collection<ProjectFile> files)
     {
         var fragments = files.stream().map(ContextFragment.RepoPathFragment::new).toList();
         pushContext(ctx -> ctx.removeReadonlyFiles(fragments).addEditableFiles(fragments));
@@ -1065,12 +1062,16 @@ public class ContextManager implements IContextManager
 
         // Extract the class from the method name for sources
         Set<CodeUnit> sources = new HashSet<>();
-        sources.add(CodeUnit.cls(ContextFragment.toClassname(methodName)));
+        String className = ContextFragment.toClassname(methodName);
+        var sourceFile = getAnalyzer().getFileFor(className);
+        if (sourceFile.isDefined()) {
+            sources.add(CodeUnit.cls(sourceFile.get(), className));
+        }
 
         // The output is similar to UsageFragment, so we'll use that
         var fragment = new ContextFragment.UsageFragment("Callers (depth " + depth + ")", methodName, sources, formattedCallGraph);
         pushContext(ctx -> ctx.addVirtualFragment(fragment));
-        
+
         int totalCallSites = callgraph.values().stream().mapToInt(List::size).sum();
         io.systemOutput("Added call graph with " + totalCallSites + " call sites for callers of " + methodName + " with depth " + depth);
     }
@@ -1091,24 +1092,25 @@ public class ContextManager implements IContextManager
 
         // Extract the class from the method name for sources
         Set<CodeUnit> sources = new HashSet<>();
-        sources.add(CodeUnit.cls(ContextFragment.toClassname(methodName)));
+        String className = ContextFragment.toClassname(methodName);
+        var sourceFile = getAnalyzer().getFileFor(className);
+        if (sourceFile.isDefined()) {
+            sources.add(CodeUnit.cls(sourceFile.get(), className));
+        }
 
         // The output is similar to UsageFragment, so we'll use that
         var fragment = new ContextFragment.UsageFragment("Callees (depth " + depth + ")", methodName, sources, formattedCallGraph);
         pushContext(ctx -> ctx.addVirtualFragment(fragment));
-        
+
         int totalCallSites = callgraph.values().stream().mapToInt(List::size).sum();
         io.systemOutput("Added call graph with " + totalCallSites + " call sites for methods called by " + methodName + " with depth " + depth);
     }
 
     /** parse stacktrace */
-    public void addStacktraceFragment(String stacktraceText)
+    public boolean addStacktraceFragment(StackTrace stacktrace)
     {
-        var stacktrace = StackTrace.parse(stacktraceText);
-        if (stacktrace == null) {
-            io.toolErrorRaw("unable to parse stacktrace");
-            return;
-        }
+        assert stacktrace != null;
+
         var exception = stacktrace.getExceptionType();
         var content = new StringBuilder();
         var sources = new HashSet<CodeUnit>();
@@ -1117,19 +1119,24 @@ public class ContextManager implements IContextManager
             var methodFullName = element.getClassName() + "." + element.getMethodName();
             var methodSource = getAnalyzer().getMethodSource(methodFullName);
             if (methodSource.isDefined()) {
-                sources.add(CodeUnit.cls(ContextFragment.toClassname(methodFullName)));
+                String className = ContextFragment.toClassname(methodFullName);
+                var sourceFile = getAnalyzer().getFileFor(className);
+                if (sourceFile.isDefined()) {
+                    sources.add(CodeUnit.cls(sourceFile.get(), className));
+                }
                 content.append(methodFullName).append(":\n");
                 content.append(methodSource.get()).append("\n\n");
             }
         }
         if (content.isEmpty()) {
-            io.toolErrorRaw("no relevant methods found in stacktrace");
-            return;
+            io.toolErrorRaw("No relevant methods found in stacktrace -- adding as text");
+            return false;
         }
         pushContext(ctx -> {
-            var fragment = new ContextFragment.StacktraceFragment(sources, stacktraceText, exception, content.toString());
+            var fragment = new ContextFragment.StacktraceFragment(sources, stacktrace.getOriginalText(), exception, content.toString());
             return ctx.addVirtualFragment(fragment);
         });
+        return true;
     }
 
     /** Summarize classes => adds skeleton fragments */
@@ -1203,7 +1210,18 @@ public class ContextManager implements IContextManager
      * Build a welcome message with environment information
      */
     private String buildWelcomeMessage(Models models) {
-        var welcomeMarkdown = Brokk.readWelcomeMarkdown();
+        String welcomeMarkdown;
+        var mdPath = "/WELCOME.md";
+        try (var welcomeStream = Brokk.class.getResourceAsStream(mdPath)) {
+            if (welcomeStream != null) {
+                welcomeMarkdown = new String(welcomeStream.readAllBytes(), StandardCharsets.UTF_8);
+            } else {
+                logger.warn("WELCOME.md resource not found.");
+                welcomeMarkdown = "Welcome to Brokk!";
+            }
+        } catch (IOException e1) {
+            throw new UncheckedIOException(e1);
+        }
 
         Properties props = new Properties();
         try {
@@ -1213,7 +1231,6 @@ public class ContextManager implements IContextManager
         }
 
         var version = props.getProperty("version");
-        var trackedFiles = project.getRepo().getTrackedFiles();
 
         return """
             %s
@@ -1223,25 +1240,27 @@ public class ContextManager implements IContextManager
             - Editor model: %s
             - Apply model: %s
             - Quick model: %s
-            - Git repo at %s with %d files
-            """.formatted(
-                welcomeMarkdown,
-                version,
-                models.editModelName(),
-                models.applyModelName(),
-                models.quickModelName(),
-                project.getRoot(),
-                trackedFiles.size()
-            );
+            - Project at %s with %d native files and %d total files including dependencies
+            - Analyzer language: %s
+            """.formatted(welcomeMarkdown,
+                          version,
+                          models.editModelName(),
+                          models.applyModelName(),
+                          models.quickModelName(),
+                          project.getRoot(),
+                          project.getRepo().getTrackedFiles().size(),
+                          project.getFiles().size(),
+                          project.getAnalyzerLanguage());
     }
 
     /**
      * Shutdown all executors
      */
-    public void shutdown() {
+    public void close() {
         userActionExecutor.shutdown();
         contextActionExecutor.shutdown();
         backgroundTasks.shutdown();
+        project.close();
     }
 
     public List<ChatMessage> getReadOnlyMessages()
@@ -1306,7 +1325,7 @@ public class ContextManager implements IContextManager
                 .collect(Collectors.joining(", "));
     }
 
-    public Set<RepoFile> getEditableFiles()
+    public Set<ProjectFile> getEditableFiles()
     {
         return selectedContext().editableFiles()
                 .map(ContextFragment.RepoPathFragment::file)
@@ -1331,24 +1350,6 @@ public class ContextManager implements IContextManager
      */
     public void setSelectedContext(Context context) {
         contextHistory.setSelectedContext(context);
-    }
-
-    /**
-     * Return the set of files for the given fragment
-     */
-    public Set<RepoFile> getFilesFromFragment(ContextFragment fragment)
-    {
-        // RepoPathFragment is the trivial case 
-        if (fragment instanceof ContextFragment.RepoPathFragment(RepoFile file)) {
-            return Set.of(file);
-        }
-
-        var classnames = fragment.sources(project);
-        return classnames.stream()
-                .map(cu -> getAnalyzer().pathOf(cu))
-                .filter(Option::isDefined)
-                .map(Option::get)
-                .collect(Collectors.toSet());
     }
 
     private String formattedOrNull(ContextFragment fragment)
@@ -1450,11 +1451,11 @@ public class ContextManager implements IContextManager
             // do background inference
             var tracked = project.getRepo().getTrackedFiles();
             var filenames = tracked.stream()
-                    .map(RepoFile::toString)
+                    .map(ProjectFile::toString)
                     .filter(s -> !s.contains(File.separator))
                     .collect(Collectors.toList());
             if (filenames.isEmpty()) {
-                filenames = tracked.stream().map(RepoFile::toString).toList();
+                filenames = tracked.stream().map(ProjectFile::toString).toList();
             }
 
             var messages = List.of(
@@ -1469,7 +1470,7 @@ public class ContextManager implements IContextManager
             submitBackgroundTask("Inferring build command", () -> {
                 String response;
                 try {
-                    response = coder.sendMessage(coder.models.searchModel(), messages).aiMessage().text().trim();
+                    response = coder.sendMessage(coder.models.searchModel(), messages).chatResponse().aiMessage().text().trim();
                 } catch (Throwable th) {
                     return BuildCommand.failure(th.getMessage());
                 }
@@ -1482,6 +1483,19 @@ public class ContextManager implements IContextManager
                 return BuildCommand.success(inferred);
             });
         }
+    }
+
+    @FunctionalInterface
+    public interface TaskRunner {
+        /**
+         * Submits a background task with the given description.
+         *
+         * @param taskDescription a description of the task
+         * @param task the task to execute
+         * @param <T> the result type of the task
+         * @return a {@link Future} representing pending completion of the task
+         */
+        <T> Future<T> submit(String taskDescription, Callable<T> task);
     }
 
     private record BuildCommand(String command, String message) {
@@ -1505,19 +1519,20 @@ public class ContextManager implements IContextManager
             try {
                 io.systemOutput("Generating project style guide...");
                 var analyzer = project.getAnalyzer();
-                var topClasses = AnalyzerUtil.combinedPageRankFor(analyzer, Map.of());
+                var topClassUnits = AnalyzerUtil.combinedPagerankFor(analyzer, Map.of());
+                var topClasses = topClassUnits.stream().map(CodeUnit::fqName).toList();
 
                 var codeForLLM = new StringBuilder();
                 var tokens = 0;
                 for (var fqcn : topClasses) {
-                    var pathOption = analyzer.pathOf(CodeUnit.cls(fqcn));
-                    if (pathOption.isEmpty()) continue;
-                    var path = pathOption.get();
+                    var fileOption = analyzer.getFileFor(fqcn);
+                    if (fileOption.isEmpty()) continue;
+                    var file = fileOption.get();
                     String chunk;
                     try {
-                        chunk = "<file path=%s>\n%s\n</file>\n".formatted(pathOption, path.read());
+                        chunk = "<file path=%s>\n%s\n</file>\n".formatted(file, file.read());
                     } catch (IOException e) {
-                        logger.error("Failed to read {}: {}", path, e.getMessage());
+                        logger.error("Failed to read {}: {}", file, e.getMessage());
                         continue;
                     }
                     var chunkTokens = Models.getApproximateTokens(chunk);
@@ -1562,13 +1577,13 @@ public class ContextManager implements IContextManager
      * Add to the user/AI message history. Called by both Ask and Code.
      */
     @Override
-    public void addToHistory(List<ChatMessage> messages, Map<RepoFile, String> originalContents, String action)
+    public void addToHistory(List<ChatMessage> messages, Map<ProjectFile, String> originalContents, String action)
     {
-        var llmOutputText = io.getLlmOutputText();
-        if (llmOutputText == null) {
-            io.systemOutput("Interrupted!");
-            return;
-        }
+        addToHistory(messages, originalContents, action, io.getLlmOutputText());
+    }
+
+    public void addToHistory(List<ChatMessage> messages, Map<ProjectFile, String> originalContents, String action, String llmOutputText)
+    {
         var parsed = new ParsedOutput(llmOutputText, new ContextFragment.StringFragment(llmOutputText, "ai Response"));
         logger.debug("Adding to history with {} changed files", originalContents.size());
         pushContext(ctx -> ctx.addHistory(messages, originalContents, parsed, submitSummarizeTaskForConversation(action)));
@@ -1580,7 +1595,7 @@ public class ContextManager implements IContextManager
 
     @Override
     public void addToGit(String filename) throws IOException {
-        project.getRepo().add(List.of(toFile(filename)));
+        ((GitRepo) project.getRepo()).add(List.of(toFile(filename)));
     }
 
     // Convert a throwable to a string with full stack trace

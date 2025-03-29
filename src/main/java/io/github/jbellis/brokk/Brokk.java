@@ -6,21 +6,20 @@ import org.apache.logging.log4j.Logger;
 
 import javax.swing.*;
 import java.awt.*;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
+import java.awt.event.WindowEvent;
 import java.nio.file.Path;
-import java.util.Comparator;
-import java.util.Map;
-import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
 
 public class Brokk {
     private static final Logger logger = LogManager.getLogger(Brokk.class);
+    
+    private static final ConcurrentHashMap<Path, Chrome> openProjectWindows = new ConcurrentHashMap<>();
+    private static final Set<Path> reOpeningProjects = ConcurrentHashMap.newKeySet();
+    private static final Path EMPTY_PROJECT = Path.of(":EMPTY:");
 
     public static final String ICON_RESOURCE = "/brokk-icon.png";
-    private static Chrome io;
-    private static ContextManager contextManager;
-    private static Coder coder;
 
     /**
      * Main entry point: Start up Brokk with no project loaded,
@@ -28,7 +27,7 @@ public class Brokk {
      */
     public static void main(String[] args) {
         logger.debug("Brokk starting");
-        
+
         // Set macOS to use system menu bar
         System.setProperty("apple.laf.useScreenMenuBar", "true");
 
@@ -54,31 +53,35 @@ public class Brokk {
         }
 
         SwingUtilities.invokeLater(() -> {
-            // If a command line argument is provided, use it as project path
-            if (args.length > 0) {
-                var projectPath = Path.of(args[0]);
-                if (GitRepo.hasGitRepo(projectPath)) {
-                    openProject(projectPath);
-                } else {
-                    System.err.println("No git project found at " + projectPath);
-                    System.exit(1);
+            // Check for --no-project flag
+            boolean noProjectFlag = false;
+            String projectPathArg = null;
+            
+            for (String arg : args) {
+                if (arg.equals("--no-project")) {
+                    noProjectFlag = true;
+                } else if (!arg.startsWith("--")) {
+                    projectPathArg = arg;
                 }
+            }
+            
+            // If a project path is provided, use it
+            if (projectPathArg != null) {
+                var projectPath = Path.of(projectPathArg);
+                openProject(projectPath);
             } else {
-                // No argument provided - attempt to load the most recent project if any
-                var recents = Project.loadRecentProjects();
-                if (recents.isEmpty()) {
-                    // Create an empty UI with no project
-                    io = new Chrome(null);
+                // No project specified - attempt to load open projects if any
+                var openProjects = Project.getOpenProjects();
+
+                if (noProjectFlag || openProjects.isEmpty()) {
+                    var io = new Chrome(null);
                     io.onComplete();
+                    openProjectWindows.put(EMPTY_PROJECT, io);
                 } else {
-                    // find the project with the largest lastOpened time
-                    var mostRecent = recents.entrySet().stream()
-                            .max(Comparator.comparingLong(Map.Entry::getValue))
-                            .get()
-                            .getKey();
-                    var path = Path.of(mostRecent);
-                    if (GitRepo.hasGitRepo(path)) {
-                        openProject(path);
+                    // Open all previously open projects
+                    logger.info("Opening {} previously open projects", openProjects.size());
+                    for (var projectPath : openProjects) {
+                        openProject(projectPath);
                     }
                 }
             }
@@ -86,32 +89,29 @@ public class Brokk {
     }
 
     /**
-     * Opens the given project folder in Brokk, discarding any previously loaded project.
+     * Opens the given project folder in Brokk, or brings existing window to front.
      * The folder must contain a .git subdirectory or else we will show an error.
      */
-    public static void openProject(Path projectPath) {
-        if (!GitRepo.hasGitRepo(projectPath)) {
-            if (io != null) {
-                io.toolErrorRaw("Not a valid git project: " + projectPath);
-            }
+    public static void openProject(Path path)
+    {
+        final Path projectPath = path.toAbsolutePath().normalize();
+
+        var existingWindow = openProjectWindows.get(projectPath);
+        if (existingWindow != null) {
+            logger.info("Project already open: {}. Bringing window to front.", projectPath);
+            SwingUtilities.invokeLater(() -> {
+                var frame = existingWindow.getFrame();
+                frame.setState(Frame.NORMAL);
+                frame.toFront();
+                frame.requestFocus();
+                existingWindow.focusInput();
+            });
             return;
         }
 
-        // Save to recent projects
         Project.updateRecentProject(projectPath);
 
-        // Dispose of the old Chrome if it exists
-        if (io != null) {
-            io.close();
-        }
-
-        // If there's an existing contextManager, shut it down
-        if (contextManager != null) {
-            contextManager.shutdown();
-        }
-
-        // Create new Project, ContextManager, Coder
-        contextManager = new ContextManager(projectPath);
+        var contextManager = new ContextManager(projectPath);
         Models models;
         String modelsError = null;
         try {
@@ -120,14 +120,10 @@ public class Brokk {
             modelsError = th.getMessage();
             models = Models.disabled();
         }
-        
-        // Create a new Chrome instance with the fresh ContextManager
-        io = new Chrome(contextManager);
 
-        // Create the Coder with the new IO
-        coder = new Coder(models, io, projectPath, contextManager);
-        
-        // Resolve circular references
+        var io = new Chrome(contextManager);
+        var coder = new Coder(models, io, projectPath, contextManager);
+
         contextManager.resolveCircularReferences(io, coder);
         io.onComplete();
         io.systemOutput("Opened project at " + projectPath);
@@ -136,19 +132,55 @@ public class Brokk {
             io.toolError("\nError loading models: " + modelsError);
             io.toolError("AI will not be available this session");
         }
+        io.focusInput();
+
+        openProjectWindows.put(projectPath, io);
+
+        // Window listener that removes from maps; only exit if not in re-opening and zero windows remain
+        io.getFrame().addWindowListener(new java.awt.event.WindowAdapter()
+        {
+            @Override
+            public void windowClosed(java.awt.event.WindowEvent e)
+            {
+                openProjectWindows.remove(projectPath).close();
+
+                // Only exit if we now have no windows open and we are NOT re-opening a project
+                if (openProjectWindows.isEmpty() && reOpeningProjects.isEmpty()) {
+                    System.exit(0);
+                }
+
+                Project.removeFromOpenProjects(projectPath);
+                logger.debug("Removed project from open windows map: {}", projectPath);
+
+                if (reOpeningProjects.contains(projectPath)) {
+                    reOpeningProjects.remove(projectPath);
+                    openProject(projectPath);
+                }
+            }
+        });
+
+        // remove placeholder frame if present
+        if (openProjectWindows.get(EMPTY_PROJECT) != null) {
+            openProjectWindows.remove(EMPTY_PROJECT).close();
+        }
     }
 
     /**
-     * Read the welcome message from the resource file
+     * Closes the project if it's already open, then opens it again fresh.
+     * Useful for reloading after external changes or config updates.
      */
-    public static String readWelcomeMarkdown() {
-        try (var welcomeStream = Brokk.class.getResourceAsStream("/WELCOME.md")) {
-            if (welcomeStream != null) {
-                return new String(welcomeStream.readAllBytes(), StandardCharsets.UTF_8);
-            }
-            return "Welcome to Brokk!";
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+    public static void reOpenProject(Path path)
+    {
+        assert SwingUtilities.isEventDispatchThread();
+
+        final Path projectPath = path.toAbsolutePath().normalize();
+        var existingWindow = openProjectWindows.get(projectPath);
+        if (existingWindow != null) {
+            // Mark as re-opening, the windowClosed listener will do the rest
+            reOpeningProjects.add(projectPath);
+            // Programatically close the window
+            var frame = openProjectWindows.get(projectPath).getFrame();
+            frame.dispatchEvent(new WindowEvent(frame, WindowEvent.WINDOW_CLOSING));
         }
     }
 }

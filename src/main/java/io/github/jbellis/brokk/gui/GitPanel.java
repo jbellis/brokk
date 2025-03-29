@@ -2,8 +2,8 @@ package io.github.jbellis.brokk.gui;
 
 import io.github.jbellis.brokk.ContextFragment;
 import io.github.jbellis.brokk.ContextManager;
-import io.github.jbellis.brokk.GitRepo;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.git.GitRepo;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -42,6 +42,7 @@ public class GitPanel extends JPanel {
     // History tabs
     private JTabbedPane tabbedPane;
     private final Map<String, JTable> fileHistoryTables = new HashMap<>();
+    private Map<String, String> fileStatusMap = new HashMap<>();
     
     
 
@@ -118,6 +119,32 @@ public class GitPanel extends JPanel {
             @Override public boolean isCellEditable(int row, int col) { return false; }
         };
         uncommittedFilesTable = new JTable(model);
+        uncommittedFilesTable.setDefaultRenderer(Object.class, new javax.swing.table.DefaultTableCellRenderer() {
+            @Override
+            public java.awt.Component getTableCellRendererComponent(javax.swing.JTable table, Object value,
+                                                                   boolean isSelected, boolean hasFocus,
+                                                                   int row, int column) {
+                var cell = (javax.swing.table.DefaultTableCellRenderer) super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+                String filename = (String) table.getModel().getValueAt(row, 0);
+                String path = (String) table.getModel().getValueAt(row, 1);
+                String fullPath = path.isEmpty() ? filename : path + "/" + filename;
+                String status = fileStatusMap.get(fullPath);
+                if (!isSelected) {
+                    if ("new".equals(status)) {
+                        cell.setForeground(java.awt.Color.GREEN);
+                    } else if ("deleted".equals(status)) {
+                        cell.setForeground(java.awt.Color.RED);
+                    } else if ("modified".equals(status)) {
+                        cell.setForeground(java.awt.Color.BLUE);
+                    } else {
+                        cell.setForeground(java.awt.Color.BLACK);
+                    }
+                } else {
+                    cell.setForeground(table.getSelectionForeground());
+                }
+                return cell;
+            }
+        });
         uncommittedFilesTable.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         uncommittedFilesTable.setRowHeight(18);
         uncommittedFilesTable.getColumnModel().getColumn(0).setPreferredWidth(150);
@@ -146,12 +173,11 @@ public class GitPanel extends JPanel {
         var uncommittedContextMenu = new JPopupMenu();
         uncommittedFilesTable.setComponentPopupMenu(uncommittedContextMenu);
 
-        // "Show Diff" menu item
-        var viewDiffItem = new JMenuItem("Show Diff");
+        var captureDiffItem = new JMenuItem("Capture Diff");
+        uncommittedContextMenu.add(captureDiffItem);
+        var viewDiffItem = new JMenuItem("View Diff");
         uncommittedContextMenu.add(viewDiffItem);
-        
-        // "Edit File" menu item
-        var editFileItem = new JMenuItem("Edit File");
+        var editFileItem = new JMenuItem("Edit File(s)");
         uncommittedContextMenu.add(editFileItem);
 
         // When the menu appears, select the row under the cursor so the right-click target is highlighted
@@ -168,8 +194,8 @@ public class GitPanel extends JPanel {
                     {
                         uncommittedFilesTable.setRowSelectionInterval(row, row);
                     }
-                    // Update edit menu item state when popup becomes visible
-                    updateEditFileItemState(editFileItem);
+                    // Update menu item states when popup becomes visible
+                    updateUncommittedContextMenuState(captureDiffItem, viewDiffItem, editFileItem);
                 });
             }
             @Override public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) {}
@@ -183,7 +209,12 @@ public class GitPanel extends JPanel {
                 viewDiffForUncommittedRow(row);
             }
         });
-        
+
+        // Hook up "Capture Diff" action
+        captureDiffItem.addActionListener(e -> {
+            captureUncommittedDiff();
+        });
+
         // Hook up "Edit File" action
         editFileItem.addActionListener(e -> {
             int row = uncommittedFilesTable.getSelectedRow();
@@ -195,10 +226,10 @@ public class GitPanel extends JPanel {
             }
         });
         
-        // Update edit menu item state based on selection
+        // Update context menu item states based on selection
         uncommittedFilesTable.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
-                updateEditFileItemState(editFileItem);
+                updateUncommittedContextMenuState(captureDiffItem, viewDiffItem, editFileItem);
             }
         });
 
@@ -226,7 +257,7 @@ public class GitPanel extends JPanel {
         suggestMessageButton.setEnabled(false);
         suggestMessageButton.addActionListener(e -> {
             chrome.disableUserActionButtons();
-            List<RepoFile> selectedFiles = getSelectedFilesFromTable();
+            List<ProjectFile> selectedFiles = getSelectedFilesFromTable();
             contextManager.submitBackgroundTask("Suggesting commit message", () -> {
                 try {
                     var diff = selectedFiles.isEmpty()
@@ -269,7 +300,7 @@ public class GitPanel extends JPanel {
                     .filter(line -> !line.trim().startsWith("#"))
                     .collect(Collectors.joining("\n"))
                     .trim();
-            List<RepoFile> selectedFiles = getSelectedFilesFromTable();
+            List<ProjectFile> selectedFiles = getSelectedFilesFromTable();
 
             contextManager.submitUserTask("Stashing changes", () -> {
                 try {
@@ -312,7 +343,7 @@ public class GitPanel extends JPanel {
         commitButton.setEnabled(false);
         commitButton.addActionListener(e -> {
             chrome.disableUserActionButtons();
-            List<RepoFile> selectedFiles = getSelectedFilesFromTable();
+            List<ProjectFile> selectedFiles = getSelectedFilesFromTable();
             String msg = commitMessageArea.getText().trim();
             if (msg.isEmpty()) {
                 chrome.enableUserActionButtons();
@@ -321,10 +352,10 @@ public class GitPanel extends JPanel {
             contextManager.submitUserTask("Committing files", () -> {
                 try {
                     if (selectedFiles.isEmpty()) {
-                        var allDirtyFiles = getRepo().getUncommittedFiles();
-                        contextManager.getProject().getRepo().commitFiles(allDirtyFiles, msg);
+                        var allDirtyFiles = getRepo().getModifiedFiles();
+                        getRepo().commitFiles(allDirtyFiles, msg);
                     } else {
-                        contextManager.getProject().getRepo().commitFiles(selectedFiles, msg);
+                        getRepo().commitFiles(selectedFiles, msg);
                     }
                     SwingUtilities.invokeLater(() -> {
                         try {
@@ -382,11 +413,6 @@ public class GitPanel extends JPanel {
     }
 
     /**
-     * Builds the Stash tab.
-     */
-
-
-    /**
      * Returns the current GitRepo from ContextManager.
      */
     private GitRepo getRepo() {
@@ -394,7 +420,7 @@ public class GitPanel extends JPanel {
         if (repo == null) {
             logger.error("getRepo() returned null - no Git repository available");
         }
-        return repo;
+        return (GitRepo) repo;
     }
 
     /**
@@ -419,21 +445,37 @@ public class GitPanel extends JPanel {
         contextManager.submitBackgroundTask("Checking uncommitted files", () -> {
             logger.debug("Background task for uncommitted files started");
             try {
-                logger.debug("Calling getRepo().getUncommittedFiles()");
-                var uncommittedFiles = getRepo().getUncommittedFiles();
-                logger.debug("Got {} uncommitted files", uncommittedFiles.size());
+                logger.debug("Calling getRepo().getModifiedFiles()");
+                var uncommittedFiles = getRepo().getModifiedFiles();
+                logger.debug("Got {} modified files", uncommittedFiles.size());
+                var gitStatus = getRepo().getGit().status().call();
+                var addedSet = gitStatus.getAdded();
+                var removedSet = new java.util.HashSet<>(gitStatus.getRemoved());
+                removedSet.addAll(gitStatus.getMissing());
                 SwingUtilities.invokeLater(() -> {
                     logger.debug("In Swing thread updating uncommitted files table");
+                    fileStatusMap.clear();
+                    for (var file : uncommittedFiles) {
+                        String fullPath = file.getParent().isEmpty() ? file.getFileName() : file.getParent() + "/" + file.getFileName();
+                        if (addedSet.contains(fullPath)) {
+                            fileStatusMap.put(fullPath, "new");
+                        } else if (removedSet.contains(fullPath)) {
+                            fileStatusMap.put(fullPath, "deleted");
+                        } else {
+                            fileStatusMap.put(fullPath, "modified");
+                        }
+                    }
+                    
                     var model = (DefaultTableModel) uncommittedFilesTable.getModel();
                     model.setRowCount(0);
 
                     if (uncommittedFiles.isEmpty()) {
-                        logger.debug("No uncommitted files found");
+                        logger.debug("No modified files found");
                         suggestMessageButton.setEnabled(false);
                         commitButton.setEnabled(false);
                         stashButton.setEnabled(false);
                     } else {
-                        logger.debug("Found {} uncommitted files to display", uncommittedFiles.size());
+                        logger.debug("Found {} modified files to display", uncommittedFiles.size());
                         // Track row indices for files that were previously selected
                         List<Integer> rowsToSelect = new ArrayList<>();
 
@@ -500,45 +542,66 @@ public class GitPanel extends JPanel {
     }
     
     /**
-     * Updates the state of the Edit File menu item based on whether the selected file
-     * is already in the editable context.
+     * Updates the enabled state of context menu items for the uncommitted files table
+     * based on the current selection.
      */
-    private void updateEditFileItemState(JMenuItem editFileItem) {
-        int row = uncommittedFilesTable.getSelectedRow();
-        if (row >= 0) {
+    private void updateUncommittedContextMenuState(JMenuItem captureDiffItem, JMenuItem viewDiffItem, JMenuItem editFileItem) {
+        int[] selectedRows = uncommittedFilesTable.getSelectedRows();
+        int selectionCount = selectedRows.length;
+
+        if (selectionCount == 0) {
+            // No files selected: disable everything
+            captureDiffItem.setEnabled(false);
+            captureDiffItem.setToolTipText("Select file(s) to capture diff");
+            viewDiffItem.setEnabled(false);
+            viewDiffItem.setToolTipText("Select a file to view its diff");
+            editFileItem.setEnabled(false);
+            editFileItem.setToolTipText("Select a file to edit");
+        } else if (selectionCount == 1) {
+            // Exactly one file selected
+            captureDiffItem.setEnabled(true);
+            captureDiffItem.setToolTipText("Capture diff of selected file to context");
+            viewDiffItem.setEnabled(true);
+            viewDiffItem.setToolTipText("View diff of selected file");
+
+            // Conditionally enable Edit File
+            int row = selectedRows[0];
             String filename = (String) uncommittedFilesTable.getValueAt(row, 0);
             String path = (String) uncommittedFilesTable.getValueAt(row, 1);
             String filePath = path.isEmpty() ? filename : path + "/" + filename;
             var file = contextManager.toFile(filePath);
-            
-            // Check if this file is already in the editable context
             boolean alreadyEditable = contextManager.getEditableFiles().contains(file);
-            
+
             editFileItem.setEnabled(!alreadyEditable);
-            editFileItem.setToolTipText(alreadyEditable ? 
-                "File is already in editable context" : 
-                "Edit this file");
+            editFileItem.setToolTipText(alreadyEditable ?
+                    "File is already in editable context" :
+                    "Edit this file");
         } else {
-            editFileItem.setEnabled(false);
-            editFileItem.setToolTipText("Select a file to edit");
+            // More than one file selected
+            captureDiffItem.setEnabled(true);
+            captureDiffItem.setToolTipText("Capture diff of selected files to context");
+            viewDiffItem.setEnabled(false); // Disable View Diff for multiple files
+            viewDiffItem.setToolTipText("Select a single file to view its diff");
+            editFileItem.setEnabled(false); // Disable Edit File for multiple files
+            editFileItem.setToolTipText("Select a single file to edit");
         }
     }
 
     /**
      * Helper to get a list of selected files from the uncommittedFilesTable.
      */
-    private List<RepoFile> getSelectedFilesFromTable()
+    private List<ProjectFile> getSelectedFilesFromTable()
     {
         var model = (DefaultTableModel) uncommittedFilesTable.getModel();
         var selectedRows = uncommittedFilesTable.getSelectedRows();
-        var files = new ArrayList<RepoFile>();
+        var files = new ArrayList<ProjectFile>();
 
         for (var row : selectedRows) {
             var filename = (String) model.getValueAt(row, 0);
             var path     = (String) model.getValueAt(row, 1);
             // Combine them to get the relative path
             var combined = path.isEmpty() ? filename : path + "/" + filename;
-            files.add(new RepoFile(contextManager.getRoot(), combined));
+            files.add(new ProjectFile(contextManager.getRoot(), combined));
         }
         return files;
     }
@@ -553,7 +616,7 @@ public class GitPanel extends JPanel {
     /**
      * Creates a new tab showing the history of a specific file
      */
-    public void addFileHistoryTab(RepoFile file) {
+    public void addFileHistoryTab(ProjectFile file) {
         String filePath = file.toString();
         
         // If we already have a tab for this file, just select it
@@ -751,7 +814,7 @@ public class GitPanel extends JPanel {
         gitLogPanel.selectCommitById(commitId);
     }
     
-    private void loadFileHistory(RepoFile file, DefaultTableModel model, JTable table) {
+    private void loadFileHistory(ProjectFile file, DefaultTableModel model, JTable table) {
         contextManager.submitBackgroundTask("Loading file history: " + file, () -> {
             try {
                 var history = getRepo().getFileHistory(file);
@@ -794,7 +857,7 @@ public class GitPanel extends JPanel {
     {
         contextManager.submitContextTask("Adding file change to context", () -> {
             try {
-                var repoFile = new RepoFile(contextManager.getRoot(), filePath);
+                var repoFile = new ProjectFile(contextManager.getRoot(), filePath);
                 var diff = getRepo().showFileDiff("HEAD", commitId, repoFile);
 
                 if (diff.isEmpty()) {
@@ -819,7 +882,7 @@ public class GitPanel extends JPanel {
     private void compareFileWithLocal(String commitId, String filePath) {
         contextManager.submitUserTask("Comparing file with local", () -> {
             try {
-                var repoFile = new RepoFile(contextManager.getRoot(), filePath);
+                var repoFile = new ProjectFile(contextManager.getRoot(), filePath);
                 var diff = getRepo().showFileDiff("HEAD", commitId, repoFile);
 
                 if (diff.isEmpty()) {
@@ -842,7 +905,7 @@ public class GitPanel extends JPanel {
     }
     
     private void editFile(String filePath) {
-        List<RepoFile> files = new ArrayList<>();
+        List<ProjectFile> files = new ArrayList<>();
         files.add(contextManager.toFile(filePath));
         contextManager.editFiles(files);
     }
@@ -851,7 +914,7 @@ public class GitPanel extends JPanel {
      * Shows the diff for a file at a specific commit from file history.
      */
     private void showFileHistoryDiff(String commitId, String filePath) {
-        RepoFile file = new RepoFile(contextManager.getRoot(), filePath);
+        ProjectFile file = new ProjectFile(contextManager.getRoot(), filePath);
         DiffPanel diffPanel = new DiffPanel(contextManager);
 
         String shortCommitId = commitId.length() > 7 ? commitId.substring(0, 7) : commitId;
@@ -861,8 +924,34 @@ public class GitPanel extends JPanel {
         diffPanel.showInDialog(this, dialogTitle);
     }
 
-    // ================ Stash Methods ==================
+    /**
+     * Captures the diff of selected uncommitted files and adds it to the context.
+     */
+    private void captureUncommittedDiff() {
+        List<ProjectFile> selectedFiles = getSelectedFilesFromTable();
+        if (selectedFiles.isEmpty()) {
+            chrome.systemOutput("No files selected to capture diff");
+            return;
+        }
 
+        contextManager.submitContextTask("Capturing uncommitted diff", () -> {
+            try {
+                String diff = getRepo().diffFiles(selectedFiles);
+                if (diff.isEmpty()) {
+                    chrome.systemOutput("No uncommitted changes found for selected files");
+                    return;
+                }
+
+                String description = "Diff of %s".formatted(selectedFiles.stream().map(ProjectFile::getFileName).collect(Collectors.joining(", ")));
+                ContextFragment.StringFragment fragment = new ContextFragment.StringFragment(diff, description);
+                contextManager.addVirtualFragment(fragment);
+                chrome.systemOutput("Added uncommitted diff for " + selectedFiles.size() + " file(s) to context");
+            } catch (Exception ex) {
+                logger.error("Error capturing uncommitted diff", ex);
+                chrome.toolErrorRaw("Error capturing uncommitted diff: " + ex.getMessage());
+            }
+        });
+    }
 
     /**
      * Shows the diff for an uncommitted file.
@@ -876,14 +965,16 @@ public class GitPanel extends JPanel {
     }
 
     /**
-     * Shows the diff for an uncommitted file.
+     * Shows the diff for an uncommitted file by comparing HEAD to what's on disk.
      */
     private void showUncommittedFileDiff(String filePath) {
-        RepoFile file = new RepoFile(contextManager.getRoot(), filePath);
-        DiffPanel diffPanel = new DiffPanel(contextManager);
+        var file = new ProjectFile(contextManager.getRoot(), filePath);
+        var diffPanel = new DiffPanel(contextManager);
 
         String dialogTitle = "Uncommitted Changes: " + file.getFileName();
-        diffPanel.showFileDiff("UNCOMMITTED", file);
+
+        // Use the unified compare-with-local approach for HEAD vs. disk
+        diffPanel.showCompareWithLocal("HEAD", file, /*useParent=*/ false);
         diffPanel.showInDialog(this, dialogTitle);
     }
     

@@ -6,7 +6,7 @@ import io.github.jbellis.brokk.ContextFragment.AutoContext;
 import io.github.jbellis.brokk.ContextFragment.SkeletonFragment;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
@@ -48,7 +48,7 @@ public class Context implements Serializable {
     transient final List<ChatMessage> historyMessages;
 
     /** backup of original contents for /undo, does not carry forward to Context children */
-    transient final Map<RepoFile, String> originalContents;
+    transient final Map<ProjectFile, String> originalContents;
 
     /** LLM output or other parsed content, with optional fragment. May be null */
     transient final ParsedOutput parsedOutput;
@@ -93,7 +93,7 @@ public class Context implements Serializable {
             AutoContext autoContext,
             int autoContextFileCount,
             List<ChatMessage> historyMessages,
-            Map<RepoFile, String> originalContents,
+            Map<ProjectFile, String> originalContents,
             ParsedOutput parsedOutput,
             Future<String> action
     ) {
@@ -307,20 +307,21 @@ public class Context implements Serializable {
         var repo = contextManager.getRepo();
 
         // Collect ineligible classnames from fragments not eligible for auto-context
+        var project = contextManager.getProject();
         var ineligibleSources = Streams.concat(editableFiles.stream(), readonlyFiles.stream(), virtualFragments.stream())
                 .filter(f -> !f.isEligibleForAutoContext())
-                .flatMap(f -> f.sources(analyzer, repo).stream())
+                .flatMap(f -> f.sources(project).stream())
                 .collect(Collectors.toSet());
 
         // Collect initial seeds
         var weightedSeeds = new HashMap<String, Double>();
         // editable files have a weight of 1.0, each
-        editableFiles.stream().flatMap(f -> f.sources(analyzer, repo).stream()).forEach(unit -> {
+        editableFiles.stream().flatMap(f -> f.sources(project).stream()).forEach(unit -> {
             weightedSeeds.put(unit.fqName(), 1.0);
         });
         // everything else splits a weight of 1.0
         Streams.concat(readonlyFiles.stream(), virtualFragments.stream())
-                .flatMap(f -> f.sources(analyzer, repo).stream())
+                .flatMap(f -> f.sources(project).stream())
                 .forEach(unit ->
                          {
                              weightedSeeds.merge(unit.fqName(), 1.0 / (readonlyFiles.size() + virtualFragments.size()), Double::sum);
@@ -336,19 +337,26 @@ public class Context implements Serializable {
     }
 
     public static SkeletonFragment buildAutoContext(IAnalyzer analyzer, Map<String, Double> weightedSeeds, Set<CodeUnit> ineligibleSources, int topK) {
-        var pagerankResults = AnalyzerUtil.combinedPageRankFor(analyzer, weightedSeeds);
+        var pagerankResults = AnalyzerUtil.combinedPagerankFor(analyzer, weightedSeeds);
 
         // build skeleton map
         var skeletonMap = new HashMap<CodeUnit, String>();
-        for (var fqName : pagerankResults) {
+        for (var codeUnit : pagerankResults) {
+            var fqcn = codeUnit.fqName();
+            var sourceFileOption = analyzer.getFileFor(fqcn);
+            if (sourceFileOption.isEmpty()) {
+                logger.warn("No source file found for class {}", fqcn);
+                continue;
+            }
+            var sourceFile = sourceFileOption.get();
             // Check if the class or its parent is in ineligible classnames
-            boolean eligible = !(ineligibleSources.contains(CodeUnit.cls(fqName))
-                    || (fqName.contains("$") && ineligibleSources.contains(CodeUnit.cls(fqName.substring(0, fqName.indexOf('$'))))));
+            boolean eligible = !(ineligibleSources.contains(codeUnit)
+                    || (fqcn.contains("$") && ineligibleSources.contains(CodeUnit.cls(sourceFile, fqcn.substring(0, fqcn.indexOf('$'))))));
 
             if (eligible) {
-                var opt = analyzer.getSkeleton(fqName);
+                var opt = analyzer.getSkeleton(fqcn);
                 if (opt.isDefined()) {
-                    skeletonMap.put(CodeUnit.cls(fqName), opt.get());
+                    skeletonMap.put(codeUnit, opt.get());
                 }
             }
             if (skeletonMap.size() >= topK) {
@@ -469,7 +477,7 @@ public class Context implements Serializable {
      * Otherwise popping context off with /undo
      * would clear out the most recent conversation round trip which is not what we want.
      */
-    public Context addHistory(List<ChatMessage> newMessages, Map<RepoFile, String> originalContents, ParsedOutput parsed, Future<String> action) {
+    public Context addHistory(List<ChatMessage> newMessages, Map<ProjectFile, String> originalContents, ParsedOutput parsed, Future<String> action) {
         var newHistory = new ArrayList<>(historyMessages);
         newHistory.addAll(newMessages);
         return new Context(
@@ -504,7 +512,7 @@ public class Context implements Serializable {
         );
     }
 
-    public Context withOriginalContents(Map<RepoFile, String> fileContents) {
+    public Context withOriginalContents(Map<ProjectFile, String> fileContents) {
         return new Context(
                 contextManager,
                 editableFiles,

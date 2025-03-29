@@ -14,7 +14,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.output.TokenUsage;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import scala.Option;
@@ -35,7 +35,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 import static java.lang.Math.min;
 
@@ -56,13 +55,13 @@ public class SearchAgent {
     private final IConsoleIO io;
 
     // Budget and action control state
-    private boolean allowSearch = true;
-    private boolean allowInspect = true;
-    private boolean allowPagerank = true;
-    private boolean allowAnswer = true;
-    private boolean allowSubstringSearch = false; // Starts disabled until searchSymbols is called
-    private boolean symbolsFound = false;
-    private boolean beastMode = false;
+    private boolean allowSearch;
+    private boolean allowInspect;
+    private boolean allowPagerank;
+    private boolean allowAnswer;
+    private boolean allowTextSearch;
+    private boolean symbolsFound;
+    private boolean beastMode;
 
     // Search state
     private final String query;
@@ -70,9 +69,6 @@ public class SearchAgent {
     private final List<Tuple2<String, String>> knowledge = new ArrayList<>();
     private final Set<String> toolCallSignatures = new HashSet<>();
     private final Set<String> trackedClassNames = new HashSet<>();
-    
-    // ThreadLocal to store the current ToolCall being processed
-    private static final ThreadLocal<ToolCall> currentToolCall = new ThreadLocal<>();
 
     private TokenUsage totalUsage = new TokenUsage(0, 0);
 
@@ -82,6 +78,13 @@ public class SearchAgent {
         this.analyzer = contextManager.getProject().getAnalyzer();
         this.coder = coder;
         this.io = io;
+        allowSearch = true;
+        allowInspect = true;
+        allowPagerank = true;
+        allowAnswer = true;
+        allowTextSearch = analyzer.isEmpty(); // otherwise, allowed after symbols search
+        symbolsFound = false;
+        beastMode = false;
     }
 
     /**
@@ -151,15 +154,15 @@ public class SearchAgent {
             %s
             </tool>
             """.stripIndent().formatted(
-                query,
-                reasoning,
-                step.request.name(),
-                getToolParameterInfo(step),
-                step.result
+                    query,
+                    reasoning,
+                    step.request.name(),
+                    getToolParameterInfo(step),
+                    step.result
             )));
 
             // Use the quick model for summarization
-            var response = coder.sendMessage(coder.models.searchModel(), messages);
+            var response = coder.sendMessage(coder.models.searchModel(), messages).chatResponse();
             return response.aiMessage().text();
         });
     }
@@ -170,6 +173,7 @@ public class SearchAgent {
      */
     public ContextFragment.VirtualFragment execute() {
         // Initialize
+        var analyzer = contextManager.getProject().getAnalyzer();
         var contextWithClasses = contextManager.selectedContext().allFragments().map(f -> {
             String text;
             try {
@@ -196,13 +200,22 @@ public class SearchAgent {
             Make sure to include the fully qualified source (class, method, etc) as well as the code.
             """.stripIndent()));
             messages.add(new UserMessage("<query>%s</query>\n\n".formatted(query) + contextWithClasses));
-            var response = coder.sendMessage(coder.models.searchModel(), messages);
-            knowledge.add(new Tuple2<>("Initial context", response.aiMessage().text()));
+            var result = coder.sendMessage(coder.models.searchModel(), messages);
+            if (result.cancelled()) {
+                io.systemOutput("Cancelled; stopping search");
+                return null;
+            }
+            if (result.error() != null) {
+                io.systemOutput("LLM error evaluating context; stopping search");
+                return null;
+            }
+            knowledge.add(new Tuple2<>("Initial context", result.chatResponse().aiMessage().text()));
         }
 
         while (true) {
             // If thread interrupted, bail out
             if (Thread.interrupted()) {
+                io.systemOutput("Interrupted; stopping search");
                 return null;
             }
 
@@ -219,32 +232,41 @@ public class SearchAgent {
             updateActionControlsBasedOnContext();
 
             // Decide what action to take for this query
-            var tools = determineNextActions();
+            var toolCalls = determineNextActions();
+            if (Thread.interrupted()) {
+                io.systemOutput("Interrupted; stopping search");
+                return null;
+            }
+            if (toolCalls.isEmpty()) {
+                io.systemOutput("Unable to get a response from the LLM; giving up search");
+                return null;
+            }
+
             // Remember these signatures for future checks, and return the call
-            for (var call: tools) {
+            for (var call: toolCalls) {
                 toolCallSignatures.addAll(createToolCallSignatures(call));
                 trackClassNamesFromToolCall(call);
             }
 
-            if (tools.isEmpty()) {
+            if (toolCalls.isEmpty()) {
                 logger.debug("No valid actions determined");
                 io.systemOutput("No valid actions returned; retrying");
                 continue;
             }
 
             // Print some debug/log info
-            var explanation = tools.stream().map(st -> getExplanationForTool(st.getRequest().name(), st)).collect(Collectors.joining("\n"));
+            var explanation = toolCalls.stream().map(st -> getExplanationForTool(st.getRequest().name(), st)).collect(Collectors.joining("\n"));
             io.systemOutput(explanation);
             logger.debug("{}; token usage: {}", explanation, totalUsage);
-            logger.debug("Actions: {}", tools);
+            logger.debug("Actions: {}", toolCalls);
 
             // Execute the steps
-            var results = tools.stream().parallel().peek(step -> {
+            var results = toolCalls.stream().parallel().peek(step -> {
                 step.execute();
-                
+
                 // Start summarization for specific tools
                 var toolName = step.getRequest().name();
-                var toolsRequiringSummaries = Set.of("searchSymbols", "getUsages", "getClassSources", "searchSubstrings");
+                var toolsRequiringSummaries = Set.of("searchSymbols", "getUsages", "getClassSources", "searchSubstrings", "searchFilenames", "getFileContents");
                 if (toolsRequiringSummaries.contains(toolName) && Models.getApproximateTokens(step.result) > SUMMARIZE_THRESHOLD) {
                     step.summarizeFuture = summarizeResultAsync(query, step);
                 } else if (toolName.equals("searchSymbols")) {
@@ -255,13 +277,13 @@ public class SearchAgent {
             }).toList();
 
             // Check if we should terminate
-            String firstToolName = tools.getFirst().getRequest().name();
+            String firstToolName = toolCalls.getFirst().getRequest().name();
             if (firstToolName.equals("answer")) {
                 logger.debug("Search complete");
-                assert tools.size() == 1 : tools;
+                assert toolCalls.size() == 1 : toolCalls;
 
                 try {
-                    ToolCall answerCall = tools.getFirst();
+                    ToolCall answerCall = toolCalls.getFirst();
                     var arguments = answerCall.argumentsMap();
                     @SuppressWarnings("unchecked")
                     var classNames = (List<String>) arguments.get("classNames");
@@ -273,18 +295,26 @@ public class SearchAgent {
                             .toList();
 
                     var sources = coalesced.stream()
-                            .map(CodeUnit::cls)
+                            .filter(fqcn -> {
+                                var fileOption = analyzer.getFileFor(fqcn);
+                                if (fileOption.isEmpty()) {
+                                    logger.warn("No file found for class: {}", fqcn);
+                                    return false;
+                                }
+                                return true;
+                            })
+                            .map(fqcn -> CodeUnit.cls(analyzer.getFileFor(fqcn).get(), fqcn))
                             .collect(Collectors.toSet());
                     return new ContextFragment.SearchFragment(query, results.getFirst().result, sources);
                 } catch (Exception e) {
                     // something went wrong parsing out the classnames
                     logger.error("Error creating SearchFragment", e);
-                    return new ContextFragment.StringFragment(query, results.getFirst().result);
+                    return new ContextFragment.StringFragment(results.getFirst().result, "Search: " + query);
                 }
             } else if (firstToolName.equals("abort")) {
                 logger.debug("Search aborted");
-                assert tools.size() == 1 : tools;
-                return new ContextFragment.StringFragment(query, results.getFirst().result);
+                assert toolCalls.size() == 1 : toolCalls;
+                return new ContextFragment.StringFragment(results.getFirst().result, "Search: " + query);
             }
 
             // Record the steps in history
@@ -316,7 +346,7 @@ public class SearchAgent {
         allowSearch = true;
         allowInspect = true;
         allowPagerank = true;
-        // don't reset allowSubstringSearch
+        // don't reset allowTextSearch
     }
 
     /**
@@ -327,6 +357,8 @@ public class SearchAgent {
         String baseExplanation = switch (toolName) {
             case "searchSymbols" -> "Searching for symbols";
             case "searchSubstrings" -> "Searching for substrings";
+            case "searchFilenames" -> "Searching for filenames";
+            case "getFileContents" -> "Getting file contents";
             case "getUsages" -> "Finding usages";
             case "getRelatedClasses" -> "Finding related code";
             case "getClassSkeletons" -> "Getting class overview";
@@ -371,7 +403,8 @@ public class SearchAgent {
             var arguments = toolCall.argumentsMap();
 
             return switch (toolCall.getRequest().name()) {
-                case "searchSymbols", "searchSubstrings" -> formatListParameter(arguments, "patterns");
+                case "searchSymbols", "searchSubstrings", "searchFilenames" -> formatListParameter(arguments, "patterns");
+                case "getFileContents" -> formatListParameter(arguments, "filenames");
                 case "getUsages" -> formatListParameter(arguments, "symbols");
                 case "getRelatedClasses", "getClassSkeletons",
                      "getClassSources" -> formatListParameter(arguments, "classNames");
@@ -384,21 +417,22 @@ public class SearchAgent {
             return "";
         }
     }
-    
+
     /**
      * Creates a list of unique signatures for a tool call based on tool name and parameters
      * Each signature is of the form toolName:paramValue
      */
     private List<String> createToolCallSignatures(ToolCall toolCall) {
         String toolName = toolCall.getRequest().name();
-        
+
         try {
             var arguments = toolCall.argumentsMap();
-            
+
             return switch (toolName) {
-                case "searchSymbols", "searchSubstrings" -> getParameterListSignatures(toolName, arguments, "patterns");
+                case "searchSymbols", "searchSubstrings", "searchFilenames" -> getParameterListSignatures(toolName, arguments, "patterns");
+                case "getFileContents" -> getParameterListSignatures(toolName, arguments, "filenames");
                 case "getUsages" -> getParameterListSignatures(toolName, arguments, "symbols");
-                case "getRelatedClasses", "getClassSkeletons", 
+                case "getRelatedClasses", "getClassSkeletons",
                      "getClassSources" -> getParameterListSignatures(toolName, arguments, "classNames");
                 case "getMethodSources" -> getParameterListSignatures(toolName, arguments, "methodNames");
                 case "answer", "abort" -> List.of(toolName + ":finalizing");
@@ -409,7 +443,7 @@ public class SearchAgent {
             return List.of(toolName + ":error");
         }
     }
-    
+
     /**
      * Helper method to extract parameter values from a list parameter and create signatures
      */
@@ -418,12 +452,12 @@ public class SearchAgent {
         List<String> items = (List<String>) arguments.get(paramName);
         if (items != null && !items.isEmpty()) {
             return items.stream()
-                .map(item -> toolName + ":" + paramName + "=" + item)
-                .collect(Collectors.toList());
+                    .map(item -> toolName + ":" + paramName + "=" + item)
+                    .collect(Collectors.toList());
         }
         return List.of(toolName + ":" + paramName + "=empty");
     }
-    
+
     /**
      * Tracks class names from tool call parameters
      */
@@ -431,7 +465,7 @@ public class SearchAgent {
         try {
             var arguments = toolCall.argumentsMap();
             String toolName = toolCall.getRequest().name();
-            
+
             switch (toolName) {
                 case "getClassSkeletons", "getClassSources", "getRelatedClasses" -> {
                     @SuppressWarnings("unchecked")
@@ -445,9 +479,9 @@ public class SearchAgent {
                     List<String> methodNames = (List<String>) arguments.get("methodNames");
                     if (methodNames != null) {
                         methodNames.stream()
-                            .map(this::extractClassNameFromMethod)
-                            .filter(Objects::nonNull)
-                            .forEach(trackedClassNames::add);
+                                .map(this::extractClassNameFromMethod)
+                                .filter(Objects::nonNull)
+                                .forEach(trackedClassNames::add);
                     }
                 }
                 case "getUsages" -> {
@@ -455,9 +489,8 @@ public class SearchAgent {
                     List<String> symbols = (List<String>) arguments.get("symbols");
                     if (symbols != null) {
                         symbols.stream()
-                            .map(this::extractClassNameFromSymbol)
-                            .filter(Objects::nonNull)
-                            .forEach(trackedClassNames::add);
+                                .map(this::extractClassNameFromSymbol)
+                                .forEach(trackedClassNames::add);
                     }
                 }
             }
@@ -465,7 +498,7 @@ public class SearchAgent {
             logger.error("Error tracking class names", e);
         }
     }
-    
+
     /**
      * Extracts class name from a fully qualified method name
      */
@@ -476,7 +509,7 @@ public class SearchAgent {
         }
         return null;
     }
-    
+
     /**
      * Extracts class name from a symbol
      */
@@ -495,6 +528,11 @@ public class SearchAgent {
      */
     private ToolCall replaceDuplicateCallIfNeeded(ToolCall call)
     {
+        if (analyzer.isEmpty()) {
+            // TODO try the ideas at https://github.com/jbellis/brokk/pull/43#issuecomment-2760530791
+            return call;
+        }
+
         // Get signatures for this call
         List<String> callSignatures = createToolCallSignatures(call);
 
@@ -502,7 +540,7 @@ public class SearchAgent {
         if (toolCallSignatures.stream().anyMatch(callSignatures::contains)) {
             logger.debug("Duplicate tool call detected: {}. Forging a getRelatedClasses call instead.", callSignatures);
             call = createRelatedClassesCall();
-            
+
             // if the forged call is itself a duplicate, use the original request but force Beast Mode next
             if (toolCallSignatures.containsAll(createToolCallSignatures(call))) {
                 logger.debug("Pagerank would be duplicate too!  Switching to Beast Mode.");
@@ -514,7 +552,7 @@ public class SearchAgent {
         // Return the call (original if no duplication, or the replacement)
         return call;
     }
-    
+
     /**
      * Creates a getRelatedClasses call using all currently tracked class names
      */
@@ -533,10 +571,10 @@ public class SearchAgent {
 
         // Create a new ToolExecutionRequest and ToolCall
         var request = ToolExecutionRequest.builder()
-            .name("getRelatedClasses")
-            .arguments(argumentsJson)
-            .build();
-            
+                .name("getRelatedClasses")
+                .arguments(argumentsJson)
+                .build();
+
         return new ToolCall(request);
     }
 
@@ -573,7 +611,15 @@ public class SearchAgent {
 
         // Ask LLM for next action with tools
         var tools = createToolSpecifications();
-        var response = coder.sendMessage(coder.models.searchModel(), messages, tools);
+        var result = coder.sendMessage(coder.models.searchModel(), messages, tools);
+        if (result.cancelled()) {
+            Thread.currentThread().interrupt();
+            return List.of();
+        }
+        if (result.error() != null) {
+            return List.of();
+        }
+        var response = result.chatResponse();
         totalUsage = TokenUsage.sum(totalUsage, response.tokenUsage());
 
         // Parse response into potentially multiple actions
@@ -586,37 +632,7 @@ public class SearchAgent {
     private List<ToolSpecification> createToolSpecifications() {
         List<ToolSpecification> tools = new ArrayList<>();
 
-        if (!beastMode || allowSearch) {
-            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("searchSymbols")));
-            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("getUsages")));
-        }
-
-        if (!beastMode || allowSubstringSearch) {
-            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("searchSubstrings")));
-        }
-
-        if (!beastMode || allowPagerank) {
-            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("getRelatedClasses")));
-        }
-
-        if (!beastMode || allowInspect) {
-            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("getClassSkeletons")));
-            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("getClassSources")));
-            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("getMethodSources")));
-            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("getCallGraphTo")));
-            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
-                    getMethodByName("getCallGraphFrom")));
-        }
-
-        if (beastMode || allowAnswer) {
+        if (allowAnswer) {
             tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
                     getMethodByName("answer")));
 
@@ -625,6 +641,45 @@ public class SearchAgent {
                     getMethodByName("abort")));
         }
 
+        if (beastMode) {
+            return tools;
+        }
+
+        if (!analyzer.isEmpty()) {
+            if (allowSearch) {
+                tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                        getMethodByName("searchSymbols")));
+                tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                        getMethodByName("getUsages")));
+            }
+            if (allowPagerank) {
+                tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                        getMethodByName("getRelatedClasses")));
+            }
+            if (allowInspect) {
+                tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                        getMethodByName("getClassSkeletons")));
+                tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                        getMethodByName("getClassSources")));
+                tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                        getMethodByName("getMethodSources")));
+                tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                        getMethodByName("getCallGraphTo")));
+                tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                        getMethodByName("getCallGraphFrom")));
+            }
+        }
+
+        if (allowTextSearch) {
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("searchSubstrings")));
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("searchFilenames")));
+            tools.add(dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom(
+                    getMethodByName("getFileContents")));
+        }
+
+        logger.debug("Available tools are {}", tools);
         return tools;
     }
 
@@ -703,7 +758,7 @@ public class SearchAgent {
                 // Force finalize only
                 allowAnswer = true;
                 allowSearch = false;
-                allowSubstringSearch = false;
+                allowTextSearch = false;
                 allowInspect = false;
                 allowPagerank = false;
             }
@@ -735,15 +790,15 @@ public class SearchAgent {
          %s
         </step>
         """.stripIndent().formatted(
-            i,
-            step.request.name(),
-            getToolParameterInfo(step),
-            step.learnings != null ?
-                "<learnings>\n%s\n</learnings>".formatted(step.learnings) :
-                "<result>\n%s\n</result>".formatted(step.result)
+                i,
+                step.request.name(),
+                getToolParameterInfo(step),
+                step.learnings != null ?
+                        "<learnings>\n%s\n</learnings>".formatted(step.learnings) :
+                        "<result>\n%s\n</result>".formatted(step.result)
         );
     }
-    
+
     /**
      * Parse the LLM response into a list of ToolCall objects.
      * This method handles both direct text responses and tool execution responses.
@@ -752,9 +807,7 @@ public class SearchAgent {
     private List<ToolCall> parseResponse(AiMessage response) {
         if (!response.hasToolExecutionRequests()) {
             logger.debug("No tool execution requests found in response");
-            var dummyTer = ToolExecutionRequest.builder().name("MISSING_TOOL_CALL").build();
-            var errorCall = new ToolCall(dummyTer, "Error: No tool execution requests found in response");
-            return List.of(errorCall);
+            return List.of();
         }
 
         // Process each tool execution request with duplicate detection
@@ -777,7 +830,7 @@ public class SearchAgent {
 
         return toolCalls;
     }
-    
+
     /**
      * Check if a specific tool has been called in the action history
      */
@@ -804,7 +857,7 @@ public class SearchAgent {
         }
 
         // Enable substring search after the first successful searchSymbols call
-        allowSubstringSearch = true;
+        allowTextSearch = true;
 
         Set<CodeUnit> allDefinitions = new HashSet<>();
         for (String pattern : patterns) {
@@ -831,7 +884,7 @@ public class SearchAgent {
     /**
      * Compresses a list of fully qualified symbol names by finding the longest common package prefix
      * and removing it from each symbol.
-     * 
+     *
      * @param symbols A list of fully qualified symbol names
      * @return A tuple containing: 1) the common package prefix, 2) the list of compressed symbol names
      */
@@ -839,49 +892,49 @@ public class SearchAgent {
         if (symbols.isEmpty()) {
             return new Tuple2<>("", List.of());
         }
-        
+
         // Find the package parts of each symbol
         List<String[]> packageParts = symbols.stream()
-            .map(s -> s.split("\\."))
-            .toList();
-        
+                .map(s -> s.split("\\."))
+                .toList();
+
         // Find longest common prefix of package parts
         String[] firstParts = packageParts.getFirst();
         int maxPrefixLength = 0;
-        
+
         // Only consider package parts (stop before the class/method name)
         // Assume the last element is always the class or method name
         for (int i = 0; i < firstParts.length - 1; i++) {
             boolean allMatch = true;
-            
+
             for (String[] parts : packageParts) {
                 if (i >= parts.length - 1 || !parts[i].equals(firstParts[i])) {
                     allMatch = false;
                     break;
                 }
             }
-            
+
             if (allMatch) {
                 maxPrefixLength = i + 1;
             } else {
                 break;
             }
         }
-        
+
         // If we have a common prefix
         if (maxPrefixLength > 0) {
             // Build the common prefix string
             String commonPrefix = String.join(".",
-                Arrays.copyOfRange(firstParts, 0, maxPrefixLength)) + ".";
-            
+                                              Arrays.copyOfRange(firstParts, 0, maxPrefixLength)) + ".";
+
             // Remove the common prefix from each symbol
             List<String> compressedSymbols = symbols.stream()
-                .map(s -> s.startsWith(commonPrefix) ? s.substring(commonPrefix.length()) : s)
-                .collect(Collectors.toList());
-            
+                    .map(s -> s.startsWith(commonPrefix) ? s.substring(commonPrefix.length()) : s)
+                    .collect(Collectors.toList());
+
             return new Tuple2<>(commonPrefix, compressedSymbols);
         }
-        
+
         // No common prefix found
         return new Tuple2<>("", symbols);
     }
@@ -941,12 +994,15 @@ public class SearchAgent {
             weightedSeeds.put(className, 1.0);
         }
 
-        var pageRankResults = AnalyzerUtil.combinedPageRankFor(analyzer, weightedSeeds);
+        var pageRankUnits = AnalyzerUtil.combinedPagerankFor(analyzer, weightedSeeds);
 
-        if (pageRankResults.isEmpty()) {
+        if (pageRankUnits.isEmpty()) {
             return "No related code found via PageRank";
         }
 
+        var pageRankResults = pageRankUnits.stream().map(CodeUnit::fqName).toList();
+
+        // Get skeletons for the top few *original* seed classes, not the PR results
         var prResult = classNames.stream().distinct()
                 .limit(10) // padding in case of not defined
                 .map(analyzer::getSkeleton)
@@ -954,9 +1010,10 @@ public class SearchAgent {
                 .limit(5)
                 .map(Option::get)
                 .collect(Collectors.joining("\n\n"));
-        var formattedPrResult = prResult.isEmpty() ? "" : "# Summaries of top 5 related classes: \n\n" + prResult + "\n\n";
+        var formattedPrResult = prResult.isEmpty() ? "" : "# Summaries of top 5 seed classes: \n\n" + prResult + "\n\n";
 
-        List<String> resultsList = pageRankResults.stream().limit(50).collect(Collectors.toList());
+        // Format the compressed list of related classes found by pagerank
+        List<String> resultsList = pageRankResults.stream().limit(50).toList();
         var formattedResults = formatCompressedSymbols("# List of related classes", resultsList);
 
         return formattedPrResult + formattedResults;
@@ -1015,7 +1072,7 @@ public class SearchAgent {
 
         for (String className : classNames) {
             if (!className.isBlank()) {
-                String classSource = analyzer.getClassSource(className);
+                String classSource = analyzer.getClassSource(className).toString();
                 if (classSource != null && !classSource.isEmpty() && !processedSources.contains(classSource)) {
                     processedSources.add(classSource);
                     if (!result.isEmpty()) {
@@ -1094,7 +1151,7 @@ public class SearchAgent {
     Use this to understand how a method's logic flows to other parts of the codebase.
     """)
     public String getCallGraphFrom(
-            @P(value = "Fully qualified method name (package name, class name, method name) to find callees for") 
+            @P(value = "Fully qualified method name (package name, class name, method name) to find callees for")
             String methodName
     ) {
         if (methodName.isBlank()) {
@@ -1123,7 +1180,7 @@ public class SearchAgent {
     }
 
     @Tool("""
-    Returns class names whose text contents match Java regular expression patterns.
+    Returns file names whose text contents match Java regular expression patterns.
     This is slower than searchSymbols but can find references to external dependencies and comment strings.
     """)
     public String searchSubstrings(
@@ -1153,42 +1210,38 @@ public class SearchAgent {
             }
 
             // Get all tracked files from GitRepo and process them functionally
-            var matchingClasses = contextManager.getProject().getRepo().getTrackedFiles().parallelStream().map(file -> {
+            var matchingFilenames = contextManager.getProject().getFiles().parallelStream().map(file -> {
                         try {
-                            RepoFile repoFile = new RepoFile(contextManager.getProject().getRoot(), file.toString());
-                            String fileContents = new String(Files.readAllBytes(repoFile.absPath()));
+                            if (!file.isText()) {
+                                return null;
+                            }
+                            String fileContents = new String(Files.readAllBytes(file.absPath()));
 
                             // Return the repoFile if its contents match any of the patterns, otherwise null
                             for (Pattern compiledPattern : compiledPatterns) {
                                 if (compiledPattern.matcher(fileContents).find()) {
-                                    return repoFile;
+                                    return file;
                                 }
                             }
                             return null;
                         } catch (Exception e) {
-                            logger.debug("Error processing file {}: {}", file, e.getMessage());
+                            logger.debug("Error processing file {}", file, e);
                             return null;
                         }
                     })
                     .filter(Objects::nonNull) // Filter out nulls (files with errors or no matches)
-                    .flatMap(repoFile -> {
-                        try {
-                            // For each matching file, get all non-inner classes and flatten them into the stream
-                            return analyzer.getClassesInFile(repoFile).stream()
-                                    .map(CodeUnit::fqName)
-                                    .filter(reference -> !reference.contains("$"));
-                        } catch (Exception e) {
-                            logger.debug("Error getting classes for file {}: {}", repoFile, e.getMessage());
-                            return Stream.empty();
-                        }
-                    })
+                    .map(ProjectFile::toString)
                     .collect(Collectors.toSet()); // Collect to a set to eliminate duplicates
 
-            if (matchingClasses.isEmpty()) {
-                return "No classes found with content matching patterns: " + String.join(", ", patterns);
+            if (matchingFilenames.isEmpty()) {
+                var msg = "No files found with content matching patterns: " + String.join(", ", patterns);
+                logger.debug(msg);
+                return msg;
             }
 
-            return "Classes with content matching patterns: " + String.join(", ", matchingClasses);
+            var msg = "Files with content matching patterns: " + String.join(", ", matchingFilenames);
+            logger.debug(msg);
+            return msg;
         } catch (Exception e) {
             logger.error("Error searching file contents", e);
             return "Error searching file contents: " + e.getMessage();
@@ -1196,7 +1249,98 @@ public class SearchAgent {
     }
 
     @Tool("""
-    Abort the search process when you determine the question is not relevant to this codebase or when an answer cannot be found. 
+    Returns filenames (relative to the project root) that match the given Java regular expression patterns.
+    Use this to find configuration files, test data, or source files when you know part of their name.
+    """)
+    public String searchFilenames(
+            @P(value = "Java-style regex patterns to match against filenames.")
+            List<String> patterns,
+            @P(value = "Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
+            String reasoning
+    ) {
+        if (patterns.isEmpty()) {
+            return "Cannot search filenames: patterns list is empty";
+        }
+        if (reasoning.isBlank()) {
+            return "Cannot search filenames: missing or empty reasoning parameter";
+        }
+
+        logger.debug("Searching filenames for patterns: {}", patterns);
+
+        try {
+            // Compile all regex patterns
+            List<Pattern> compiledPatterns = patterns.stream()
+                    .filter(p -> !p.isBlank())
+                    .map(Pattern::compile)
+                    .toList();
+
+            if (compiledPatterns.isEmpty()) {
+                return "No valid patterns provided";
+            }
+
+            // Get all tracked files and filter by filename
+            var matchingFiles = contextManager.getProject().getFiles().stream()
+                    .map(ProjectFile::toString)
+                    .filter(filePath -> {
+                        for (Pattern compiledPattern : compiledPatterns) {
+                            if (compiledPattern.matcher(filePath).find()) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    })
+                    .collect(Collectors.toList());
+
+            if (matchingFiles.isEmpty()) {
+                return "No filenames found matching patterns: " + String.join(", ", patterns);
+            }
+
+            return "Matching filenames: " + String.join(", ", matchingFiles);
+        } catch (Exception e) {
+            logger.error("Error searching filenames", e);
+            return "Error searching filenames: " + e.getMessage();
+        }
+    }
+
+    @Tool("""
+    Returns the full contents of the specified files. Use this after searchFilenames or searchSubstrings, or when you need the content of a non-code file.
+    This can be expensive for large files.
+    """)
+    public String getFileContents(
+            @P(value = "List of filenames (relative to project root) to retrieve contents for.")
+            List<String> filenames
+    ) {
+        if (filenames.isEmpty()) {
+            return "Cannot get file contents: filenames list is empty";
+        }
+
+        logger.debug("Getting contents for files: {}", filenames);
+
+        return filenames.stream()
+                .distinct()
+                .map(filename -> {
+                    try {
+                        var file = contextManager.toFile(filename);
+                        if (!file.exists()) {
+                            logger.debug("File not found or not a regular file: {}", file);
+                            return "<file name=\"%s\">\nError: File not found or not a regular file.\n</file>".formatted(filename);
+                        }
+                        var content = file.read();
+                        return "<file name=\"%s\">\n%s\n</file>".formatted(filename, content);
+                    } catch (IOException e) {
+                        logger.error("Error reading file content for {}: {}", filename, e.getMessage());
+                        return "<file name=\"%s\">\nError reading file: %s\n</file>".formatted(filename, e.getMessage());
+                    } catch (Exception e) {
+                        logger.error("Unexpected error getting content for {}: {}", filename, e.getMessage());
+                        return "<file name=\"%s\">\nUnexpected error: %s\n</file>".formatted(filename, e.getMessage());
+                    }
+                })
+                .collect(Collectors.joining("\n\n"));
+    }
+
+
+    @Tool("""
+    Abort the search process when you determine the question is not relevant to this codebase or when an answer cannot be found.
     Use this as a last resort when you're confident no useful answer can be provided.
     """)
     public String abort(
@@ -1257,7 +1401,7 @@ public class SearchAgent {
         public ToolExecutionRequest getRequest() {
             return request;
         }
-        
+
         /**
          * Parse the JSON arguments into a map
          */
@@ -1279,7 +1423,6 @@ public class SearchAgent {
                 return;
             }
 
-            currentToolCall.set(this);
             try {
                 // Use TER's tool name as the method name
                 String methodName = request.name();
@@ -1288,6 +1431,7 @@ public class SearchAgent {
                 // Prepare arguments array from method parameters
                 var arguments = argumentsMap();
                 var params = method.getParameters();
+                logger.debug("Extracting {} from {}", params, arguments);
                 Object[] args = new Object[params.length];
                 for (int i = 0; i < params.length; i++) {
                     String paramName = params[i].getName(); // requires compilation with -parameters
@@ -1301,9 +1445,17 @@ public class SearchAgent {
                 // Invoke the method
                 Object res = method.invoke(SearchAgent.this, args);
                 result = res != null ? res.toString() : "";
-            } catch (Exception e) {
-                logger.error("Tool method invocation error", e);
+            } catch (IllegalArgumentException e) {
+                logger.error("Tool method parameter error for {}: {}", request.name(), e.getMessage());
                 result = "Error: " + e.getMessage();
+            }
+            catch (Exception e) {
+                // Catch reflection invocation target exceptions specifically
+                var cause = e.getCause() != null ? e.getCause() : e;
+                logger.error("Tool method invocation error for {}: {}", request.name(), cause.getMessage(), cause);
+                result = "Error executing tool " + request.name() + ": " + cause.getMessage();
+            } finally {
+                logger.debug("Tool call completed: {}", result);
             }
         }
 
@@ -1318,4 +1470,3 @@ public class SearchAgent {
         }
     }
 }
-

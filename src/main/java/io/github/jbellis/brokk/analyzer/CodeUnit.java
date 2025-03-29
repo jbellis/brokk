@@ -8,10 +8,14 @@ import java.util.stream.Collectors;
 /**
  * Represents a named code element (class, function, or field).
  */
-public record CodeUnit(CodeUnitType kind, String fqName)
+public record CodeUnit(ProjectFile source, CodeUnitType kind, String fqName)
         implements Comparable<CodeUnit>, Serializable
 {
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
+
+    public CodeUnit {
+        assert source != null;
+    }
 
     /**
      * @return just the last symbol name (a.b.C -> C, a.b.C.foo -> foo)
@@ -99,24 +103,24 @@ public record CodeUnit(CodeUnitType kind, String fqName)
     /**
      * Factory method to create a CodeUnit of type CLASS.
      */
-    public static CodeUnit cls(String reference)
+    public static CodeUnit cls(ProjectFile source, String reference)
     {
-        return new CodeUnit(CodeUnitType.CLASS, reference);
+        return new CodeUnit(source, CodeUnitType.CLASS, reference);
     }
 
     /**
      * Factory method to create a CodeUnit of type FUNCTION.
      */
-    public static CodeUnit fn(String reference)
+    public static CodeUnit fn(ProjectFile source, String reference)
     {
-        return new CodeUnit(CodeUnitType.FUNCTION, reference);
+        return new CodeUnit(source, CodeUnitType.FUNCTION, reference);
     }
 
     /**
      * Factory method to create a CodeUnit of type FIELD.
      */
-    public static CodeUnit field(String reference)
+    public static CodeUnit field(ProjectFile source, String reference)
     {
-        return new CodeUnit(CodeUnitType.FIELD, reference);
+        return new CodeUnit(source, CodeUnitType.FIELD, reference);
     }
 }

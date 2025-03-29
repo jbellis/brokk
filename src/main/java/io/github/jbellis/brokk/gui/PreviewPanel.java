@@ -3,7 +3,7 @@ package io.github.jbellis.brokk.gui;
 import io.github.jbellis.brokk.ContextManager;
 import io.github.jbellis.brokk.IConsoleIO;
 import io.github.jbellis.brokk.LLM;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 import org.fife.ui.rtextarea.RTextScrollPane;
@@ -40,10 +40,10 @@ public class PreviewPanel extends JPanel
     private GuiTheme themeManager;
 
     // Nullable
-    private final RepoFile file;
+    private final ProjectFile file;
 
     public PreviewPanel(ContextManager contextManager,
-                        RepoFile file,
+                        ProjectFile file,
                         String content,
                         String syntaxStyle,
                         GuiTheme guiTheme)
@@ -492,13 +492,29 @@ public class PreviewPanel extends JPanel
             try {
                 future.get(); // Wait for the task to complete successfully.
                 // On success, reload the preview panel's contents from the repofile.
-                var newContent = file.read(); // Assumes RepoFile.getContent() exists.
+                var newContent = file.read();
+                
+                // Calculate the position of the edited text in the new content
+                // We use the original selected text to find where the edit was made
                 SwingUtilities.invokeLater(() -> {
+                    // Remember current caret position before changing text
+                    int origCaretPos = textArea.getCaretPosition();
+                    
+                    // Update the text area with new content
                     textArea.setText(newContent);
-                    // Reapply the theme
-                    if (themeManager != null) {
-                        themeManager.applyCurrentThemeToComponent(textArea);
+                    
+                    // Try to find the text that was edited
+                    int startPos = newContent.indexOf(selectedText);
+                    if (startPos >= 0) {
+                        // If found, select it to highlight the changes
+                        textArea.setCaretPosition(startPos);
+                        textArea.moveCaretPosition(startPos + selectedText.length());
+                    } else {
+                        // If not found (likely because it was changed), 
+                        // try to position close to where we were
+                        textArea.setCaretPosition(Math.min(origCaretPos, newContent.length()));
                     }
+                    
                     okayButton.setEnabled(true);
                     stopButton.setEnabled(false);
                     resultsIo.systemOutput("Quick edit completed successfully.");

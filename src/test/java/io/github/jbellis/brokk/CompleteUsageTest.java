@@ -2,6 +2,7 @@ package io.github.jbellis.brokk;
 
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.junit.jupiter.api.Test;
 import org.msgpack.core.annotations.VisibleForTesting;
 
@@ -22,6 +23,8 @@ public class CompleteUsageTest {
 
     // A simple inline "mock" analyzer: no mocking library used.
     private static class MockAnalyzer implements IAnalyzer {
+        private final ProjectFile mockFile = new ProjectFile(null, "MockFile.java");
+        
         private final List<CodeUnit> allClasses = Stream.of(
                 "a.b.Do",
                 "a.b.Do$Re",
@@ -29,15 +32,15 @@ public class CompleteUsageTest {
                 "x.y.Zz",
                 "w.u.Zz",
                 "test.CamelClass"
-        ).map(CodeUnit::cls).toList();
+        ).map(name -> CodeUnit.cls(mockFile, name)).toList();
 
         private final Map<String, List<CodeUnit>> methodsMap = Map.of(
-                "a.b.Do", Stream.of("a.b.Do.foo", "a.b.Do.bar").map(CodeUnit::fn).toList(),
-                "a.b.Do$Re", Stream.of("a.b.Do$Re.baz").map(CodeUnit::fn).toList(),
-                "a.b.Do$Re$Sub", Stream.of("a.b.Do$Re$Sub.qux").map(CodeUnit::fn).toList(),
+                "a.b.Do", Stream.of("a.b.Do.foo", "a.b.Do.bar").map(name -> CodeUnit.fn(mockFile, name)).toList(),
+                "a.b.Do$Re", Stream.of("a.b.Do$Re.baz").map(name -> CodeUnit.fn(mockFile, name)).toList(),
+                "a.b.Do$Re$Sub", Stream.of("a.b.Do$Re$Sub.qux").map(name -> CodeUnit.fn(mockFile, name)).toList(),
                 "x.y.Zz", List.of(),
                 "w.u.Zz", List.of(),
-                "test.CamelClass", Stream.of("test.CamelClass.someMethod").map(CodeUnit::fn).toList()
+                "test.CamelClass", Stream.of("test.CamelClass.someMethod").map(name -> CodeUnit.fn(mockFile, name)).toList()
         );
 
         @Override

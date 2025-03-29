@@ -3,7 +3,8 @@ package io.github.jbellis.brokk;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.ExternalFile;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
+import io.github.jbellis.brokk.git.IGitRepo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -32,37 +33,7 @@ public class ContextSerializationTest {
     @BeforeEach
     void setup() {
         // Setup mock context manager
-        mockContextManager = new IContextManager() {
-            @Override
-            public IAnalyzer getAnalyzer() {
-                return new IAnalyzer() {
-                    @Override
-                    public Set<CodeUnit> getClassesInFile(RepoFile file) {
-                        return Set.of();
-                    }
-
-                    @Override
-                    public List<Tuple2<String, Double>> getPagerank(Map<String, Double> seedClassWeights, int k, boolean reversed) {
-                        return List.of();
-                    }
-                };
-            }
-
-            @Override
-            public IGitRepo getRepo() {
-                return new IGitRepo() {
-                    @Override
-                    public Path getRoot() {
-                        return Path.of(tempDir.toString());
-                    }
-
-                    @Override
-                    public List<RepoFile> getTrackedFiles() {
-                        return List.of();
-                    }
-                };
-            }
-        };
+        mockContextManager = new IContextManager() {};
     }
     
     @Test
@@ -99,16 +70,16 @@ public class ContextSerializationTest {
         Path repoRoot = tempDir.resolve("repo");
         Files.createDirectories(repoRoot);
         
-        RepoFile repoFile = new RepoFile(repoRoot, "src/main/java/Test.java");
-        Files.createDirectories(repoFile.absPath().getParent());
-        Files.writeString(repoFile.absPath(), "public class Test {}");
+        var projectFile = new ProjectFile(repoRoot, "src/main/java/Test.java");
+        Files.createDirectories(projectFile.absPath().getParent());
+        Files.writeString(projectFile.absPath(), "public class Test {}");
         
-        ExternalFile externalFile = new ExternalFile(tempDir.resolve("external.txt").toAbsolutePath());
+        var externalFile = new ExternalFile(tempDir.resolve("external.txt").toAbsolutePath());
         Files.writeString(externalFile.absPath(), "This is external content");
         
         // Create context with fragments
         Context context = new Context(mockContextManager, 5)
-            .addEditableFiles(List.of(new ContextFragment.RepoPathFragment(repoFile)))
+            .addEditableFiles(List.of(new ContextFragment.RepoPathFragment(projectFile)))
             .addReadonlyFiles(List.of(new ContextFragment.ExternalPathFragment(externalFile)))
             .addVirtualFragment(new ContextFragment.StringFragment("virtual content", "Virtual Fragment"));
         
@@ -123,7 +94,7 @@ public class ContextSerializationTest {
         
         // Check paths were properly serialized
         ContextFragment.RepoPathFragment repoFragment = deserialized.editableFiles.get(0);
-        assertEquals(repoFile.toString(), repoFragment.file().toString());
+        assertEquals(projectFile.toString(), repoFragment.file().toString());
         assertEquals(repoRoot.toString(), repoFragment.file().absPath().getParent().getParent().getParent().getParent().toString());
 
         ContextFragment.PathFragment externalFragment = deserialized.readonlyFiles.get(0);
@@ -143,12 +114,15 @@ public class ContextSerializationTest {
     void testAllVirtualFragmentTypes() throws Exception {
         Context context = new Context(mockContextManager, 5);
         
+        // Create mock RepoFile for CodeUnit construction
+        ProjectFile mockFile = new ProjectFile(tempDir, "Mock.java");
+
         // Add examples of each VirtualFragment type
         context = context
             .addVirtualFragment(new ContextFragment.StringFragment("string content", "String Fragment"))
-            .addVirtualFragment(new ContextFragment.SearchFragment("query", "explanation", Set.of(CodeUnit.cls("Test"))))
+            .addVirtualFragment(new ContextFragment.SearchFragment("query", "explanation", Set.of(CodeUnit.cls(mockFile, "Test"))))
             .addVirtualFragment(new ContextFragment.SkeletonFragment(
-                Map.of(CodeUnit.cls("com.test.Test"), "class Test {}")
+                Map.of(CodeUnit.cls(mockFile, "com.test.Test"), "class Test {}")
             ));
         
         // Add fragments that use Future
@@ -160,15 +134,15 @@ public class ContextSerializationTest {
         
         // Add fragment with usage
         context = context.addVirtualFragment(
-            new ContextFragment.UsageFragment("Uses", "Test.method", Set.of(CodeUnit.cls("com.test.Test")), "Test.method()")
+            new ContextFragment.UsageFragment("Uses", "Test.method", Set.of(CodeUnit.cls(mockFile, "com.test.Test")), "Test.method()")
         );
         
         // Add stacktrace fragment
         context = context.addVirtualFragment(
             new ContextFragment.StacktraceFragment(
-                Set.of(CodeUnit.cls("com.test.Test")), 
-                "original", 
-                "NPE", 
+                Set.of(CodeUnit.cls(mockFile, "com.test.Test")),
+                "original",
+                "NPE",
                 "code"
             )
         );
@@ -262,7 +236,7 @@ public class ContextSerializationTest {
         // Create many files
         List<ContextFragment.RepoPathFragment> editableFiles = new ArrayList<>();
         for (int i = 0; i < 20; i++) {
-            RepoFile file = new RepoFile(repoRoot, "src/main/java/Test" + i + ".java");
+            ProjectFile file = new ProjectFile(repoRoot, "src/main/java/Test" + i + ".java");
             Files.createDirectories(file.absPath().getParent());
             Files.writeString(file.absPath(), "public class Test" + i + " {}");
             editableFiles.add(new ContextFragment.RepoPathFragment(file));

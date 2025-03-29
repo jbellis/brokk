@@ -1,8 +1,8 @@
 package io.github.jbellis.brokk.gui;
 
 import io.github.jbellis.brokk.ContextManager;
-import io.github.jbellis.brokk.GitRepo;
-import io.github.jbellis.brokk.analyzer.RepoFile;
+import io.github.jbellis.brokk.git.GitRepo;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
@@ -11,6 +11,9 @@ import org.fife.ui.rtextarea.RTextScrollPane;
 
 import javax.swing.*;
 import java.awt.*;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 /**
  * A panel for displaying file diffs in a syntax-highlighted editor.
@@ -22,7 +25,7 @@ public class DiffPanel extends JPanel {
     private final ContextManager contextManager;
     private String currentDiff;
     private String commitId;
-    private RepoFile repoFile;
+    private ProjectFile projectFile;
     
     /**
      * Creates a new DiffPanel for displaying file diffs.
@@ -60,37 +63,30 @@ public class DiffPanel extends JPanel {
         controlPanel.add(addToContextButton);
         add(controlPanel, BorderLayout.SOUTH);
     }
-    
+
     /**
      * Displays a diff for a specific file at a commit.
-     * 
-     * @param commitId The commit ID to show the diff for
+     *
+     * @param commitId The commit ID to show the diff for (e.g. "HEAD", "abc123", etc.)
      * @param file The file to show the diff for
      */
-    public void showFileDiff(String commitId, RepoFile file) {
+    public void showFileDiff(String commitId, ProjectFile file) {
         this.commitId = commitId;
-        this.repoFile = file;
-        
+        this.projectFile = file;
+
         // Set syntax style based on file extension
         setSyntaxStyleForFile(file.getFileName());
-        
+
         contextManager.submitBackgroundTask("Loading diff for " + file.getFileName(), () -> {
             try {
-                GitRepo repo = contextManager.getProject().getRepo();
-                
-                String diff;
-                if (commitId.equals("UNCOMMITTED")) {
-                    // Special case for uncommitted changes
-                    diff = repo.diffFiles(java.util.List.of(file));
-                } else {
-                    // Get diff against parent commit
-                    String parentRef = commitId + "^";
-                    diff = repo.showFileDiff(commitId, parentRef, file);
-                }
-                
-                // Store the diff for later use
+                var repo = (GitRepo) contextManager.getProject().getRepo();
+
+                // Compare commitId vs its parent if possible
+                var parentRef = commitId + "^";
+                var diff = repo.showFileDiff(commitId, parentRef, file);
+
                 currentDiff = diff;
-                
+
                 SwingUtilities.invokeLater(() -> {
                     diffArea.setText(diff);
                     diffArea.setCaretPosition(0);
@@ -203,20 +199,115 @@ public class DiffPanel extends JPanel {
         
         diffArea.setSyntaxEditingStyle(style);
     }
-    
+
     /**
      * Builds a description for the current diff to use when adding to context.
      */
     private String buildDescription() {
-        if (commitId == null || repoFile == null) {
+        if (commitId == null || projectFile == null) {
             return "Git diff";
         }
-        
-        String shortCommitId = commitId.length() > 7 ? commitId.substring(0, 7) : commitId;
-        if (commitId.equals("UNCOMMITTED")) {
-            return "Uncommitted changes: " + repoFile.getFileName();
-        } else {
-            return "git " + shortCommitId + ": " + repoFile.getFileName();
+
+        var shortCommitId = (commitId.length() > 7) ? commitId.substring(0, 7) : commitId;
+        return "git " + shortCommitId + ": " + projectFile.getFileName();
+    }
+
+    /**
+     * Compare the file's content from the specified commit (or its parent if useParent=true)
+     * against the actual on-disk (local) contents, then display an in-memory diff.
+     *
+     * @param commitId The commit to compare from
+     * @param file The file to compare
+     * @param useParent If true, we attempt to compare commitId^; if commitId has no parent, old content is empty
+     */
+    public void showCompareWithLocal(String commitId, ProjectFile file, boolean useParent)
+    {
+        this.commitId = commitId;
+        this.projectFile = file;
+        setSyntaxStyleForFile(file.getFileName());
+
+        contextManager.submitBackgroundTask("Loading compare-with-local for " + file.getFileName(), () -> {
+            try {
+                // 1) read the local file from disk
+                var localContent = file.exists() ? file.read() : "";
+
+                // 2) figure out the "base commit" to read from
+                String baseCommitId = commitId;
+                if (useParent) {
+                    // Attempt commit^, and if that doesn't exist (first commit), oldContent stays ""
+                    var parentId = contextManager.getProject().getRepo().resolve(commitId + "^");
+                    if (parentId == null) {
+                        baseCommitId = null; // so we get blank oldContent
+                    } else {
+                        baseCommitId = commitId + "^";
+                    }
+                }
+
+                // 3) read old content from that commit
+                var oldContent = "";
+                if (baseCommitId != null) {
+                    // call our new GitRepo method
+                    var repo = (GitRepo) contextManager.getProject().getRepo();
+                    oldContent = repo.getFileContent(baseCommitId, file);
+                }
+
+                // 4) generate a unified diff
+                var diff = generateInMemoryDiff(oldContent, localContent, file.getFileName());
+                currentDiff = diff;
+
+                SwingUtilities.invokeLater(() -> {
+                    diffArea.setText(diff);
+                    diffArea.setCaretPosition(0);
+                });
+            } catch (Exception ex) {
+                logger.error("Error generating compare-with-local diff", ex);
+                SwingUtilities.invokeLater(() -> {
+                    diffArea.setText("Error generating diff:\n" + ex.getMessage());
+                });
+            }
+            return null;
+        });
+    }
+
+    /**
+     * Produces a unified diff (similar to 'git diff') between oldContent and newContent.
+     * This implementation writes header lines for the file paths and then formats the diff.
+     *
+     * @param oldContent the content from the old (commit) version of the file
+     * @param newContent the content from the local (on-disk) version of the file
+     * @param fileName the file name to display in the header lines
+     * @return the unified diff as a String
+     */
+    private String generateInMemoryDiff(String oldContent, String newContent, String fileName) {
+        try (var out = new ByteArrayOutputStream();
+             var diffFormatter = new org.eclipse.jgit.diff.DiffFormatter(out)) {
+
+            // Use the default comparator and configure repository for blob lookups.
+            diffFormatter.setDiffComparator(org.eclipse.jgit.diff.RawTextComparator.DEFAULT);
+            var repo = (GitRepo) contextManager.getProject().getRepo();
+            diffFormatter.setRepository(repo.getGit().getRepository());
+
+            // Create RawText instances from the old and new contents.
+            var rawOld = new org.eclipse.jgit.diff.RawText(oldContent.getBytes(StandardCharsets.UTF_8));
+            var rawNew = new org.eclipse.jgit.diff.RawText(newContent.getBytes(StandardCharsets.UTF_8));
+
+            // Generate the list of edits using the Myers diff algorithm.
+            var diffAlgorithm = org.eclipse.jgit.diff.DiffAlgorithm.getAlgorithm(
+                    org.eclipse.jgit.diff.DiffAlgorithm.SupportedAlgorithm.MYERS);
+            org.eclipse.jgit.diff.EditList edits = diffAlgorithm.diff(
+                    org.eclipse.jgit.diff.RawTextComparator.DEFAULT, rawOld, rawNew);
+
+            // Write the header lines for the unified diff.
+            out.write(("--- a/" + fileName + "\n").getBytes(StandardCharsets.UTF_8));
+            out.write(("+++ b/" + fileName + "\n").getBytes(StandardCharsets.UTF_8));
+
+            // Format the diff using the available format() method (with no DiffDriver).
+            diffFormatter.format(edits, rawOld, rawNew);
+
+            return out.toString(StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            logger.error("Error creating in-memory diff", e);
+            return "<<error generating diff: " + e.getMessage() + ">>";
         }
     }
 }
