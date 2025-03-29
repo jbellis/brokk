@@ -17,6 +17,15 @@ class AnalyzerTest {
     Assertions.assertTrue(callIn.nonEmpty)
   }
 
+  @Test
+  def isClassInProjectTest(): Unit = {
+    val analyzer = getAnalyzer
+    Assertions.assertTrue(analyzer.isClassInProject("A"))
+    
+    Assertions.assertFalse(analyzer.isClassInProject("NonExistentClass"))
+    Assertions.assertFalse(analyzer.isClassInProject("console"))
+  }
+
   private def getAnalyzer = {
     TypescriptAnalyzer(Path.of("src/test/resources/testcode/typescript"))
   }

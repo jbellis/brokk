@@ -33,6 +33,11 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
   def this(sourcePath: Path, preloadedPath: Path, language: Language) =
     this(sourcePath, preloadedPath)
 
+  override def isClassInProject(className: String): Boolean = {
+    val td = cpg.typeDecl.name(className).l
+    td.nonEmpty && !(td.member.isEmpty && td.method.isEmpty && td.derivedTypeDecl.isEmpty)
+  }
+
   /**
    * TypeScript-specific method signature builder.
    */
