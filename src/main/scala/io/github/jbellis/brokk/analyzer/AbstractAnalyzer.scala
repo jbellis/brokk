@@ -883,7 +883,7 @@ abstract class AbstractAnalyzer protected (sourcePath: Path, private[brokk] val 
   /**
    * Write the underlying CPG to the specified path.
    */
-  def writeCpg(path: Path): Unit = {
+  override def writeCpg(path: Path): Unit = {
     Serialization.writeGraph(cpg.graph, path)
   }
 

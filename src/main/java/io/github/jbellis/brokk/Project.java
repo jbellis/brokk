@@ -16,12 +16,7 @@ import javax.swing.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public class Project implements IProject, AutoCloseable {
@@ -146,7 +141,11 @@ public class Project implements IProject, AutoCloseable {
             return Language.Java;
         }
         try {
-            return Language.valueOf(lang.toUpperCase());
+            // Find the Language enum value that matches the string, ignoring case
+            return Arrays.stream(Language.values())
+                .filter(v -> v.name().equalsIgnoreCase(lang))
+                .findFirst()
+                .orElse(Language.None);
         } catch (IllegalArgumentException e) {
             return Language.None;
         }

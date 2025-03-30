@@ -1,6 +1,7 @@
 package io.github.jbellis.brokk.analyzer
 
 import java.util
+import java.nio.file.Path
 
 trait IAnalyzer {
   def isEmpty: Boolean =
@@ -58,5 +59,13 @@ trait IAnalyzer {
    * @return A map where keys are fully-qualified method signatures and values are lists of CallSite objects
    */
   def getCallgraphFrom(methodName: String, depth: Int): java.util.Map[String, java.util.List[CallSite]] =
+    throw new UnsupportedOperationException()
+    
+  /**
+   * Writes the underlying CPG to the specified path.
+   *
+   * @param path The path where the CPG should be written
+   */
+  def writeCpg(path: Path): Unit =
     throw new UnsupportedOperationException()
 }

@@ -6,6 +6,7 @@ import java.awt.KeyboardFocusManager;
 import io.github.jbellis.brokk.analyzer.DisabledAnalyzer;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
 import io.github.jbellis.brokk.analyzer.JavaAnalyzer;
+import io.github.jbellis.brokk.analyzer.TypescriptAnalyzer;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.Language;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
@@ -196,7 +197,9 @@ public class AnalyzerWrapper implements AutoCloseable {
                 Code Intelligence by setting code_intelligence_language=%s in .brokk/project.properties.
                 Otherwise, Code Intelligence will refresh automatically when changes are made to tracked files.
                 You can change this with the code_intelligence_refresh parameter in .brokk/project.properties.
-                """.stripIndent().formatted(analyzer.getAllClasses().size(), duration, Language.Java, Language.None);
+                """.stripIndent().formatted(analyzer.getAllClasses().size(), duration,
+                    project.getAnalyzerLanguage(),
+                    Language.None);
                 listener.afterFirstBuild(msg);
                 logger.info(msg);
                 startWatcher();
@@ -214,16 +217,17 @@ public class AnalyzerWrapper implements AutoCloseable {
         return analyzer;
     }
 
-    private JavaAnalyzer createAndSaveAnalyzer() {
-        JavaAnalyzer newAnalyzer = new JavaAnalyzer(root);
+    private IAnalyzer createAndSaveAnalyzer() {
+        Language language = project.getAnalyzerLanguage();
+        IAnalyzer newAnalyzer = createAnalyzerForLanguage(language, root, null /** create new CPG**/);
         Path analyzerPath = root.resolve(".brokk").resolve("joern.cpg");
         newAnalyzer.writeCpg(analyzerPath);
-        logger.debug("Analyzer (re)build completed");
+        logger.debug("Analyzer (re)build completed for {}", language);
         return newAnalyzer;
     }
 
     /** Load a cached analyzer if it is up to date; otherwise return null. */
-    private JavaAnalyzer loadCachedAnalyzer(Path analyzerPath) {
+    private IAnalyzer loadCachedAnalyzer(Path analyzerPath) {
         if (!Files.exists(analyzerPath)) {
             return null;
         }
@@ -248,7 +252,8 @@ public class AnalyzerWrapper implements AutoCloseable {
         if (cpgMTime > maxTrackedMTime) {
             logger.debug("Using cached code intelligence data ({} > {})", cpgMTime, maxTrackedMTime);
             try {
-                return new JavaAnalyzer(root, analyzerPath);
+                Language language = project.getAnalyzerLanguage();
+                return createAnalyzerForLanguage(language, root, analyzerPath);
             } catch (Throwable th) {
                 logger.info("Error loading analyzer", th);
                 // fall through to return null
@@ -441,6 +446,30 @@ public class AnalyzerWrapper implements AutoCloseable {
                   });
         }
     }
+
+    /**
+     * Creates the appropriate analyzer based on the language
+     * @param language The language to create an analyzer for
+     * @param root The project root directory
+     * @param analyzerPath Optional path to a cached analyzer file (null for new analyzer)
+     * @return A newly created or loaded analyzer instance
+     */
+    private IAnalyzer createAnalyzerForLanguage(Language language, Path root, Path analyzerPath) {
+        return switch (language) {
+            case Java -> (analyzerPath == null) 
+                         ? new JavaAnalyzer(root) 
+                         : new JavaAnalyzer(root, analyzerPath);
+            case Typescript -> (analyzerPath == null) 
+                              ? new TypescriptAnalyzer(root) 
+                              : new TypescriptAnalyzer(root, analyzerPath);
+            // reuse JavaAnalyzer for the moment
+            case Python, None -> (analyzerPath == null) 
+                               ? new JavaAnalyzer(root) 
+                               : new JavaAnalyzer(root, analyzerPath);
+        };
+    }
+
+
 
     @Override
     public void close() {
