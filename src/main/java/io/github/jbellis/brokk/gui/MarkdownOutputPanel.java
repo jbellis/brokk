@@ -390,6 +390,7 @@ class MarkdownOutputPanel extends JPanel implements Scrollable
         htmlPane.setContentType("text/html");
         htmlPane.setEditable(false);
         htmlPane.setAlignmentX(LEFT_ALIGNMENT);
+        htmlPane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
         htmlPane.setText("<html><body></body></html>");
 
         if (textBackgroundColor != null) {
@@ -407,10 +408,11 @@ class MarkdownOutputPanel extends JPanel implements Scrollable
             var linkColor = isDarkTheme ? "#88b3ff" : "#0366d6";
 
             ss.addRule("body { font-family: sans-serif; background-color: "
-                               + bgColorHex + "; color: " + textColor + "; }");
+                               + bgColorHex + "; color: " + textColor + "; word-wrap: break-word; }");
             ss.addRule("a { color: " + linkColor + "; }");
             ss.addRule("code { padding: 2px; background-color: "
                                + (isDarkTheme ? "#3c3f41" : "#f6f8fa") + "; }");
+            ss.addRule("pre { white-space: pre-wrap; word-wrap: break-word; }");
         }
 
         return htmlPane;
