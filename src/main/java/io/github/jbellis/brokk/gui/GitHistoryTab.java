@@ -1,18 +1,14 @@
 package io.github.jbellis.brokk.gui;
 
-import io.github.jbellis.brokk.ContextFragment;
 import io.github.jbellis.brokk.ContextManager;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
 import io.github.jbellis.brokk.git.GitRepo;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * A panel representing a single tab showing the Git history for a specific file.
@@ -140,7 +136,7 @@ public class GitHistoryTab extends JPanel {
                         fileHistoryTable.setRowSelectionInterval(row, row);
                         String commitId = (String) fileHistoryModel.getValueAt(row, 3);
                         // Replaced local code with GitUIUtils:
-                        GitUIUtils.showFileHistoryDiff(contextManager, chrome, GitHistoryTab.this, commitId, file);
+                        GitUiUtil.showFileHistoryDiff(contextManager, chrome, GitHistoryTab.this, commitId, file);
                     }
                 }
             }
@@ -151,7 +147,7 @@ public class GitHistoryTab extends JPanel {
             int row = fileHistoryTable.getSelectedRow();
             if (row >= 0) {
                 String commitId = (String) fileHistoryModel.getValueAt(row, 3);
-                GitUIUtils.addFileChangeToContext(contextManager, chrome, commitId, getFilePath());
+                GitUiUtil.addFileChangeToContext(contextManager, chrome, commitId, getFilePath());
             }
         });
 
@@ -159,7 +155,7 @@ public class GitHistoryTab extends JPanel {
             int row = fileHistoryTable.getSelectedRow();
             if (row >= 0) {
                 String commitId = (String) fileHistoryTable.getValueAt(row, 3);
-                GitUIUtils.viewFileAtRevision(contextManager, chrome, commitId, getFilePath());
+                GitUiUtil.viewFileAtRevision(contextManager, chrome, commitId, getFilePath());
             }
         });
 
@@ -167,7 +163,7 @@ public class GitHistoryTab extends JPanel {
             int row = fileHistoryTable.getSelectedRow();
             if (row >= 0) {
                 String commitId = (String) fileHistoryTable.getValueAt(row, 3);
-                GitUIUtils.showFileHistoryDiff(contextManager, chrome, GitHistoryTab.this, commitId, file);
+                GitUiUtil.showFileHistoryDiff(contextManager, chrome, GitHistoryTab.this, commitId, file);
             }
         });
 
@@ -176,8 +172,8 @@ public class GitHistoryTab extends JPanel {
             if (row >= 0) {
                 String commitId = (String) fileHistoryTable.getValueAt(row, 3);
                 // Compare commit -> local
-                GitUIUtils.compareFileWithLocal(contextManager, chrome, GitHistoryTab.this,
-                                                commitId, getFilePath(), /*useParent=*/ false);
+                GitUiUtil.compareFileWithLocal(contextManager, chrome, GitHistoryTab.this,
+                                               commitId, getFilePath(), /*useParent=*/ false);
             }
         });
 
@@ -190,7 +186,7 @@ public class GitHistoryTab extends JPanel {
         });
 
         editFileItem.addActionListener(e ->
-                                               GitUIUtils.editFile(contextManager, getFilePath())
+                                               GitUiUtil.editFile(contextManager, getFilePath())
         );
 
         add(new JScrollPane(fileHistoryTable), BorderLayout.CENTER);

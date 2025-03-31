@@ -313,7 +313,7 @@ public class GitLogTab extends JPanel {
             int[] selectedRows = commitsTable.getSelectedRows();
             if (selectedRows.length >= 1) {
                 // Now we rely on GitUIUtils for the multi-commit diff
-                GitUIUtils.addCommitRangeToContext(contextManager, chrome, selectedRows, commitsTableModel);
+                GitUiUtil.addCommitRangeToContext(contextManager, chrome, selectedRows, commitsTableModel);
             }
         });
         softResetItem.addActionListener(e -> {
@@ -482,8 +482,8 @@ public class GitLogTab extends JPanel {
                         if (selRows.length == 1 && isFileNode(path)) {
                             String commitId = (String) commitsTableModel.getValueAt(selRows[0], 3);
                             String filePath = getFilePathFromTreePath(path);
-                            GitUIUtils.showFileDiffDialog(contextManager, chrome, GitLogTab.this,
-                                                          commitId, filePath);
+                            GitUiUtil.showFileDiffDialog(contextManager, chrome, GitLogTab.this,
+                                                         commitId, filePath);
                         }
                     }
                 }
@@ -497,8 +497,8 @@ public class GitLogTab extends JPanel {
                 if (!selectedFiles.isEmpty()) {
                     int[] selRows = commitsTable.getSelectedRows();
                     if (selRows.length >= 1) {
-                        GitUIUtils.addFilesChangeToContext(contextManager, chrome, selRows,
-                                                           commitsTableModel, selectedFiles);
+                        GitUiUtil.addFilesChangeToContext(contextManager, chrome, selRows,
+                                                          commitsTableModel, selectedFiles);
                     }
                 }
             }
@@ -510,8 +510,8 @@ public class GitLogTab extends JPanel {
                 int[] selRows = commitsTable.getSelectedRows();
                 if (selRows.length == 1) {
                     String commitId = (String) commitsTableModel.getValueAt(selRows[0], 3);
-                    GitUIUtils.compareFileWithLocal(contextManager, chrome, GitLogTab.this,
-                                                    commitId, filePath, /*useParent=*/ false);
+                    GitUiUtil.compareFileWithLocal(contextManager, chrome, GitLogTab.this,
+                                                   commitId, filePath, /*useParent=*/ false);
                 }
             }
         });
@@ -522,8 +522,8 @@ public class GitLogTab extends JPanel {
                 int[] selRows = commitsTable.getSelectedRows();
                 if (selRows.length == 1) {
                     String commitId = (String) commitsTableModel.getValueAt(selRows[0], 3);
-                    GitUIUtils.compareFileWithLocal(contextManager, chrome, GitLogTab.this,
-                                                    commitId, filePath, /*useParent=*/ true);
+                    GitUiUtil.compareFileWithLocal(contextManager, chrome, GitLogTab.this,
+                                                   commitId, filePath, /*useParent=*/ true);
                 }
             }
         });
@@ -534,8 +534,8 @@ public class GitLogTab extends JPanel {
                 if (selRows.length == 1 && isFileNode(paths[0])) {
                     String commitId = (String) commitsTableModel.getValueAt(selRows[0], 3);
                     String filePath = getFilePathFromTreePath(paths[0]);
-                    GitUIUtils.showFileDiffDialog(contextManager, chrome, GitLogTab.this,
-                                                  commitId, filePath);
+                    GitUiUtil.showFileDiffDialog(contextManager, chrome, GitLogTab.this,
+                                                 commitId, filePath);
                 }
             }
         });
@@ -554,7 +554,7 @@ public class GitLogTab extends JPanel {
             if (paths != null) {
                 var selectedFiles = getSelectedFilePaths(paths);
                 for (var fp : selectedFiles) {
-                    GitUIUtils.editFile(contextManager, fp);
+                    GitUiUtil.editFile(contextManager, fp);
                 }
             }
         });
@@ -670,7 +670,7 @@ public class GitLogTab extends JPanel {
             }
             private void handleBranchPopup(MouseEvent e) {
                 if (e.isPopupTrigger()) {
-                    int row = branchTable.rowAtPoint(e.getX());
+                    int row = branchTable.rowAtPoint(e.getPoint());
                     if (row >= 0) {
                         if (!branchTable.isRowSelected(row)) {
                             branchTable.setRowSelectionInterval(row, row);

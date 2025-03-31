@@ -25,7 +25,7 @@ public interface IGitRepo {
         throw new UnsupportedOperationException();
     }
 
-    default showFileDiff(String head, String commitId, ProjectFile file) {
+    default String showFileDiff(String head, String commitId, ProjectFile file) {
         throw new UnsupportedOperationException();
     }
 
@@ -34,6 +34,10 @@ public interface IGitRepo {
     }
 
     default String showDiff(String firstCommitId, String s) {
+        throw new UnsupportedOperationException();
+    }
+
+    default List<ProjectFile> listChangedFilesInCommitRange(String firstCommitId, String lastCommitId) {
         throw new UnsupportedOperationException();
     }
 }

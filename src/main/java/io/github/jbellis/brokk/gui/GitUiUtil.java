@@ -15,9 +15,9 @@ import java.util.stream.Collectors;
  * Static utilities for showing diffs, capturing diffs, or editing files
  * in the Git UI, removing duplicated code across multiple panels.
  */
-public final class GitUIUtils
+public final class GitUiUtil
 {
-    private GitUIUtils() {}
+    private GitUiUtil() {}
 
     /**
      * Capture uncommitted diffs for the specified files, adding the result to the context.
@@ -171,15 +171,21 @@ public final class GitUIUtils
         }
         contextManager.submitUserTask("Viewing file at revision", () -> {
             var file = new ProjectFile(contextManager.getRoot(), filePath);
-            var content = repo.getFileContent(commitId, file);
+            String content = null;
+            try {
+                content = repo.getFileContent(commitId, file);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
             if (content.isEmpty()) {
                 chrome.systemOutput("File not found in this revision or is empty.");
                 return;
             }
+            String finalContent = content;
             SwingUtilities.invokeLater(() -> {
                 var shortHash = (commitId.length() > 7) ? commitId.substring(0, 7) : commitId;
                 var title = "%s at %s".formatted(file.getFileName(), shortHash);
-                var fragment = new ContextFragment.StringFragment(content, title);
+                var fragment = new ContextFragment.StringFragment(finalContent, title);
                 chrome.openFragmentPreview(fragment, SyntaxConstants.SYNTAX_STYLE_JAVA);
             });
         });

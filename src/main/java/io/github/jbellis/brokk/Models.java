@@ -144,6 +144,10 @@ public final class Models {
                 logger.info("Initialized quickModel with {} => {}", matchingEntry.getKey(), preferredQuickModelLocation);
             }
         } else {
+            if (modelLocations.isEmpty()) {
+                System.out.println("Unable to load models, exiting");
+                System.exit(1);
+            }
             logger.warn("Quick model unavailable!? Using first available");
             var firstEntry = modelLocations.entrySet().iterator().next();
             quickModel = get(firstEntry.getKey());

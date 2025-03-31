@@ -1,13 +1,11 @@
 package io.github.jbellis.brokk.gui;
 
-import io.github.jbellis.brokk.ContextFragment;
 import io.github.jbellis.brokk.ContextManager;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
 import io.github.jbellis.brokk.git.GitRepo;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
-import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
@@ -102,7 +100,7 @@ public class GitCommitTab extends JPanel {
                         String path     = (String) uncommittedFilesTable.getValueAt(row, 1);
                         String filePath = path.isEmpty() ? filename : path + "/" + filename;
                         // Unified call:
-                        GitUIUtils.showUncommittedFileDiff(contextManager, chrome, GitCommitTab.this, filePath);
+                        GitUiUtil.showUncommittedFileDiff(contextManager, chrome, GitCommitTab.this, filePath);
                     }
                 }
             }
@@ -147,14 +145,14 @@ public class GitCommitTab extends JPanel {
                 String filename = (String) uncommittedFilesTable.getValueAt(row, 0);
                 String path     = (String) uncommittedFilesTable.getValueAt(row, 1);
                 String filePath = path.isEmpty() ? filename : path + "/" + filename;
-                GitUIUtils.showUncommittedFileDiff(contextManager, chrome, this, filePath);
+                GitUiUtil.showUncommittedFileDiff(contextManager, chrome, this, filePath);
             }
         });
 
         captureDiffItem.addActionListener(e -> {
             // Unified call:
             var selectedFiles = getSelectedFilesFromTable();
-            GitUIUtils.captureUncommittedDiff(contextManager, chrome, selectedFiles);
+            GitUiUtil.captureUncommittedDiff(contextManager, chrome, selectedFiles);
         });
 
         editFileItem.addActionListener(e -> {
@@ -163,7 +161,7 @@ public class GitCommitTab extends JPanel {
                 String filename = (String) uncommittedFilesTable.getValueAt(row, 0);
                 String path     = (String) uncommittedFilesTable.getValueAt(row, 1);
                 String filePath = path.isEmpty() ? filename : path + "/" + filename;
-                GitUIUtils.editFile(contextManager, filePath);
+                GitUiUtil.editFile(contextManager, filePath);
             }
         });
 
