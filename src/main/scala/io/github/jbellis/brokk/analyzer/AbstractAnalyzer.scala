@@ -32,6 +32,22 @@ import scala.util.matching.Regex
 abstract class AbstractAnalyzer protected (sourcePath: Path, private[brokk] val cpg: Cpg)
   extends IAnalyzer with Closeable {
 
+  /**
+   * Extract just the last symbol name (a.b.C -> C, a.b.C.foo -> foo)
+   */
+  def extractName(fqName: String): String
+
+  /**
+   * Extract for classes: just the class name
+   * for functions and fields: className.memberName (last two components)
+   */
+  def extractShortName(fqName: String, kind: CodeUnitType): String
+
+  /**
+   * Extract the package portion of the fully qualified name
+   */
+  def extractPackageName(fqName: String): String
+
   // Logger instance for this class
   private val logger = LoggerFactory.getLogger(getClass)
 

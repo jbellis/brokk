@@ -169,6 +169,54 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
   }
 
   /**
+   * Extract just the last symbol name (a.b.C -> C, a.b.C.foo -> foo)
+   */
+  override def extractName(fqName: String): String = {
+    // Handle TypeScript module syntax
+    if (fqName.contains("::program:")) {
+      fqName.split("::program:").last.split("\\.").last
+    } else {
+      val lastDotIndex = fqName.lastIndexOf('.')
+      if (lastDotIndex == -1) fqName else fqName.substring(lastDotIndex + 1)
+    }
+  }
+
+  /**
+   * Extract for classes: just the class name
+   * for functions and fields: className.memberName (last two components)
+   */
+  override def extractShortName(fqName: String, kind: CodeUnitType): String = {
+    // For TypeScript, we handle both dot-notation and ::program: notation
+    val normalizedName = fqName.replace("::program:", ".")
+    val parts = normalizedName.split("\\.")
+
+    kind match {
+      case CodeUnitType.CLASS => parts.last
+      case _ =>
+        if (parts.length >= 2)
+          s"${parts(parts.length - 2)}.${parts.last}"
+        else
+          parts.last
+    }
+  }
+
+  /**
+   * Extract the package portion of the fully qualified name
+   * For TypeScript, we consider the module path as the package name
+   */
+  override def extractPackageName(fqName: String): String = {
+    if (fqName.contains("::program:")) {
+      val moduleParts = fqName.split("::program:")
+      if (moduleParts.length > 1) moduleParts(0) else ""
+    } else {
+      // For conventional dot notation, use the same logic as Java
+      val parts = fqName.split("\\.")
+      parts.takeWhile(part => part.isEmpty || !Character.isUpperCase(part.charAt(0)))
+        .mkString(".")
+    }
+  }
+
+  /**
    * Recursively builds a structural "skeleton" for a given TypeDecl.
    * Override to handle TypeScript specific formatting.
    */

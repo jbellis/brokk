@@ -94,6 +94,40 @@ class JavaAnalyzer private(sourcePath: Path, cpgInit: Cpg)
     } else processType(t)
   }
 
+  /**
+   * Extract just the last symbol name (a.b.C -> C, a.b.C.foo -> foo)
+   */
+  override def extractName(fqName: String): String = {
+    val lastDotIndex = fqName.lastIndexOf('.')
+    if (lastDotIndex == -1) fqName else fqName.substring(lastDotIndex + 1)
+  }
+
+  /**
+   * Extract for classes: just the class name
+   * for functions and fields: className.memberName (last two components)
+   */
+  override def extractShortName(fqName: String, kind: CodeUnitType): String = {
+    val parts = fqName.split("\\.")
+    kind match {
+      case CodeUnitType.CLASS => parts.last
+      case _ =>
+        if (parts.length >= 2)
+          s"${parts(parts.length - 2)}.${parts.last}"
+        else
+          parts.last
+    }
+  }
+
+  /**
+   * Extract the package portion of the fully qualified name up to the first capitalized component
+   * in the dot-separated hierarchy.
+   */
+  override def extractPackageName(fqName: String): String = {
+    val parts = fqName.split("\\.")
+    parts.takeWhile(part => part.isEmpty || !Character.isUpperCase(part.charAt(0)))
+      .mkString(".")
+  }
+
   override protected def methodsFromName(resolvedMethodName: String): List[Method] = {
     val escaped = Regex.quote(resolvedMethodName)
     cpg.method.fullName(escaped + ":.*").l
