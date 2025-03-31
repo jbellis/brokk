@@ -583,6 +583,11 @@ public interface ContextFragment extends Serializable {
         public static final AutoContext REBUILDING =
                 new AutoContext(new SkeletonFragment(Map.of(CodeUnit.cls(DUMMY, "Updating"), "")));
 
+        public AutoContext {
+            assert fragment != null;
+            assert !fragment.skeletons.isEmpty();
+        }
+
         public boolean isEmpty() {
             return fragment.isEmpty();
         }
@@ -612,7 +617,7 @@ public interface ContextFragment extends Serializable {
         @Override
         public String shortDescription() {
             if (isEmpty()) {
-                return "Autosummary " + fragment.skeletons.keySet().stream().findFirst().orElse(CodeUnit.cls(null, "None"));
+                return "Autosummary " + fragment.skeletons.keySet().stream().findFirst().orElseThrow();
             }
             return "Autosummary of " + fragment.skeletons.keySet().stream()
                     .map(CodeUnit::name)
