@@ -54,6 +54,8 @@ public class LLM {
         // we give more specific feedback when we need to make another request
         io.systemOutput("Request sent");
 
+        boolean isComplete = false;
+
         while (true) {
             // Check for interruption before sending to LLM
             if (Thread.currentThread().isInterrupted()) {
@@ -74,26 +76,26 @@ public class LLM {
             // 1) If user cancelled
             if (streamingResult.cancelled()) {
                 io.systemOutput("Session interrupted");
-                return;
+                break;
             }
 
             // 2) Handle errors or empty responses
             if (streamingResult.error() != null) {
                 logger.warn("Error from LLM: {}", streamingResult.error().getMessage());
                 io.systemOutput("LLM returned an error even after retries.");
-                return;
+                break;
             }
 
             var llmResponse = streamingResult.chatResponse();
             if (llmResponse == null) {
                 io.systemOutput("Empty LLM response even after retries. Stopping session.");
-                return;
+                break;
             }
 
             String llmText = llmResponse.aiMessage().text();
             if (llmText.isBlank()) {
                 io.systemOutput("Blank LLM response even after retries. Stopping session.");
-                return;
+                break;
             }
 
             // We got a valid response
@@ -190,9 +192,9 @@ public class LLM {
             var buildReflection = getBuildReflection(coder.contextManager, io, buildErrors);
             blocksAppliedWithoutBuild = 0;
             if (buildReflection.isEmpty()) {
-                break;
+                isComplete = true;
             }
-
+d
             // Check if we should continue trying
             if (!shouldContinue(coder, parseErrorAttempts, buildErrors, io)) {
                 break;
@@ -204,6 +206,9 @@ public class LLM {
 
         // Add all pending messages to history in one batch
         if (!pendingHistory.isEmpty()) {
+            if (!isComplete) {
+                userInput += " [incomplete]"
+            }
             coder.contextManager.addToHistory(pendingHistory, originalContents, userInput);
         }
     }
@@ -248,17 +253,32 @@ public class LLM {
         var instructionsMsg = QuickEditPrompts.instance.formatInstructions(oldText, instructions);
         messages.add(new UserMessage(instructionsMsg));
 
+        // Record the original content so we can undo if necessary
+        var originalContents = Map.of(file, fileContents);
+        
+        // Initialize pending history with the instruction
+        var pendingHistory = new ArrayList<ChatMessage>();
+        pendingHistory.add(new UserMessage(instructionsMsg));
+
         // No echo for Quick Edit, use static quickModel
         var result = coder.sendStreaming(Models.quickModel(), messages, false);
+
         if (result.cancelled() || result.error() != null || result.chatResponse() == null) {
             io.systemOutput("Quick edit failed or was cancelled.");
+            // Add to history even if canceled, so we can potentially undo any partial changes
+            cm.addToHistory(pendingHistory, originalContents, "Quick Edit (canceled): " + file.getFileName());
             return;
         }
         var responseText = result.chatResponse().aiMessage().text();
         if (responseText == null || responseText.isBlank()) {
             io.systemOutput("LLM returned empty response for quick edit.");
+            // Add to history even if it failed
+            cm.addToHistory(pendingHistory, originalContents, "Quick Edit (failed): " + file.getFileName());
             return;
         }
+        
+        // Add the response to pending history
+        pendingHistory.add(new AiMessage(responseText));
 
         // Extract the new snippet
         var newSnippet = EditBlock.extractCodeFromTripleBackticks(responseText).trim();
@@ -273,6 +293,8 @@ public class LLM {
         try {
             if (!fileContents.contains(oldText)) {
                 io.systemOutput("The selected snippet was not found in the file. No changes applied.");
+                // Add to history even if it failed
+                cm.addToHistory(List.of(new UserMessage(instructionsMsg)), originalContents, "Quick Edit (failed): " + file.getFileName());
                 return;
             }
             updatedFileContents = fileContents.replaceFirst(
@@ -281,6 +303,8 @@ public class LLM {
             );
         } catch (Exception ex) {
             io.systemOutput("Failed to replace text: " + ex.getMessage());
+            // Add to history even if it failed
+            cm.addToHistory(List.of(new UserMessage(instructionsMsg)), originalContents, "Quick Edit (failed): " + file.getFileName());
             return;
         }
 
@@ -291,14 +315,7 @@ public class LLM {
             throw new java.io.UncheckedIOException(e);
         }
 
-        // Record the original content so we can undo if necessary
-        var originalContents = Map.of(file, fileContents);
-
-        // Save to context history
-        var pendingHistory = List.of(
-                new UserMessage(instructionsMsg),
-                new AiMessage(responseText)
-        );
+        // Save to context history - pendingHistory already contains both the instruction and the response
         cm.addToHistory(pendingHistory, originalContents, "Quick Edit: " + file.getFileName(), responseText);
     }
 
