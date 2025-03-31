@@ -6,6 +6,10 @@ export class A {
 
     private fieldA: A;
 
+    private fieldCArray: Array<A>;
+
+    private fieldDArray: B[];
+
     constructor(private bar?: B) {
     }
 

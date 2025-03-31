@@ -77,10 +77,10 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
     val paramList = m.parameter
       .sortBy(_.order).filterNot(_.name == "this").l
       .map { p =>
-//        val paramType = sanitizeType(makeSimpleType(extractType(p.properties)))
-//        val typeAnnotation = if (paramType == "any") "" else s": $paramType"
-//        s"${p.name}${typeAnnotation}"
-          s"${p.code}" // this has more information and parameters are always in one line
+        //        val paramType = sanitizeType(makeSimpleType(extractType(p.properties)))
+        //        val typeAnnotation = if (paramType == "any") "" else s": $paramType"
+        //        s"${p.name}${typeAnnotation}"
+        s"${p.code}" // this has more information and parameters are always in one line
       }
       .mkString(", ")
 
@@ -112,6 +112,7 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
       val result = t.replace("__ecma.Number", "number")
         .replace("__ecma.String", "string")
         .replace("__ecma.Boolean", "boolean")
+        .replace("__ecma.Array", "[]")
         .replace("ANY", "any")
         .replace("VOID", "void")
       result
@@ -183,17 +184,21 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
       .filterNot(_.name.startsWith("<clinit>")) // skip static constructors
       .filterNot(_.name.startsWith("<lambda>")) // skip lambdas which are arrow functions, these will covered by fields
       .foreach { m =>
-      sb.append("  " * (indent + 1))
-        .append(methodSignature(m))
-        .append(" {...}\n")
-    }
+        sb.append("  " * (indent + 1))
+          .append(methodSignature(m))
+          .append(" {...}\n")
+      }
     // Fields
-    td.member.filterNot(m => m.astParent.astChildren.isMethod.name.contains(m.name)).foreach { f =>
-      val modifiers = f.modifier.map(_.modifierType.toLowerCase).filter(_.nonEmpty)
-      val modString = if (modifiers.nonEmpty) filterModifiers(modifiers.toList).mkString(" ") + " " else ""
-      sb.append("  " * (indent + 1))
-        .append(s"${modString}${f.name}: ${sanitizeType(makeSimpleType(extractType(f.properties)))};\n")
-    }
+    td.member
+      .filterNot(m => m.astParent.astChildren.isMethod.name.contains(m.name))
+      .groupBy(_.name)
+      .map(_._2.head) // Take only the first occurrence; there can be multiple fields with the same name
+      .foreach { f =>
+        val modifiers = f.modifier.map(_.modifierType.toLowerCase).filter(_.nonEmpty)
+        val modString = if (modifiers.nonEmpty) filterModifiers(modifiers.toList).mkString(" ") + " " else ""
+        sb.append("  " * (indent + 1))
+          .append(s"${modString}${f.name}: ${sanitizeType(makeSimpleType(extractType(f.properties)))};\n")
+      }
     sb.append("  " * indent).append("}")
     sb.toString
   }
@@ -217,21 +222,21 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
     // Collect all types from different sources
     val allTypes = scala.collection.mutable.ListBuffer[String]()
 
-    // Add DYNAMIC_TYPE_HINT_FULL_NAME types
+    // Add DYNAMIC_TYPE_HINT_FULL_NAME types (Prio 3)
     properties.get("DYNAMIC_TYPE_HINT_FULL_NAME") match {
       case Some(types: IndexedSeq[_]) =>
         allTypes ++= types.map(_.toString)
       case _ => // Do nothing
     }
 
-    // Add POSSIBLE_TYPES
+    // Add POSSIBLE_TYPES (Prio 2)
     properties.get("POSSIBLE_TYPES") match {
       case Some(types: IndexedSeq[_]) =>
         allTypes ++= types.map(_.toString)
       case _ => // Do nothing
     }
 
-    // Add TYPE_FULL_NAME
+    // Add TYPE_FULL_NAME (Prio 1)
     properties.get("TYPE_FULL_NAME") match {
       case Some(t: String) if t.nonEmpty =>
         allTypes += t
@@ -245,16 +250,18 @@ class TypescriptAnalyzer private(sourcePath: Path, cpgInit: Cpg)
       return "any"
     }
 
-    // First priority: find types containing "::program:"
+    // First priority: find types containing "::program:" => internal full types
     val programTypes = validTypes.filter(_.contains("::program:"))
     if (programTypes.nonEmpty) {
-      return programTypes.head
+      return programTypes.head // pick by prio
     }
 
     // Second priority: find non-ANY types
-    val nonAnyTypes = validTypes.filterNot(t => t == "ANY" || t == "any")
-    if (nonAnyTypes.nonEmpty) {
-      return nonAnyTypes.head
+    val nonSupportedTypes = validTypes.filterNot(
+      t => t == "ANY" || t == "any" || t == "this"
+        || t.contains("<returnValue>")) // i.e. dynamic external types like @angular/common/http:HttpClient:get:<returnValue>
+    if (nonSupportedTypes.nonEmpty) {
+      return nonSupportedTypes.head // pick by prio
     }
 
     // Default to "any"

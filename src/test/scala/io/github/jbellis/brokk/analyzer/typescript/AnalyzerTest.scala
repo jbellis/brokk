@@ -87,9 +87,11 @@ class AnalyzerTest {
         |  public static method4(foo: number, bar: number | null): number {...}
         |  public method5(b: B): B {...}
         |  public method6(): void {...}
-        |  public foo: () => string;
-        |  public fieldB: B;
+        |  private fieldDArray: [];
         |  private fieldA: A;
+        |  public fieldB: B;
+        |  private fieldCArray: Array<A>;
+        |  public foo: () => string;
         |}""".stripMargin
 
     Assertions.assertEquals(expected, skeleton)
