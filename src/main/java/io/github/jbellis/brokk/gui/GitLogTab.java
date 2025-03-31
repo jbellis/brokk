@@ -1461,7 +1461,7 @@ public class GitLogTab extends JPanel {
     /**
      * Format commit date to show e.g. "HH:MM:SS today" if it is today's date.
      */
-    protected String formatCommitDate(Date date, java.time.LocalDate today) {
+    static String formatCommitDate(Date date, java.time.LocalDate today) {
         try {
             java.time.LocalDate commitDate = date.toInstant()
                     .atZone(java.time.ZoneId.systemDefault())
