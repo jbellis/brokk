@@ -30,15 +30,8 @@ public class LLMTools {
         this.specs = ToolSpecifications.toolSpecificationsFrom(this);
     }
 
-    /**
-     * Overwrites or creates a file with the given contents.
-     * Throws an error if the file is read-only.
-     */
-    @Tool(
-            name = "replace_file",
-            value = "Replace or create the entire file content. Usage: replace_file(\"path/to/MyClass.java\", \"the entire text...\")."
-    )
-    public String replace_file(
+    @Tool(value = "Replace or create the entire file content. Usage: replaceFile(\"path/to/MyClass.java\", \"the entire text...\").")
+    public String replaceFile(
             @P("The path of the file to overwrite") String filename,
             @P("The new file content") String text
     ) {
@@ -55,16 +48,8 @@ public class LLMTools {
         }
     }
 
-    /**
-     * Replaces the text of a function body in a file, identified by its
-     * fully-qualified method name and a list of parameter variable names.
-     * If not found or the file is read-only, throws an exception.
-     */
-    @Tool(
-            name = "replace_function",
-            value = "Replace the entire function body, identified by fully qualified function name (e.g. com.foo.Bar.doStuff) and param names. The param names must match exactly."
-    )
-    public String replace_function(
+    @Tool(value = "Replace the entire function body, identified by fully qualified function name (e.g. com.foo.Bar.doStuff) and param names. The param names must match exactly. Do not include param types, just names.")
+    public String replaceFunction(
             @P("The fully qualified function name, e.g. com.example.Foo.barMethod") String fullyQualifiedFunctionName,
             @P("List of parameter variable names, e.g. [\"arg1\", \"userId\"]") List<String> functionParameterNames,
             @P("The new code for the entire function (no extra braces)") String newFunctionBody
@@ -119,19 +104,11 @@ public class LLMTools {
         return "Successfully replaced function " + fullyQualifiedFunctionName + " in " + file;
     }
 
-    /**
-     * Tries to replace the first occurrence of oldText with newText in the file,
-     * using partial/fuzzy matching from EditBlock. If oldText is empty,
-     * we append newText to the file. If no match found, throw an error.
-     */
-    @Tool(
-            name = "replace_text",
-            value = "Replace the first occurrence of 'old_text' in the specified file with 'new_text'. If oldText is empty, newText is appended."
-    )
-    public String replace_text(
+    @Tool(value = "Replace the first occurrence of `oldLines` in the specified file with `newLines`. If oldLines is empty, newLines is appended. oldLines and newLines must both be full lines, not substrings!")
+    public String replaceLines(
             @P("Name of the file to modify") String filename,
-            @P("Text to search for") String oldText,
-            @P("Text to insert in its place") String newText
+            @P("Text to search for") String oldLines,
+            @P("Text to insert in its place") String newLines
     ) {
         var file = contextManager.toFile(filename);
         if (file == null || !contextManager.getEditableFiles().contains(file)) {
@@ -144,9 +121,9 @@ public class LLMTools {
             throw new ToolExecutionError("Could not read file " + filename + ": " + e.getMessage());
         }
         // Re-use partial matching from EditBlock
-        String updated = EditBlock.doReplace(original, oldText, newText);
+        String updated = EditBlock.doReplace(original, oldLines, newLines);
         if (updated == null) {
-            throw new ToolExecutionError("No matching location found for old_text in " + filename);
+            throw new ToolExecutionError("No matching location found for oldLines in " + filename);
         }
         try {
             file.write(updated);
@@ -191,23 +168,23 @@ public class LLMTools {
             );
 
             result = switch (request.name()) {
-                case "replace_file" -> {
+                case "replaceFile" -> {
                     var filename = (String) argMap.get("filename");
                     var text = (String) argMap.get("text");
-                    yield replace_file(filename, text);
+                    yield replaceFile(filename, text);
                 }
-                case "replace_function" -> {
+                case "replaceFunction" -> {
                     var fullyQualifiedFunctionName = (String) argMap.get("fullyQualifiedFunctionName");
                     @SuppressWarnings("unchecked")
                     var functionParameterNames = (List<String>) argMap.get("functionParameterNames");
                     var newFunctionBody = (String) argMap.get("newFunctionBody");
-                    yield replace_function(fullyQualifiedFunctionName, functionParameterNames, newFunctionBody);
+                    yield replaceFunction(fullyQualifiedFunctionName, functionParameterNames, newFunctionBody);
                 }
-                case "replace_text" -> {
+                case "replaceLines" -> {
                     var filename = (String) argMap.get("filename");
                     var oldText = (String) argMap.get("oldText");
                     var newText = (String) argMap.get("newText");
-                    yield replace_text(filename, oldText, newText);
+                    yield replaceLines(filename, oldText, newText);
                 }
                 default -> "ERROR: Tool not recognized or not implemented: " + request.name();
             };

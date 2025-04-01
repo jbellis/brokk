@@ -902,14 +902,14 @@ public class SearchAgent {
                 .anyMatch(call -> call.request.name().equals(toolName));
     }
 
-    @Tool("""
+    @Tool(value = """
     Search for symbols (class/method/field definitions) using Joern.
     This should usually be the first step in a search.
     """)
     public String searchSymbols(
-            @P(value = "Case-insensitive Joern regex patterns to search for code symbols. Since ^ and $ are implicitly included, YOU MUST use explicit wildcarding (e.g., .*Foo.*, Abstract.*, [a-z]*DAO) unless you really want exact matches.")
+            @P("Case-insensitive Joern regex patterns to search for code symbols. Since ^ and $ are implicitly included, YOU MUST use explicit wildcarding (e.g., .*Foo.*, Abstract.*, [a-z]*DAO) unless you really want exact matches.")
             List<String> patterns,
-            @P(value = "Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
+            @P("Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
             String reasoning
     ) {
         if (patterns.isEmpty()) {
@@ -1005,13 +1005,13 @@ public class SearchAgent {
     /**
      * Search for usages of symbols.
      */
-    @Tool("""
+    @Tool(value = """
     Returns the source code of blocks where symbols are used. Use this to discover how classes, methods, or fields are actually used throughout the codebase.
     """)
     public String getUsages(
-            @P(value = "Fully qualified symbol names (package name, class name, optional member name) to find usages for")
+            @P("Fully qualified symbol names (package name, class name, optional member name) to find usages for")
             List<String> symbols,
-            @P(value = "Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
+            @P("Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
             String reasoning
     ) {
         if (symbols.isEmpty()) {
@@ -1039,12 +1039,12 @@ public class SearchAgent {
     /**
      * Find related code using PageRank.
      */
-    @Tool("""
+    @Tool(value = """
     Returns a list of related class names, ordered by relevance.
     Use this for exploring and also when you're almost done and want to double-check that you haven't missed anything.
     """)
     public String getRelatedClasses(
-            @P(value = "List of fully qualified class names.")
+            @P("List of fully qualified class names.")
             List<String> classNames
     ) {
         if (classNames.isEmpty()) {
@@ -1085,12 +1085,12 @@ public class SearchAgent {
     /**
      * Get the skeletons (structures) of classes.
      */
-    @Tool("""
+    @Tool(value = """
     Returns an overview of classes' contents, including fields and method signatures.
     Use this to understand class structures and APIs much faster than fetching full source code.
     """)
     public String getClassSkeletons(
-            @P(value = "Fully qualified class names to get the skeleton structures for")
+            @P("Fully qualified class names to get the skeleton structures for")
             List<String> classNames
     ) {
         if (classNames.isEmpty()) {
@@ -1112,15 +1112,15 @@ public class SearchAgent {
     /**
      * Get the full source code of classes.
      */
-    @Tool("""
+    @Tool(value = """
     Returns the full source code of classes.
     This is expensive, so prefer requesting skeletons or method sources when possible.
     Use this when you need the complete implementation details, or if you think multiple methods in the classes may be relevant.
     """)
     public String getClassSources(
-            @P(value = "Fully qualified class names to retrieve the full source code for")
+            @P("Fully qualified class names to retrieve the full source code for")
             List<String> classNames,
-            @P(value = "Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
+            @P("Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
             String reasoning
     ) {
         if (classNames.isEmpty()) {
@@ -1156,11 +1156,11 @@ public class SearchAgent {
     /**
      * Get the source code of methods.
      */
-    @Tool("""
+    @Tool(value = """
     Returns the full source code of specific methods. Use this to examine the implementation of particular methods without retrieving the entire classes.
     """)
     public String getMethodSources(
-            @P(value = "Fully qualified method names (package name, class name, method name) to retrieve sources for")
+            @P("Fully qualified method names (package name, class name, method name) to retrieve sources for")
             List<String> methodNames
     ) {
         if (methodNames.isEmpty()) {
@@ -1193,12 +1193,12 @@ public class SearchAgent {
         return result.toString();
     }
 
-    @Tool("""
+    @Tool(value = """
     Returns the call graph to a depth of 5 showing which methods call the given method and one line of source code for each invocation.
     Use this to understand method dependencies and how code flows into a method.
     """)
     public String getCallGraphTo(
-            @P(value = "Fully qualified method name (package name, class name, method name) to find callers for")
+            @P("Fully qualified method name (package name, class name, method name) to find callers for")
             String methodName
     ) {
         if (methodName.isBlank()) {
@@ -1209,12 +1209,12 @@ public class SearchAgent {
         return AnalyzerUtil.formatCallGraph(graph, methodName, false);
     }
 
-    @Tool("""
+    @Tool(value = """
     Returns the call graph to a depth of 5 showing which methods are called by the given method and one line of source code for each invocation.
     Use this to understand how a method's logic flows to other parts of the codebase.
     """)
     public String getCallGraphFrom(
-            @P(value = "Fully qualified method name (package name, class name, method name) to find callees for")
+            @P("Fully qualified method name (package name, class name, method name) to find callees for")
             String methodName
     ) {
         if (methodName.isBlank()) {
@@ -1225,11 +1225,11 @@ public class SearchAgent {
         return AnalyzerUtil.formatCallGraph(graph, methodName, true);
     }
 
-    @Tool("Provide a final answer to the query. Use this when you have enough information to fully address the query.")
+    @Tool(value = "Provide a final answer to the query. Use this when you have enough information to fully address the query.")
     public String answer(
-            @P(value = "Comprehensive explanation that answers the query. Include relevant source code snippets and explain how they relate to the query. Format the entire explanation with Markdown.")
+            @P("Comprehensive explanation that answers the query. Include relevant source code snippets and explain how they relate to the query. Format the entire explanation with Markdown.")
             String explanation,
-            @P(value = "List of fully qualified class names (FQCNs) of ALL classes relevant to the explanation. Do not skip even minor details!")
+            @P("List of fully qualified class names (FQCNs) of ALL classes relevant to the explanation. Do not skip even minor details!")
             List<String> classNames
     ) {
         if (explanation.isBlank()) {
@@ -1242,14 +1242,14 @@ public class SearchAgent {
         return explanation;
     }
 
-    @Tool("""
+    @Tool(value = """
     Returns file names whose text contents match Java regular expression patterns.
     This is slower than searchSymbols but can find references to external dependencies and comment strings.
     """)
     public String searchSubstrings(
-            @P(value = "Java-style regex patterns to search for within file contents. Unlike searchSymbols this does not automatically include any implicit anchors or case insensitivity.")
+            @P("Java-style regex patterns to search for within file contents. Unlike searchSymbols this does not automatically include any implicit anchors or case insensitivity.")
             List<String> patterns,
-            @P(value = "Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
+            @P("Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
             String reasoning
     ) {
         if (patterns.isEmpty()) {
@@ -1311,14 +1311,14 @@ public class SearchAgent {
         }
     }
 
-    @Tool("""
+    @Tool(value = """
     Returns filenames (relative to the project root) that match the given Java regular expression patterns.
     Use this to find configuration files, test data, or source files when you know part of their name.
     """)
     public String searchFilenames(
-            @P(value = "Java-style regex patterns to match against filenames.")
+            @P("Java-style regex patterns to match against filenames.")
             List<String> patterns,
-            @P(value = "Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
+            @P("Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
             String reasoning
     ) {
         if (patterns.isEmpty()) {
@@ -1365,12 +1365,12 @@ public class SearchAgent {
         }
     }
 
-    @Tool("""
+    @Tool(value = """
     Returns the full contents of the specified files. Use this after searchFilenames or searchSubstrings, or when you need the content of a non-code file.
     This can be expensive for large files.
     """)
     public String getFileContents(
-            @P(value = "List of filenames (relative to project root) to retrieve contents for.")
+            @P("List of filenames (relative to project root) to retrieve contents for.")
             List<String> filenames
     ) {
         if (filenames.isEmpty()) {
@@ -1402,12 +1402,12 @@ public class SearchAgent {
     }
 
 
-    @Tool("""
+    @Tool(value = """
     Abort the search process when you determine the question is not relevant to this codebase or when an answer cannot be found.
     Use this as a last resort when you're confident no useful answer can be provided.
     """)
     public String abort(
-            @P(value = "Explanation of why the question cannot be answered or is not relevant to this codebase")
+            @P("Explanation of why the question cannot be answered or is not relevant to this codebase")
             String explanation
     ) {
         if (explanation.isBlank()) {
