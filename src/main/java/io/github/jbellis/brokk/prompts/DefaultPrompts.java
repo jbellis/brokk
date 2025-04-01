@@ -4,7 +4,9 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import io.github.jbellis.brokk.ContextManager;
+import io.github.jbellis.brokk.Models;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,19 +16,25 @@ public abstract class DefaultPrompts {
 
     public static final String LAZY_REMINDER = """
     You are diligent and tireless!
+    You ALWAYS follow the existing code style!
     You NEVER leave comments describing code without implementing it!
-    You always COMPLETELY IMPLEMENT the needed code!
+    You always COMPLETELY IMPLEMENT the needed code without pausing to ask if you should continue!
     """;
 
     public static final String OVEREAGER_REMINDER = """
     Pay careful attention to the scope of the user's request. Do what he asks, but no more.
     """;
 
+    public static String reminderForModel(StreamingChatLanguageModel model) {
+        return Models.isLazy(model)
+                ? LAZY_REMINDER
+                : OVEREAGER_REMINDER;
+    }
+
     public List<ChatMessage> collectMessages(ContextManager cm, String reminder) {
         var messages = new ArrayList<ChatMessage>();
 
-        messages.add(new SystemMessage(formatIntro(cm)));
-        messages.addAll(exampleMessages());
+        messages.add(new SystemMessage(formatIntro(cm, reminder)));
         messages.addAll(cm.getReadOnlyMessages());
         messages.addAll(cm.getHistoryMessages());
         messages.add(new UserMessage(toolUsageReminder(reminder)));
@@ -36,7 +44,7 @@ public abstract class DefaultPrompts {
         return messages;
     }
 
-    protected String formatIntro(ContextManager cm) {
+    protected String formatIntro(ContextManager cm, String reminder) {
         var editableContents = cm.getEditableSummary();
         var readOnlyContents = cm.getReadOnlySummary();
         var styleGuide = cm.getProject().getStyleGuide();
@@ -51,32 +59,25 @@ public abstract class DefaultPrompts {
         }
 
         return """
-                <instructions>
-                %s
-                </instructions>
-                <workspace>
-                %s
-                </workspace>
-                <style_guide>
-                %s
-                </style_guide>
-                """.stripIndent().formatted(
-                systemIntro(),
-                workspaceBuilder.toString(),
-                styleGuide
-        ).trim();
+        <instructions>
+        %s
+        </instructions>
+        <workspace>
+        %s
+        </workspace>
+        <style_guide>
+        %s
+        </style_guide>
+        """.stripIndent().formatted(systemIntro(reminder), workspaceBuilder.toString(), styleGuide).trim();
     }
 
-    public String systemIntro() {
+    public String systemIntro(String reminder) {
         return """
                Act as an expert software developer.
                Always use best practices when coding.
                Respect and use existing conventions, libraries, etc. that are already present in the code base.
-
-               You are diligent and tireless!
-               You ALWAYS follow the existing code style!
-               You NEVER leave comments describing code without implementing it!
-               You always COMPLETELY IMPLEMENT the needed code without pausing to ask if you should continue!
+    
+               %s
 
                Take requests for changes to the supplied code.
                If the request is ambiguous, ask questions.
@@ -85,119 +86,15 @@ public abstract class DefaultPrompts {
 
                1. Plan the changes you will make.
                2. Explain them in plain English, in a few short sentences.
-               3. Use the correct tools to apply the changes. You can call any of these tools:
-                  - replaceFile
-                  - replaceLines
-                  - replaceFunction
-
-               Each tool has a well-defined JSON structure for arguments. Provide a JSON object
-               with the fields it requires, e.g.:
-
-               For "replaceFile":
-               {
-                 "name": "replaceFile",
-                 "arguments": {
-                   "filename": "path/to/MyClass.java",
-                   "text": "entire new file content here"
-                 }
-               }
-
-               For "replaceLines":
-               {
-                 "name": "replaceLines",
-                 "arguments": {
-                   "filename": "someFile.java",
-                   "oldText": "lines to search",
-                   "newText": "lines to replace"
-                 }
-               }
-
-               For "replaceFunction":
-               {
-                 "name": "replaceFunction",
-                 "arguments": {
-                   "fullyQualifiedFunctionName": "com.example.MyClass.doStuff",
-                   "functionParameterNames": ["arg1","arg2"],
-                   "newFunctionBody": "body code here (omit outer braces)"
-                 }
-               }
+               3. Use the correct tools to apply the changes.
 
                Include as many tool calls as necessary to fulfill the requested changes.
                If you need to add or modify multiple files, simply provide multiple tool calls.
-               Always provide your final proposed solution as a JSON list of tool calls
-               with no additional code blocks or explanation beyond them.
 
-               If you need to create a brand new file, specify it with "replaceFile" and
-               use an empty or nonexistent file as the old version.
+               If you need to create a actorial(n-1).  do so with the `replaceFile` tool.
 
-               If a file is read-only or unavailable, ask the user to add or make it editable.
-               """.stripIndent();
-    }
-
-    public List<ChatMessage> exampleMessages() {
-        return List.of(
-                new UserMessage("Change get_factorial() to use math.factorial"),
-                new AiMessage("""
-                  To make this change, we need to modify `mathweb/flask/app.py`:
-                  
-                  1. Import the math package.
-                  2. Remove the existing factorial() function.
-                  3. Update get_factorial() to call math.factorial instead.
-
-                  Here is how we can do that with the tools:
-
-                  [
-                    {
-                      "name": "replaceLines",
-                      "arguments": {
-                        "filename": "mathweb/flask/app.py",
-                        "oldText": "from flask import Flask",
-                        "newText": "import math\\nfrom flask import Flask"
-                      }
-                    },
-                    {
-                      "name": "replaceLines",
-                      "arguments": {
-                        "filename": "mathweb/flask/app.py",
-                        "oldText": "def factorial(n):\\n    if n == 0: ...",
-                        "newText": ""
-                      }
-                    },
-                    {
-                      "name": "replaceLines",
-                      "arguments": {
-                        "filename": "mathweb/flask/app.py",
-                        "oldText": "return str(factorial(n))",
-                        "newText": "return str(math.factorial(n))"
-                      }
-                    }
-                  ]
-                  """.stripIndent()),
-                new UserMessage("Refactor hello() into its own filename."),
-                new AiMessage("""
-                  We can extract hello() into a new file named hello.py, then import it in main.py.
-                  
-                  Here is how we can do it with tools:
-
-                  [
-                    {
-                      "name": "replaceFile",
-                      "arguments": {
-                        "filename": "hello.py",
-                        "text": "def hello():\\n    print(\\"hello\\")\\n"
-                      }
-                    },
-                    {
-                      "name": "replaceLines",
-                      "arguments": {
-                        "filename": "main.py",
-                        "oldText": "def hello():\\n    print(\\"hello\\")",
-                        "newText": "from hello import hello"
-                      }
-                    }
-                  ]
-                  """.stripIndent())
-        );
+               If a file is read-only or unavailable, ask the user to add it or make it editable.
+               """.formatted(reminder).stripIndent();
     }
 
     /**

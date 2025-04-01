@@ -17,7 +17,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests for the LLMTools class.
  */
 class LLMToolsTest {
-
     private LLMTools tools;
     private final Map<String, String> inMemoryFileContents = new HashMap<>();
 
@@ -108,11 +107,11 @@ class LLMToolsTest {
                 .name("replaceFile")
                 .arguments("""
                     {"filename":"Test.java","text":"hello world"}
-                    """)
+                """)
                 .build();
-        var result = tools.execute(request);
-        assertTrue(result.output().startsWith("Successfully replaced file"),
-                   "Expected success message, got: " + result.output());
+
+        var previews = tools.validateToolRequests(List.of(request));
+        assertDoesNotThrow(() -> tools.applyToolOperations(previews));
 
         // Verify the file actually changed in memory
         assertEquals("hello world", inMemoryFileContents.get("Test.java"),
@@ -121,21 +120,21 @@ class LLMToolsTest {
 
     @Test
     void testReplaceLinesFail() {
-        // Attempt partial match that can't be found
         var request = ToolExecutionRequest.builder()
                 .name("replaceLines")
                 .arguments("""
                     {"filename":"Test.java","oldText":"nonexistent","newText":"???"}
-                    """)
+                """)
                 .build();
-        var result = tools.execute(request);
-        assertTrue(result.output().contains("ERROR:"),
-                   "Should fail because 'nonexistent' not found. Output: " + result.output());
+
+        var previews = tools.validateToolRequests(List.of(request));
+        Exception ex = assertThrows(Exception.class, () -> tools.applyToolOperations(previews));
+        assertTrue(ex.getMessage().contains("No matching location found"),
+                   "Should fail because 'nonexistent' was not found in the file");
     }
 
     @Test
     void testReplaceLines() {
-        // oldText to find in the file:
         String oldText = "// Some text we will replace";
         String newText = "// Replaced line successfully";
 
@@ -150,11 +149,9 @@ class LLMToolsTest {
                     """.formatted(oldText, newText))
                 .build();
 
-        var result = tools.execute(request);
-        assertTrue(result.output().startsWith("Successfully replaced text in file"),
-                   "Expected success, got: " + result.output());
+        var previews = tools.validateToolRequests(List.of(request));
+        assertDoesNotThrow(() -> tools.applyToolOperations(previews));
 
-        // Verify that the file now contains the new text and not the old
         String updated = inMemoryFileContents.get("Test.java");
         assertFalse(updated.contains(oldText),
                     "Old text should be removed from file content");
@@ -175,11 +172,9 @@ class LLMToolsTest {
                     """)
                 .build();
 
-        var result = tools.execute(request);
-        assertTrue(result.output().contains("Successfully replaced function Test.sayHello"),
-                   "Should indicate success. Output: " + result.output());
+        var previews = tools.validateToolRequests(List.of(request));
+        assertDoesNotThrow(() -> tools.applyToolOperations(previews));
 
-        // Verify file was updated in memory
         String updated = inMemoryFileContents.get("Test.java");
         assertTrue(updated.contains("Hi there, "),
                    "New function body should appear in the updated file content");

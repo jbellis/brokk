@@ -12,14 +12,10 @@ public abstract class ArchitectPrompts extends DefaultPrompts {
 
     @Override
     public List<ChatMessage> collectMessages(ContextManager cm, String reminder) {
-        throw new UnsupportedOperationException();
-    }
-
-    public List<ChatMessage> collectMessages(ContextManager cm) {
         // like the default, but omits the edit instructions and examples
         var messages = new ArrayList<ChatMessage>();
 
-        messages.add(new SystemMessage(formatIntro(cm)));
+        messages.add(new SystemMessage(formatIntro(cm, reminder)));
         messages.addAll(cm.getReadOnlyMessages());
         messages.addAll(cm.getHistoryMessages());
         messages.addAll(cm.getEditableMessages());
@@ -28,7 +24,7 @@ public abstract class ArchitectPrompts extends DefaultPrompts {
     }
 
     @Override
-    public String systemIntro() {
+    public String systemIntro(String reminder) {
         return """
         Act as an expert software engineer. Study the change request and the current code.
         Describe how to modify the code to complete the request.

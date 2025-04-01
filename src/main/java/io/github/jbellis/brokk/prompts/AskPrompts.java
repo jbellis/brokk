@@ -4,7 +4,7 @@ public abstract class AskPrompts extends ArchitectPrompts {
     public static final AskPrompts instance = new AskPrompts() {};
 
     @Override
-    public String systemIntro() {
+    public String systemIntro(String reminder) {
         return """
                Act as an expert code analyst and software engineering consultant.
                Answer questions about the supplied code thoroughly and accurately.
