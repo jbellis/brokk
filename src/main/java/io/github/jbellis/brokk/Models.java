@@ -176,8 +176,6 @@ public final class Models {
                     .baseUrl(LITELLM_BASE_URL)
                     .apiKey("litellm") // placeholder, LiteLLM manages actual keys
                     .modelName(location)
-                    .logRequests(true)
-                    .logResponses(true)
                     .build();
         });
     }
