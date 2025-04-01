@@ -1,7 +1,6 @@
 package io.github.jbellis.brokk;
 
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dev.langchain4j.agent.tool.ToolSpecifications;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,7 +10,7 @@ import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class LLMTest {
+class LLMToolsTest {
     private LLMTools tools;
 
     @BeforeEach
