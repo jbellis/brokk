@@ -31,14 +31,18 @@ public abstract class DefaultPrompts {
                 : OVEREAGER_REMINDER;
     }
 
-    public List<ChatMessage> collectMessages(ContextManager cm, String reminder) {
+    public final List<ChatMessage> collectMessages(ContextManager cm, List<ChatMessage> sessionMessages, String reminder) {
         var messages = new ArrayList<ChatMessage>();
 
         messages.add(new SystemMessage(formatIntro(cm, reminder)));
         messages.addAll(cm.getReadOnlyMessages());
+
         messages.addAll(cm.getHistoryMessages());
+        messages.addAll(sessionMessages);
+
         messages.add(new UserMessage(toolUsageReminder(reminder)));
         messages.add(new AiMessage("I will use these tools accordingly."));
+
         messages.addAll(cm.getEditableMessages());
 
         return messages;

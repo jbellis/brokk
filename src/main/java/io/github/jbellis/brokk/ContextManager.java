@@ -321,7 +321,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
                     return;
                 }
                 // Provide the prompt messages
-                var messages = new LinkedList<>(AskPrompts.instance.collectMessages(this, DefaultPrompts.LAZY_REMINDER));
+                var messages = new LinkedList<>(AskPrompts.instance.collectMessages(this));
                 messages.add(new UserMessage("<question>\n%s\n</question>".formatted(question.trim())));
 
                 // stream from coder using the provided model
@@ -647,7 +647,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
         String content;
         if (selectedFragments.isEmpty()) {
             // gather entire context
-            var msgs = ArchitectPrompts.instance.collectMessages(this, DefaultPrompts.LAZY_REMINDER);
+            var msgs = ArchitectPrompts.instance.collectMessages(this);
             var combined = new StringBuilder();
             for (var m : msgs) {
                 if (!(m instanceof dev.langchain4j.data.message.AiMessage)) {

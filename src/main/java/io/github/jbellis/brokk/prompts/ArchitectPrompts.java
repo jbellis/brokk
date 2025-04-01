@@ -10,12 +10,11 @@ import java.util.List;
 public abstract class ArchitectPrompts extends DefaultPrompts {
     public static final ArchitectPrompts instance = new ArchitectPrompts() {};
 
-    @Override
-    public List<ChatMessage> collectMessages(ContextManager cm, String reminder) {
+    public List<ChatMessage> collectMessages(ContextManager cm) {
         // like the default, but omits the edit instructions and examples
         var messages = new ArrayList<ChatMessage>();
 
-        messages.add(new SystemMessage(formatIntro(cm, reminder)));
+        messages.add(new SystemMessage(formatIntro(cm, DefaultPrompts.LAZY_REMINDER)));
         messages.addAll(cm.getReadOnlyMessages());
         messages.addAll(cm.getHistoryMessages());
         messages.addAll(cm.getEditableMessages());

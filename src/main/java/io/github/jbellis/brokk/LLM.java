@@ -44,11 +44,8 @@ public class LLM {
         // Track original contents of files before any changes
         var originalContents = new HashMap<ProjectFile, String>();
 
-        // `requestMessages` is the messages we send to the LLM [not including its responses]
-        // `pendingHistory` contains user instructions + llm response but omits the Context messages
-        var pendingHistory = new ArrayList<ChatMessage>();
-        var requestMessages = new ArrayList<ChatMessage>();
-        requestMessages.add(new UserMessage("<goal>\n%s\n</goal>".formatted(userInput.trim())));
+        var sessionMessages = new ArrayList<ChatMessage>();
+        sessionMessages.add(new UserMessage("<goal>\n%s\n</goal>".formatted(userInput.trim())));
 
         // track repeated tool failures
         int parseErrorAttempts = 0;
@@ -70,11 +67,7 @@ public class LLM {
             // Gather context from the context manager -- need to refresh this since we may have made edits in the last pass
             var contextManager = (ContextManager) coder.contextManager;
             var reminder = DefaultPrompts.reminderForModel(model);
-            var contextMessages = DefaultPrompts.instance.collectMessages(contextManager, reminder);
-            // Add conversation so far
-            var allMessages = new ArrayList<>(contextMessages);
-            // TODO this is broken -- it confuses the LLM into thinking it hasn't responded to older requests (combine history with context's in collectMessages?)
-            allMessages.addAll(requestMessages);
+            var allMessages = DefaultPrompts.instance.collectMessages(contextManager, sessionMessages, reminder);
 
             // Actually send the message to the LLM and get the response
             var toolSpecs = ToolSpecifications.toolSpecificationsFrom(tools);
@@ -103,12 +96,7 @@ public class LLM {
 
             // We got a valid response
             logger.debug("response:\n{}", llmResponse);
-
-            // Add to pending conversation
-            pendingHistory.add(requestMessages.getLast());
-            pendingHistory.add(llmResponse.aiMessage());
-            // also add so the next loop sees it
-            requestMessages.add(llmResponse.aiMessage());
+            sessionMessages.add(llmResponse.aiMessage());
 
             // 1. Preview (validate) all tool requests
             var toolRequests = llmResponse.aiMessage().toolExecutionRequests();
@@ -117,7 +105,7 @@ public class LLM {
 
                 // Collect any that failed
                 var failedMessages = previewResults.stream().filter(p -> !p.success()).count();
-                if (!failedMessages > 0) {
+                if (failedMessages > 0) {
                     parseErrorAttempts++;
                     // If everything failed, we might reflect and continue
                     if (failedMessages == previewResults.size()) {
@@ -154,7 +142,7 @@ public class LLM {
                 // Actually apply changes
                 try {
                     var toolMessages = tools.applyToolOperations(previewResults);
-                    requestMessages.addAll(toolMessages);
+                    sessionMessages.addAll(toolMessages);
                     logger.info("Validated tool operations applied");
                 } catch (Exception ex) {
                     logger.error("Tool apply error", ex);
@@ -181,15 +169,15 @@ public class LLM {
             }
 
             io.systemOutput("Attempting to fix build errors...");
-            requestMessages.add(new UserMessage(buildReflection));
+            sessionMessages.add(new UserMessage(buildReflection));
         }
 
         // Write conversation to history if anything happened
-        if (!pendingHistory.isEmpty()) {
+        if (sessionMessages.size() > 1) {
             if (!isComplete) {
                 userInput += " [incomplete]";
             }
-            coder.contextManager.addToHistory(pendingHistory, originalContents, userInput);
+            coder.contextManager.addToHistory(sessionMessages, originalContents, userInput);
         }
     }
 
