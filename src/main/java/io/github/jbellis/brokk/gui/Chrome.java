@@ -16,14 +16,20 @@ import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.awt.event.KeyAdapter;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Future;
+
+import javax.swing.text.Highlighter;
+import javax.swing.text.DefaultHighlighter;
 
 import io.github.jbellis.brokk.analyzer.ProjectFile;
 
@@ -126,6 +132,14 @@ public class Chrome implements AutoCloseable, IConsoleIO {
             disableUserActionButtons();
             disableContextActionButtons();
         }
+        frame.getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+            .put(KeyStroke.getKeyStroke("TAB"), "focusCommandInput");
+        frame.getRootPane().getActionMap().put("focusCommandInput", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                commandInputField.requestFocusInWindow();
+            }
+        });
     }
 
     public void onComplete() {
@@ -575,10 +589,16 @@ public class Chrome implements AutoCloseable, IConsoleIO {
         runButton.setToolTipText("Execute the current instructions in a shell");
         runButton.addActionListener(e -> runRunCommand());
 
+        JButton viewLogsButton = new JButton("View Logs");
+        viewLogsButton.setMnemonic(KeyEvent.VK_L);
+        viewLogsButton.setToolTipText("View debug logs");
+        viewLogsButton.addActionListener(e -> openLogsWindow());
+
         leftButtonsPanel.add(codeButton);
         leftButtonsPanel.add(askButton);
         leftButtonsPanel.add(searchButton);
         leftButtonsPanel.add(runButton);
+        leftButtonsPanel.add(viewLogsButton);
 
         var rightButtonsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         stopButton = new JButton("Stop");
@@ -591,8 +611,6 @@ public class Chrome implements AutoCloseable, IConsoleIO {
 
         wrapper.add(buttonsHolder, gbc);
 
-        // set "Code" as default button
-        frame.getRootPane().setDefaultButton(codeButton);
 
         return wrapper;
     }
@@ -1327,12 +1345,220 @@ public class Chrome implements AutoCloseable, IConsoleIO {
         var totalHeight = contextGitSplitPane.getHeight();
         var dividerSize = contextGitSplitPane.getDividerSize();
         contextGitSplitPane.setDividerLocation(totalHeight - dividerSize - 1);
-
+        
         logger.debug("Git panel collapsed; stored divider location={}", lastGitPanelDividerLocation);
-
+        
         // Force a re-layout
         contextGitSplitPane.revalidate();
         contextGitSplitPane.repaint();
+    }
+    
+    /**
+     * Opens a window displaying debug logs with options to copy and download the logs.
+     */
+    private void openLogsWindow() {
+        JFrame logsFrame = new JFrame("Debug Logs");
+        logsFrame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        logsFrame.setSize(600, 400);
+        logsFrame.setLayout(new BorderLayout());
+        
+        JTextArea logsTextArea = new JTextArea(getDebugLogs());
+        logsTextArea.setEditable(false);
+        logsTextArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        JScrollPane scrollPane = new JScrollPane(logsTextArea);
+        logsFrame.add(scrollPane, BorderLayout.CENTER);
+        
+        JPanel bottomPanel = new JPanel(new BorderLayout());
+        // Left panel: search field with up/down buttons and match count
+        JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
+        // Search field with rounded corners matching bottom-right buttons
+        JTextField searchField = new JTextField(20);
+        searchField.setToolTipText("Search logs");
+        searchField.setBorder(BorderFactory.createLineBorder(Color.GRAY, 1, true));
+        // Up and Down buttons with arrow icons and rounded borders
+        JButton upButton = new JButton("▲");
+        upButton.setBorder(BorderFactory.createLineBorder(Color.GRAY, 1, true));
+        JButton downButton = new JButton("▼");
+        downButton.setBorder(BorderFactory.createLineBorder(Color.GRAY, 1, true));
+        // Label to show match count, e.g., "3 of 5"
+        JLabel matchLabel = new JLabel("0 of 0");
+        
+        // Variables to track matches
+        final List<int[]> matchPositions = new ArrayList<>();
+        final int[] currentMatchIndex = { -1 };
+        Highlighter.HighlightPainter allMatchesPainter = new DefaultHighlighter.DefaultHighlightPainter(new Color(255,255,0,128));
+        Highlighter.HighlightPainter currentMatchPainter = new DefaultHighlighter.DefaultHighlightPainter(new Color(255,165,0,128));
+        
+        // Helper runnable to update highlights
+        Runnable updateHighlights = () -> {
+            Highlighter highlighter = logsTextArea.getHighlighter();
+            highlighter.removeAllHighlights();
+            matchPositions.clear();
+            String query = searchField.getText();
+            String text = logsTextArea.getText();
+            if(query.isEmpty()){
+                matchLabel.setText("0 of 0");
+                currentMatchIndex[0] = -1;
+                return;
+            }
+            int idx = 0;
+            while ((idx = text.indexOf(query, idx)) != -1) {
+                matchPositions.add(new int[]{idx, idx + query.length()});
+                try {
+                    highlighter.addHighlight(idx, idx + query.length(), allMatchesPainter);
+                } catch(Exception ex){ }
+                idx += query.length();
+            }
+            if(!matchPositions.isEmpty()){
+                currentMatchIndex[0] = 0;
+                int[] pos = matchPositions.get(0);
+                try{
+                    highlighter.removeAllHighlights();
+                    for (int i = 0; i < matchPositions.size(); i++){
+                        int[] range = matchPositions.get(i);
+                        if(i == currentMatchIndex[0]){
+                            highlighter.addHighlight(range[0], range[1], currentMatchPainter);
+                        } else {
+                            highlighter.addHighlight(range[0], range[1], allMatchesPainter);
+                        }
+                    }
+                    logsTextArea.setCaretPosition(pos[0]);
+                } catch(Exception ex){ }
+                matchLabel.setText("1 of " + matchPositions.size());
+            } else {
+                currentMatchIndex[0] = -1;
+                matchLabel.setText("0 of 0");
+            }
+        };
+        
+        // Automatically update highlights when the search query changes
+        searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { updateHighlights.run(); }
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { updateHighlights.run(); }
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { updateHighlights.run(); }
+        });
+        // Bind Enter and Down arrow keys to move to next match, and Up arrow key to move to previous match
+        searchField.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke("ENTER"), "nextMatch");
+        searchField.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke("DOWN"), "nextMatch");
+        searchField.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke("UP"), "prevMatch");
+        searchField.getActionMap().put("nextMatch", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                downButton.doClick();
+                searchField.requestFocusInWindow();
+            }
+        });
+        searchField.getActionMap().put("prevMatch", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                upButton.doClick();
+                searchField.requestFocusInWindow();
+            }
+        });
+        
+        // Up button: move to previous match
+        upButton.addActionListener(e -> {
+            if(!matchPositions.isEmpty()){
+                currentMatchIndex[0] = (currentMatchIndex[0] - 1 + matchPositions.size()) % matchPositions.size();
+                Highlighter highlighter = logsTextArea.getHighlighter();
+                highlighter.removeAllHighlights();
+                for (int i = 0; i < matchPositions.size(); i++){
+                    int[] range = matchPositions.get(i);
+                    try{
+                        if(i == currentMatchIndex[0]){
+                            highlighter.addHighlight(range[0], range[1], currentMatchPainter);
+                            logsTextArea.requestFocus();
+                            logsTextArea.setCaretPosition(range[0]);
+                        } else {
+                            highlighter.addHighlight(range[0], range[1], allMatchesPainter);
+                        }
+                    } catch(Exception ex){ }
+                }
+                matchLabel.setText((currentMatchIndex[0]+1) + " of " + matchPositions.size());
+            }
+        });
+        
+        // Down button: move to next match
+        downButton.addActionListener(e -> {
+            if(!matchPositions.isEmpty()){
+                currentMatchIndex[0] = (currentMatchIndex[0] + 1) % matchPositions.size();
+                Highlighter highlighter = logsTextArea.getHighlighter();
+                highlighter.removeAllHighlights();
+                for (int i = 0; i < matchPositions.size(); i++){
+                    int[] range = matchPositions.get(i);
+                    try{
+                        if(i == currentMatchIndex[0]){
+                            highlighter.addHighlight(range[0], range[1], currentMatchPainter);
+                            logsTextArea.requestFocus();
+                            logsTextArea.setCaretPosition(range[0]);
+                        } else {
+                            highlighter.addHighlight(range[0], range[1], allMatchesPainter);
+                        }
+                    } catch(Exception ex){ }
+                }
+                matchLabel.setText((currentMatchIndex[0]+1) + " of " + matchPositions.size());
+            }
+        });
+        
+        searchPanel.add(searchField);
+        searchPanel.add(upButton);
+        searchPanel.add(downButton);
+        searchPanel.add(matchLabel);
+        
+        // Right panel: copy and download buttons (unchanged functionality)
+        JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 5));
+        JButton copyButton = new JButton("Copy");
+        copyButton.addActionListener(e -> {
+            StringSelection selection = new StringSelection(logsTextArea.getText());
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
+            systemOutput("Logs copied to clipboard");
+        });
+        JButton downloadButton = new JButton("Download");
+        downloadButton.addActionListener(e -> {
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setDialogTitle("Save Logs");
+            int userSelection = fileChooser.showSaveDialog(logsFrame);
+            if (userSelection == JFileChooser.APPROVE_OPTION) {
+                try {
+                    Files.writeString(fileChooser.getSelectedFile().toPath(), logsTextArea.getText());
+                    systemOutput("Logs saved to " + fileChooser.getSelectedFile().getAbsolutePath());
+                } catch (IOException ex) {
+                    toolError("Error saving logs: " + ex.getMessage());
+                }
+            }
+        });
+        rightPanel.add(copyButton);
+        rightPanel.add(downloadButton);
+        
+        bottomPanel.add(searchPanel, BorderLayout.WEST);
+        bottomPanel.add(rightPanel, BorderLayout.EAST);
+        logsFrame.add(bottomPanel, BorderLayout.SOUTH);
+        
+        logsFrame.setLocationRelativeTo(getFrame());
+        logsFrame.setVisible(true);
+        SwingUtilities.invokeLater(() -> {
+            logsTextArea.setCaretPosition(logsTextArea.getDocument().getLength());
+        });
+    }
+    
+    /**
+     * Retrieves the debug logs to display.
+     */
+    private String getDebugLogs() {
+        var logPath = Paths.get(System.getProperty("user.home"), ".brokk", "debug.log");
+        if (Files.exists(logPath)) {
+            try {
+                return Files.readString(logPath);
+            } catch (IOException e) {
+                toolError("Unable to read debug logs: " + e.getMessage());
+                return "Error reading debug logs.";
+            }
+        } else {
+            return "Debug log file not found at " + logPath.toString();
+        }
     }
     
     public void updateContextTable() {
