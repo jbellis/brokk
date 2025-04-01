@@ -46,7 +46,12 @@ public class LLMTools {
         }
     }
 
-    @Tool(value = "Replace the entire function body, identified by fully qualified function name (e.g. com.foo.Bar.doStuff) and param names. The param names must match exactly. Do not include param types, just names.")
+    @Tool(value = """
+    Replace the entire function body, identified by `fullyQualifiedFunctionName` and `functionParameterNames`.
+    The param names must match exactly. Do not include param types in `functionParameterNames`, just names.
+    The new function body MUST include the entire function, including the method signature (which
+    may differ from the old) and braces.
+    """)
     public void replaceFunction(
             @P("The fully qualified function name, e.g. com.example.Foo.barMethod") String fullyQualifiedFunctionName,
             @P("List of parameter variable names, e.g. [\"arg1\", \"userId\"]") List<String> functionParameterNames,

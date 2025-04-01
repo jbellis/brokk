@@ -40,7 +40,6 @@ class LLMToolsTest {
 
         // Minimal in-memory ProjectFile that reads/writes from the map above
         IContextManager contextManager = new IContextManager() {
-
             @Override
             public ProjectFile toFile(String path) {
                 // We'll store everything by the short filename as key

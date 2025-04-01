@@ -263,8 +263,8 @@ public class ContextManager implements IContextManager, AutoCloseable {
             } catch (CancellationException cex) {
                 io.systemOutput(description + " canceled.");
             } catch (Exception e) {
-                logger.error("Error in " + description, e);
-                io.toolErrorRaw("Error in " + description + ": " + e.getMessage());
+                logger.error("Error while " + description, e);
+                io.toolErrorRaw("Error while " + description + ": " + e.getMessage());
             } finally {
                 io.actionComplete();
                 io.enableUserActionButtons();
@@ -279,8 +279,8 @@ public class ContextManager implements IContextManager, AutoCloseable {
             } catch (CancellationException cex) {
                 io.systemOutput(description + " canceled.");
             } catch (Exception e) {
-                logger.error("Error in " + description, e);
-                io.toolErrorRaw("Error in " + description + ": " + e.getMessage());
+                logger.error("Error while " + description, e);
+                io.toolErrorRaw("Error while " + description + ": " + e.getMessage());
             } finally {
                 io.enableContextActionButtons();
                 io.enableUserActionButtons();

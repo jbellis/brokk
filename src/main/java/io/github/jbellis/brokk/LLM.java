@@ -45,7 +45,7 @@ public class LLM {
         var originalContents = new HashMap<ProjectFile, String>();
 
         var sessionMessages = new ArrayList<ChatMessage>();
-        sessionMessages.add(new UserMessage("<goal>\n%s\n</goal>".formatted(userInput.trim())));
+        var nextRequest = new UserMessage("<goal>\n%s\n</goal>".formatted(userInput.trim()));
 
         // track repeated tool failures
         int parseErrorAttempts = 0;
@@ -68,6 +68,7 @@ public class LLM {
             var contextManager = (ContextManager) coder.contextManager;
             var reminder = DefaultPrompts.reminderForModel(model);
             var allMessages = DefaultPrompts.instance.collectMessages(contextManager, sessionMessages, reminder);
+            allMessages.add(nextRequest);
 
             // Actually send the message to the LLM and get the response
             var toolSpecs = ToolSpecifications.toolSpecificationsFrom(tools);
@@ -96,6 +97,7 @@ public class LLM {
 
             // We got a valid response
             logger.debug("response:\n{}", llmResponse);
+            sessionMessages.add(nextRequest);
             sessionMessages.add(llmResponse.aiMessage());
 
             // 1. Preview (validate) all tool requests
@@ -151,6 +153,7 @@ public class LLM {
                 }
 
                 if (failedMessages > 0) {
+                    nextRequest = new UserMessage("Some edit request tool calls failed. Please fix them.");
                     continue; // don't bother building
                 }
             }
@@ -169,11 +172,11 @@ public class LLM {
             }
 
             io.systemOutput("Attempting to fix build errors...");
-            sessionMessages.add(new UserMessage(buildReflection));
+            nextRequest = new UserMessage(buildReflection);
         }
 
         // Write conversation to history if anything happened
-        if (sessionMessages.size() > 1) {
+        if (!sessionMessages.isEmpty()) {
             if (!isComplete) {
                 userInput += " [incomplete]";
             }
