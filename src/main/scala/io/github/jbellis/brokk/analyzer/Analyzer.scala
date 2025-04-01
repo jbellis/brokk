@@ -1018,7 +1018,7 @@ class JavaAnalyzer private (sourcePath: Path, cpgInit: Cpg)
 
     // If exactly one method is matched, use it. If multiple matched, pick the first arbitrarily.
     val chosen = matched.head
-    val fileOpt = toFile(chosen.typeDecl.head)
+    val fileOpt = toFile(chosen.typeDecl.filename.head)
     if (fileOpt.isEmpty || chosen.lineNumber.isEmpty || chosen.lineNumberEnd.isEmpty) {
       return java.util.Optional.empty()
     }

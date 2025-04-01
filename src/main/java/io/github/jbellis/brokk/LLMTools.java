@@ -1,0 +1,232 @@
+package io.github.jbellis.brokk;
+
+import dev.langchain4j.agent.tool.P;
+import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dotty.tools.dotc.Run;
+import io.github.jbellis.brokk.analyzer.FunctionLocation;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.io.IOException;
+import java.nio.file.Paths;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * Tools for rewriting file contents or specific function definitions.
+ * Also a static utility for "handleToolCall(...)" that finds the right tool
+ * and executes it, returning a simple result object.
+ */
+public class LLMTools {
+
+    private static final Logger logger = LogManager.getLogger(LLMTools.class);
+
+    private final IContextManager contextManager;
+
+    public LLMTools(IContextManager contextManager) {
+        this.contextManager = contextManager;
+    }
+
+    /**
+     * Overwrites or creates a file with the given contents.
+     * Throws an error if the file is read-only.
+     */
+    @Tool(
+            name = "replace_file",
+            value = "Replace or create the entire file content. Usage: replace_file(\"path/to/MyClass.java\", \"the entire text...\")."
+    )
+    public String replace_file(
+            @P("The path of the file to overwrite") String filename,
+            @P("The new file content") String text
+    ) {
+        var file = contextManager.toFile(filename);
+        if (file == null || !contextManager.getEditableFiles().contains(file)) {
+            throw new ToolExecutionError("File is read-only or not recognized as editable: " + filename);
+        }
+        try {
+            file.write(text);
+            logger.info("Replaced content of file: {}", filename);
+            return "Successfully replaced file " + filename;
+        } catch (IOException e) {
+            throw new ToolExecutionError("Failed to write file " + filename + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Replaces the text of a function body in a file, identified by its
+     * fully-qualified method name and a list of parameter variable names.
+     * If not found or the file is read-only, throws an exception.
+     */
+    @Tool(
+            name = "replace_function",
+            value = "Replace the entire function body, identified by fully qualified function name (e.g. com.foo.Bar.doStuff) and param names. The param names must match exactly."
+    )
+    public String replace_function(
+            @P("The fully qualified function name, e.g. com.example.Foo.barMethod") String fullyQualifiedFunctionName,
+            @P("List of parameter variable names, e.g. [\"arg1\", \"userId\"]") List<String> functionParameterNames,
+            @P("The new code for the entire function (no extra braces)") String newFunctionBody
+    ) {
+        var analyzer = contextManager.getAnalyzer();
+        if (analyzer == null) {
+            throw new ToolExecutionError("No analyzer is available to locate function " + fullyQualifiedFunctionName);
+        }
+        var optLocation = analyzer.findFunctionLocation(fullyQualifiedFunctionName, functionParameterNames);
+        if (optLocation.isEmpty()) {
+            throw new ToolExecutionError("Could not find function location for " + fullyQualifiedFunctionName);
+        }
+        FunctionLocation loc = optLocation.get();
+        var file = loc.file();
+        if (!contextManager.getEditableFiles().contains(file)) {
+            throw new ToolExecutionError("File is read-only or not recognized as editable: " + file);
+        }
+
+        String original;
+        try {
+            original = file.read();
+        } catch (IOException e) {
+            throw new ToolExecutionError("Failed reading file: " + file + " -> " + e.getMessage());
+        }
+
+        var lines = original.split("\n", -1);
+        if (loc.startLine() - 1 < 0 || loc.endLine() > lines.length) {
+            throw new ToolExecutionError("Invalid line range for function body in " + file);
+        }
+        StringBuilder sb = new StringBuilder();
+        // lines before
+        for (int i = 0; i < loc.startLine() - 1; i++) {
+            sb.append(lines[i]).append("\n");
+        }
+        // new lines
+        for (String line : newFunctionBody.split("\n", -1)) {
+            sb.append(line).append("\n");
+        }
+        // lines after
+        for (int i = loc.endLine(); i < lines.length; i++) {
+            sb.append(lines[i]);
+            if (i < lines.length - 1) {
+                sb.append("\n");
+            }
+        }
+        try {
+            file.write(sb.toString());
+        } catch (IOException e) {
+            throw new ToolExecutionError("Failed to write updated function to file: " + e.getMessage());
+        }
+        logger.info("Function replaced: {} in file {}", fullyQualifiedFunctionName, file);
+        return "Successfully replaced function " + fullyQualifiedFunctionName + " in " + file;
+    }
+
+    /**
+     * Tries to replace the first occurrence of oldText with newText in the file,
+     * using partial/fuzzy matching from EditBlock. If oldText is empty,
+     * we append newText to the file. If no match found, throw an error.
+     */
+    @Tool(
+            name = "replace_text",
+            value = "Replace the first occurrence of 'old_text' in the specified file with 'new_text'. If oldText is empty, newText is appended."
+    )
+    public String replace_text(
+            @P("Name of the file to modify") String filename,
+            @P("Text to search for") String oldText,
+            @P("Text to insert in its place") String newText
+    ) {
+        var file = contextManager.toFile(filename);
+        if (file == null || !contextManager.getEditableFiles().contains(file)) {
+            throw new ToolExecutionError("File is read-only or not recognized as editable: " + filename);
+        }
+        String original;
+        try {
+            original = file.read();
+        } catch (IOException e) {
+            throw new ToolExecutionError("Could not read file " + filename + ": " + e.getMessage());
+        }
+        // Re-use partial matching from EditBlock
+        String updated = EditBlock.doReplace(original, oldText, newText);
+        if (updated == null) {
+            throw new ToolExecutionError("No matching location found for old_text in " + filename);
+        }
+        try {
+            file.write(updated);
+        } catch (IOException e) {
+            throw new ToolExecutionError("Failed to write updated content to file " + filename + ": " + e.getMessage());
+        }
+        logger.info("Replaced text in file: {}", filename);
+        return "Successfully replaced text in file " + filename;
+    }
+
+    /**
+     * Encapsulates the results of a tool call:
+     *  - output text
+     *  - which file changed (if any)
+     */
+    public record ToolCallResult(String output, ProjectFile changedFile) {}
+
+    /**
+     * This method finds and executes the requested tool by name.
+     * The 'toolSpecs' list is typically obtained from ToolSpecifications.toolSpecificationsFrom(new LLMTools(...)).
+     *
+     * Return a small record containing the output plus a reference to the file that changed (if any).
+     */
+    public static ToolCallResult handleToolCall(ToolExecutionRequest request,
+                                                List<ToolSpecification> toolSpecs,
+                                                IContextManager contextManager)
+    {
+        // find the matching ToolSpecification by name
+        var toolSpecOpt = toolSpecs.stream()
+                .filter(spec -> spec.name().equals(request.name()))
+                .findFirst();
+        if (toolSpecOpt.isEmpty()) {
+            // The LLM asked for a nonexistent tool
+            return new ToolCallResult("ERROR: No such tool: " + request.name(), null);
+        }
+        var toolSpec = toolSpecOpt.get();
+        // Execute the tool
+        String result;
+        try {
+            result = null; // TODO
+        } catch (Exception e) {
+            result = "ERROR: " + e.getMessage();
+        }
+        // Our own tool methods return messages like "Successfully replaced file X" or "ERROR..."
+        // If you want to detect which file got changed, you can do a quick parse:
+        ProjectFile changed = extractFileFromMessage(contextManager, result);
+        return new ToolCallResult(result, changed);
+    }
+
+    /**
+     * A quick hack to detect which file changed from the success message.
+     * You can refine this or store file references directly in each tool method's return object.
+     */
+    private static ProjectFile extractFileFromMessage(IContextManager contextManager, String result) {
+        // For example, "Successfully replaced file path/to/Test.java"
+        // We'll look for "file " or "in " as a naive approach
+        String marker = " file ";
+        int idx = result.indexOf(marker);
+        if (idx < 0) {
+            marker = " in ";
+            idx = result.indexOf(marker);
+            if (idx < 0) return null;
+        }
+        var partial = result.substring(idx + marker.length()).trim();
+        // if there's a space or punctuation, parse up to that
+        int spaceIdx = partial.indexOf(' ');
+        if (spaceIdx > 0) {
+            partial = partial.substring(0, spaceIdx);
+        }
+        // see if we can create a ProjectFile from partial
+        var file = contextManager.toFile(partial);
+        if (file == null) return null;
+        if (!contextManager.getEditableFiles().contains(file)) return null;
+        return file;
+    }
+
+    private static class ToolExecutionError extends RuntimeException {
+        public ToolExecutionError(String s) {
+            super(s);
+        }
+    }
+}

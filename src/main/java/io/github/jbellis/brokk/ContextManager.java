@@ -506,9 +506,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
      * Cast BrokkFile to RepoFile. Will throw if ExternalFiles are present.
      */
     private List<ProjectFile> toRepoFiles(List<BrokkFile> files) {
-        return files.stream()
-                .map(f -> (ProjectFile) f)
-                .collect(Collectors.toList());
+        return files.stream().map(f -> (ProjectFile) f).toList();
     }
 
     /**

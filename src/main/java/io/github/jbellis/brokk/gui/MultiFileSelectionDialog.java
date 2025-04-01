@@ -255,9 +255,8 @@ public class MultiFileSelectionDialog extends JDialog { // Renamed class
                 filenames.add(currentToken.toString());
             }
 
-
+            logger.debug("Raw files: {}", filenames);
             Map<Path, BrokkFile> uniqueFiles = new HashMap<>();
-
             for (String filename : filenames) {
                 if (filename.isBlank()) continue;
 
@@ -285,6 +284,7 @@ public class MultiFileSelectionDialog extends JDialog { // Renamed class
                     }
                 }
             }
+            logger.debug("Unique files: {}", uniqueFiles);
             selectedFiles.addAll(uniqueFiles.values());
         }
         dispose();
