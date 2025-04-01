@@ -3,6 +3,7 @@ package io.github.jbellis.brokk;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import io.github.jbellis.brokk.analyzer.FunctionLocation;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.apache.logging.log4j.LogManager;
@@ -133,13 +134,16 @@ public class LLMTools {
      * A record capturing the outcome of a preview for a single tool request.
      * If success == false, errorMessage should contain the reason for failure.
      */
-    public record ToolOperationPreview(
-            String toolName,
-            ProjectFile targetFile,
-            Object parsedArguments,
-            boolean success,
-            String errorMessage
-    ) {}
+    public record ToolOperationPreview(ToolExecutionRequest request,
+                                       ProjectFile targetFile,
+                                       Object parsedArguments,
+                                       boolean success,
+                                       String errorMessage)
+    {
+        public String toolName() {
+            return request.name();
+        }
+    }
 
     /**
      * Parse and validate a list of tool requests *without* actually writing to disk.
@@ -158,7 +162,7 @@ public class LLMTools {
                 argMap = mapper.readValue(request.arguments(), new com.fasterxml.jackson.core.type.TypeReference<>() {});
             } catch (Exception ex) {
                 previews.add(new ToolOperationPreview(
-                        toolName, null, null, false,
+                        request, null, null, false,
                         "Could not parse JSON arguments: " + ex.getMessage()
                 ));
                 continue;
@@ -197,13 +201,9 @@ public class LLMTools {
                     }
                 }
 
-                previews.add(new ToolOperationPreview(
-                        toolName, file, argMap, true, ""
-                ));
+                previews.add(new ToolOperationPreview(request, file, argMap, true, ""));
             } catch (Exception ex) {
-                previews.add(new ToolOperationPreview(
-                        toolName, null, argMap, false, ex.getMessage()
-                ));
+                previews.add(new ToolOperationPreview(request, null, argMap, false, ex.getMessage()));
             }
         }
         return previews;
@@ -213,16 +213,18 @@ public class LLMTools {
      * Apply the list of tool operations that have been validated.
      * Throws a ToolExecutionError if any validated tool execution fails.
      */
-    public void applyToolOperations(List<ToolOperationPreview> previews) {
-        for (var preview : previews) {
-            if (!preview.success()) {
-                continue;
-            }
-            try {
-                applyTool(preview);
-            } catch (Exception ex) {
-                throw new ToolExecutionError("Failed applying tool " + preview.toolName() + ": " + ex.getMessage(), ex);
-            }
+    public List<ToolExecutionResultMessage> applyToolOperations(List<ToolOperationPreview> previews) {
+        try {
+        return previews.stream()
+                .map(p -> {
+                    if (!p.success()) {
+                        return ToolExecutionResultMessage.from(p.request, p.errorMessage);
+                    }
+                    applyTool(p);
+                    return ToolExecutionResultMessage.from(p.request, "Success");
+                }).toList();
+        } catch (Exception ex) {
+            throw new ToolExecutionError("Failed applying tools", ex);
         }
     }
 
@@ -239,19 +241,27 @@ public class LLMTools {
             case "replaceFile" -> {
                 var filename = (String) argMap.get("filename");
                 var text = (String) argMap.get("text");
+                assert filename != null;
+                assert text != null;
                 replaceFile(filename, text);
             }
             case "replaceLines" -> {
                 var filename = (String) argMap.get("filename");
-                var oldText = (String) argMap.get("oldText");
-                var newText = (String) argMap.get("newText");
-                replaceLines(filename, oldText, newText);
+                var oldLines = (String) argMap.get("oldLines");
+                var newLines = (String) argMap.get("newLines");
+                assert filename != null;
+                assert oldLines != null;
+                assert newLines != null;
+                replaceLines(filename, oldLines, newLines);
             }
             case "replaceFunction" -> {
                 var fullyQualifiedFunctionName = (String) argMap.get("fullyQualifiedFunctionName");
                 @SuppressWarnings("unchecked")
                 var functionParameterNames = (List<String>) argMap.get("functionParameterNames");
                 var newFunctionBody = (String) argMap.get("newFunctionBody");
+                assert fullyQualifiedFunctionName != null;
+                assert functionParameterNames != null;
+                assert newFunctionBody != null;
                 replaceFunction(fullyQualifiedFunctionName, functionParameterNames, newFunctionBody);
             }
             default -> throw new ToolExecutionError("Unsupported tool: " + toolName);

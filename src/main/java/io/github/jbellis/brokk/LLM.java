@@ -1,8 +1,10 @@
 package io.github.jbellis.brokk;
 
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
@@ -91,6 +93,7 @@ public class LLM {
                 io.systemOutput("Empty LLM response even after retries. Stopping session.");
                 break;
             }
+
             String llmText = llmResponse.aiMessage().text();
             boolean hasTools = llmResponse.aiMessage().hasToolExecutionRequests();
             if (llmText.isBlank() && !hasTools) {
@@ -113,50 +116,31 @@ public class LLM {
                 var previewResults = tools.validateToolRequests(toolRequests);
 
                 // Collect any that failed
-                var failedMessages = new ArrayList<String>();
-                for (var pr : previewResults) {
-                    if (!pr.success()) {
-                        failedMessages.add("""
-                            Tool request failed:
-                            Requested tool: %s
-                            Reason: %s
-                            """.stripIndent().formatted(
-                                pr.toolName(),
-                                pr.errorMessage()
-                        ));
-                    }
-                }
-
-                if (!failedMessages.isEmpty()) {
+                var failedMessages = previewResults.stream().filter(p -> !p.success()).count();
+                if (!failedMessages > 0) {
                     parseErrorAttempts++;
                     // If everything failed, we might reflect and continue
-                    if (failedMessages.size() == previewResults.size()) {
+                    if (failedMessages == previewResults.size()) {
+                        // If everything failed, reflect or stop
                         if (parseErrorAttempts >= MAX_PARSE_ATTEMPTS) {
                             io.systemOutput("Tool request failures keep repeating. Stopping.");
                             break;
                         }
-                        // Add reflection
-                        var reflection = String.join("\n\n", failedMessages);
-                        io.systemOutput("Some or all tool requests failed; requesting fix from LLM...");
-                        requestMessages.add(new UserMessage(reflection));
+                        io.systemOutput("All tool requests failed; requesting fix from LLM...");
                     } else {
                         parseErrorAttempts = 0; // we had partial success
                         // We'll still reflect about the failures
-                        var reflection = String.join("\n\n", failedMessages);
                         io.systemOutput("Some tool requests failed; continuing with others...");
-                        requestMessages.add(new UserMessage(reflection));
                     }
                 } else {
                     // If none failed, reset the "parseErrorAttempts"
                     parseErrorAttempts = 0;
                 }
 
-                // 2. Apply only the successful previews
-                var successfulPreviews = previewResults.stream()
+                // Save original content for validated calls
+                previewResults.stream()
                         .filter(LLMTools.ToolOperationPreview::success)
-                        .toList();
-                for (var sp : successfulPreviews) {
-                    // Save original content if needed
+                        .forEach(sp -> {
                     var pf = sp.targetFile();
                     if (pf != null && !originalContents.containsKey(pf)) {
                         try {
@@ -165,19 +149,20 @@ public class LLM {
                             io.toolError("Failed reading file before applying changes: " + e.getMessage());
                         }
                     }
-                }
+                });
 
                 // Actually apply changes
                 try {
-                    tools.applyToolOperations(successfulPreviews);
-                    logger.info("All requested tool operations applied successfully.");
+                    var toolMessages = tools.applyToolOperations(previewResults);
+                    requestMessages.addAll(toolMessages);
+                    logger.info("Validated tool operations applied");
                 } catch (Exception ex) {
-                    logger.warn("Tool apply error", ex);
-                    // skip building if any validated tool fails
-                    continue;
+                    logger.error("Tool apply error", ex);
+                    io.systemOutput("Fatal tool error: " + ex.getMessage());
+                    break;
                 }
 
-                if (!failedMessages.isEmpty()) {
+                if (failedMessages > 0) {
                     continue; // don't bother building
                 }
             }
@@ -225,13 +210,9 @@ public class LLM {
 
         // Use up to 5 related classes as context
         var seeds = analyzer.getClassesInFile(file).stream()
-                .collect(Collectors.toMap(
-                        CodeUnit::fqName,   // use the class name as the key
-                        cls -> 1.0    // assign a default weight of 1.0 to each class
-                ));
+                .collect(Collectors.toMap(CodeUnit::fqName, cls -> 1.0));
         var relatedCode = Context.buildAutoContext(analyzer, seeds, Set.of(), 5);
 
-        // (5) Wrap read() in UncheckedIOException
         String fileContents;
         try {
             fileContents = file.read();
@@ -329,16 +310,16 @@ public class LLM {
         logger.debug("Build command result: {}", result);
         if (result.error() == null) {
             io.systemOutput("Build successful");
-            buildErrors.clear(); // Reset on successful build
+            buildErrors.clear();
             return "";
         }
 
         io.llmOutput("""
-        %s
-        ```
-        %s
-        ```
-        """.stripIndent().formatted(result.error(), result.output()));
+            %s
+            ```
+            %s
+            ```
+            """.stripIndent().formatted(result.error(), result.output()));
         io.systemOutput("Build failed (details above)");
         buildErrors.add(result.error() + "\n\n" + result.output());
 
@@ -374,9 +355,6 @@ public class LLM {
         return true;
     }
 
-    /**
-     * Helper to get a quick response from the LLM without streaming to determine if build errors are improving
-     */
     private static boolean isBuildProgressing(Coder coder, List<String> buildResults) {
         var messages = BuildPrompts.instance.collectMessages(buildResults);
         var response = coder.sendMessage(messages);

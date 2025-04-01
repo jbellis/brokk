@@ -15,24 +15,24 @@ import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.chat.request.ResponseFormatType;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.concurrent.CountDownLatch;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-import java.util.Objects; // Add this import
 
 public class Coder {
     private static final Logger logger = LogManager.getLogger(Coder.class);
@@ -308,8 +308,9 @@ public class Coder {
             }
 
             // For models with native function calling
-            var params = ChatRequestParameters.builder()
+            var params = OpenAiChatRequestParameters.builder()
                     .toolSpecifications(tools)
+                    .parallelToolCalls(true)
                     .build();
             builder = builder.parameters(params);
         }
@@ -378,6 +379,8 @@ public class Coder {
 
             var jsonPrompt = """
                 You MUST respond ONLY with a valid JSON object containing a 'tool_calls' array. Do not include any other text or explanation.
+                Make as many tool calls as appropriate to satisfy the request.
+
                 Available tools:
                 %s
 
