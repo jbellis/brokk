@@ -97,7 +97,7 @@ public class LLM {
             logger.debug("response:\n{}", llmResponse);
 
             // Add to pending conversation
-            pendingHistory.add(requestMessages.getLast());
+            pendingHistory.add(requestMessages.get(requestMessages.size() - 1));
             pendingHistory.add(llmResponse.aiMessage());
             // also add so the next loop sees it
             requestMessages.add(llmResponse.aiMessage());
@@ -106,6 +106,11 @@ public class LLM {
             var toolRequests = llmResponse.aiMessage().toolExecutionRequests();
             var toolResults = new ArrayList<ChatMessage>();
 
+            // TODO add a two-pass apply like we had before
+            // first pass: validate edits and collect failed blocks
+            // second pass: apply the successful blocks
+            // this will let us add back the "auto-add files referenced in search/replace blocks that are not already editable"
+            // code, and the abort-if-attempting-edit-of-read-only logic
             for (var toolRequest : toolRequests) {
                 var resultText = "(no result)";
                 try {
@@ -127,11 +132,10 @@ public class LLM {
                     logger.warn("Tool execution failed: {}", ex.getMessage());
                     resultText = "ERROR: " + ex.getMessage();
                 }
-                // Send the tool result message back to the LLM
-                var toolResultMsg = ToolExecutionResultMessage.from(toolRequest, resultText);
-                toolResults.add(toolResultMsg);
+
+                // TODO collect feedback on failed edits
             }
-            // FIXME continue the outer loop with tool results if any failures
+            // TODO continue the outer loop with feedback for LLM if any edits failed
 
             // If no further instructions or tool calls, attempt a build
             var buildReflection = getBuildReflection(contextManager, io, buildErrors);
