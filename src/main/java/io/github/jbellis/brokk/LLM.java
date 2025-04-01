@@ -51,6 +51,7 @@ public class LLM {
 
         io.systemOutput("Request sent");
 
+        var tools = new LLMTools(coder.contextManager);
         while (true) {
             if (Thread.currentThread().isInterrupted()) {
                 io.systemOutput("Session interrupted");
@@ -116,8 +117,7 @@ public class LLM {
             for (var toolRequest : toolRequests) {
                 var resultText = "(no result)";
                 try {
-                    // The new static method in LLMTools handles invocation
-                    var toolResult = LLMTools.handleToolCall(toolRequest, toolSpecs, contextManager);
+                    var toolResult = tools.execute(toolRequest);
                     resultText = toolResult.output();
                     if (toolResult.changedFile() != null && !originalContents.containsKey(toolResult.changedFile())) {
                         // Save original content

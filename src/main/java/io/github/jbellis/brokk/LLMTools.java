@@ -2,19 +2,16 @@ package io.github.jbellis.brokk;
 
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
-import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dotty.tools.dotc.Run;
+import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.agent.tool.ToolSpecifications;
 import io.github.jbellis.brokk.analyzer.FunctionLocation;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
-import java.nio.file.Paths;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 
 /**
  * Tools for rewriting file contents or specific function definitions.
@@ -26,9 +23,11 @@ public class LLMTools {
     private static final Logger logger = LogManager.getLogger(LLMTools.class);
 
     private final IContextManager contextManager;
+    private final List<ToolSpecification> specs;
 
     public LLMTools(IContextManager contextManager) {
         this.contextManager = contextManager;
+        this.specs = ToolSpecifications.toolSpecificationsFrom(this);
     }
 
     /**
@@ -171,30 +170,54 @@ public class LLMTools {
      *
      * Return a small record containing the output plus a reference to the file that changed (if any).
      */
-    public static ToolCallResult handleToolCall(ToolExecutionRequest request,
-                                                List<ToolSpecification> toolSpecs,
-                                                IContextManager contextManager)
-    {
-        // find the matching ToolSpecification by name
-        var toolSpecOpt = toolSpecs.stream()
+    public ToolCallResult execute(ToolExecutionRequest request) {
+        var toolSpecOpt = specs.stream()
                 .filter(spec -> spec.name().equals(request.name()))
                 .findFirst();
         if (toolSpecOpt.isEmpty()) {
-            // The LLM asked for a nonexistent tool
             return new ToolCallResult("ERROR: No such tool: " + request.name(), null);
         }
-        var toolSpec = toolSpecOpt.get();
-        // Execute the tool
+
+        logger.info("Executing tool: {}", request.name());
+        logger.info("Tool arguments (JSON): {}", request.arguments());
+
         String result;
         try {
-            result = null; // TODO
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            var argMap = mapper.readValue(
+                    request.arguments(),
+                    new com.fasterxml.jackson.core.type.TypeReference<java.util.Map<String, Object>>() {
+                    }
+            );
+
+            result = switch (request.name()) {
+                case "replace_file" -> {
+                    var filename = (String) argMap.get("filename");
+                    var text = (String) argMap.get("text");
+                    yield replace_file(filename, text);
+                }
+                case "replace_function" -> {
+                    var fullyQualifiedFunctionName = (String) argMap.get("fullyQualifiedFunctionName");
+                    @SuppressWarnings("unchecked")
+                    var functionParameterNames = (List<String>) argMap.get("functionParameterNames");
+                    var newFunctionBody = (String) argMap.get("newFunctionBody");
+                    yield replace_function(fullyQualifiedFunctionName, functionParameterNames, newFunctionBody);
+                }
+                case "replace_text" -> {
+                    var filename = (String) argMap.get("filename");
+                    var oldText = (String) argMap.get("oldText");
+                    var newText = (String) argMap.get("newText");
+                    yield replace_text(filename, oldText, newText);
+                }
+                default -> "ERROR: Tool not recognized or not implemented: " + request.name();
+            };
         } catch (Exception e) {
             result = "ERROR: " + e.getMessage();
         }
-        // Our own tool methods return messages like "Successfully replaced file X" or "ERROR..."
-        // If you want to detect which file got changed, you can do a quick parse:
-        ProjectFile changed = extractFileFromMessage(contextManager, result);
-        return new ToolCallResult(result, changed);
+
+        logger.info("Tool result: {}", result);
+        var changedFile = extractFileFromMessage(contextManager, result);
+        return new ToolCallResult(result, changedFile);
     }
 
     /**
