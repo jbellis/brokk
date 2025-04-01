@@ -974,6 +974,78 @@ class JavaAnalyzer private (sourcePath: Path, cpgInit: Cpg)
     val escaped = Regex.quote(resolvedMethodName)
     cpg.method.fullName(escaped + ":.*").l
   }
+
+  override def findFunctionLocation(
+                                     fqMethodName: String,
+                                     paramNames: java.util.List[String]
+                                   ): java.util.Optional[FunctionLocation] = {
+
+    import scala.jdk.CollectionConverters.*
+
+    // e.g. "com.example.Foo.doStuff"
+    // We'll chop off everything after a colon if present
+    val methodPattern = fqMethodName.replaceAllLiterally("$", "\\$")
+    val allCandidates = cpg.method.fullName(s"$methodPattern:.*").l
+
+    if (allCandidates.isEmpty) {
+      return java.util.Optional.empty()
+    }
+
+    // If there's exactly one method node, just pick it (assuming param names might not matter).
+    val single = allCandidates.size == 1
+    val paramList = paramNames.asScala.toList
+
+    // Filter by param names if we have more than one candidate
+    val matched =
+      if (single || paramList.isEmpty) allCandidates
+      else {
+        // For each method, gather param variable names (excluding 'this')
+        allCandidates.filter { m =>
+          val actualNames = m.parameter
+            .filterNot(_.name == "this")
+            .sortBy(_.order)
+            .map(_.name)
+            .l
+            .toList
+          actualNames == paramList
+        }
+      }
+
+    if (matched.isEmpty) {
+      // If param name matching found nothing, fallback to returning nothing
+      return java.util.Optional.empty()
+    }
+
+    // If exactly one method is matched, use it. If multiple matched, pick the first arbitrarily.
+    val chosen = matched.head
+    val fileOpt = toFile(chosen.typeDecl.head)
+    if (fileOpt.isEmpty || chosen.lineNumber.isEmpty || chosen.lineNumberEnd.isEmpty) {
+      return java.util.Optional.empty()
+    }
+
+    val file = fileOpt.get
+    val start = chosen.lineNumber.get
+    val end   = chosen.lineNumberEnd.get
+
+    // Read the lines from start..end
+    val maybeCode = try {
+      val lines = scala.io.Source.fromFile(file.absPath().toFile)
+        .getLines()
+        .drop(start - 1)   // zero-based
+        .take((end - start) + 1)
+        .mkString("\n")
+      Some(lines)
+    } catch {
+      case _: Throwable => None
+    }
+
+    if (maybeCode.isEmpty) {
+      return java.util.Optional.empty()
+    }
+
+    val funcLoc = FunctionLocation(file, start, end, maybeCode.get)
+    java.util.Optional.of(funcLoc)
+  }
 }
 
 object JavaAnalyzer {
