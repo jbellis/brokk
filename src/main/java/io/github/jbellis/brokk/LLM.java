@@ -93,22 +93,14 @@ public class LLM {
                 break;
             }
 
+            // We got a valid response
+            logger.debug("response:\n{}", llmResponse);
+
             // Add to pending conversation
-            pendingHistory.add(requestMessages.get(requestMessages.size() - 1));
+            pendingHistory.add(requestMessages.getLast());
             pendingHistory.add(llmResponse.aiMessage());
             // also add so the next loop sees it
             requestMessages.add(llmResponse.aiMessage());
-
-            // If no further instructions or tool calls, attempt a build
-            if (!llmResponse.aiMessage().hasToolExecutionRequests()) {
-                var buildReflection = getBuildReflection(contextManager, io, buildErrors);
-                if (buildReflection.isEmpty()) {
-                    isComplete = true;
-                    break;
-                }
-                requestMessages.add(new UserMessage(buildReflection));
-                continue;
-            }
 
             // The LLM wants to execute some tools. We'll do so and return any results/errors
             var toolRequests = llmResponse.aiMessage().toolExecutionRequests();
@@ -139,10 +131,23 @@ public class LLM {
                 var toolResultMsg = ToolExecutionResultMessage.from(toolRequest, resultText);
                 toolResults.add(toolResultMsg);
             }
+            // FIXME continue the outer loop with tool results if any failures
 
-            // Re-query the LLM with the new tool results appended
-            requestMessages.addAll(toolResults);
-            io.systemOutput("Applied " + toolRequests.size() + " tool call(s). Will re-query the LLM.");
+            // If no further instructions or tool calls, attempt a build
+            var buildReflection = getBuildReflection(contextManager, io, buildErrors);
+            if (buildReflection.isEmpty()) {
+                // success!
+                isComplete = true;
+                break;
+            }
+
+            // Check if we should continue trying
+            if (!shouldContinue(coder, parseErrorAttempts, buildErrors, io)) {
+                break;
+            }
+
+            io.systemOutput("Attempting to fix build errors...");
+            requestMessages.add(new UserMessage(buildReflection));
         }
 
         // Write conversation to history if anything happened
