@@ -155,6 +155,7 @@ public class LLM {
                     logger.warn("Tool application failure: {}", result.text());
                     failures++;
                 }
+                sessionMessages.add(result);
                 // TODO make this fancier! like, an actual graphical representation of the diff
                 io.llmOutput("\n" + result.toolName() + ": " + result.text());
             }
