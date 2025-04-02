@@ -471,12 +471,18 @@ class AnalyzerTest {
   }
 
   @Test
-  def getFunctionLocationOverloadAmbiguousTest(): Unit = {
+  def getFunctionLocationMissingParamTest(): Unit = {
     val analyzer = getAnalyzer
-    // "A.method2" has two overloads. Passing no param names means we don't disambiguate
-    assertThrows(classOf[SymbolAmbiguousException], () => {
+    // "A.method2" has two overloads, but neither takes zero parameters
+    assertThrows(classOf[SymbolNotFoundException], () => {
       analyzer.getFunctionLocation("A.method2", java.util.Collections.emptyList())
     })
+  }
+
+  @Test
+  def getFunctionLocationMissingPackageTest(): Unit = {
+    val analyzer = getAnalyzer
+    analyzer.getFunctionLocation("Foo.bar", java.util.Collections.emptyList())
   }
 
   @Test

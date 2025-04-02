@@ -981,15 +981,18 @@ class JavaAnalyzer private (sourcePath: Path, cpgInit: Cpg)
                                   ): FunctionLocation = {
     import scala.jdk.CollectionConverters.*
 
-    val methodPattern = fqMethodName.replaceAllLiterally("$", "\\$")
-    val allCandidates = cpg.method.fullName(s"$methodPattern:.*").l
-
-    if (allCandidates.isEmpty) {
-      throw new SymbolNotFoundException(s"No methods found for $fqMethodName")
-    }
+    var methodPattern = Regex.quote(fqMethodName)
+    var allCandidates = cpg.method.fullName(s"$methodPattern:.*").l
 
     if (allCandidates.size == 1) {
       return toFunctionLocation(allCandidates.head)
+    }
+
+    if (allCandidates.isEmpty) {
+      // Try to resolve the method name without the package (but with the class)
+      val shortName = fqMethodName.split('.').takeRight(2).mkString(".")
+      methodPattern = Regex.quote(shortName)
+      allCandidates = cpg.method.fullName(s".*$methodPattern:.*").l
     }
 
     val paramList = paramNames.asScala.toList
