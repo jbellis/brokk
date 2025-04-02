@@ -117,7 +117,7 @@ public class EditBlock {
                                  String.join("", splicedReplace));
         }
 
-        throw new NoMatchException("No matching location found in content");
+        throw new NoMatchException("No matching oldLines found in content");
     }
 
     /** Counts how many leading lines in 'lines' are completely blank (trim().isEmpty()). */
@@ -213,7 +213,7 @@ public class EditBlock {
             }
             matches.add(i);
             if (matches.size() > 1) {
-                throw new AmbiguousMatchException("Multiple matches found for the search block.");
+                throw new AmbiguousMatchException("Multiple matches found for the oldLines");
             }
         }
 
