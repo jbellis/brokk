@@ -98,7 +98,7 @@ public class Coder {
         });
 
         // Write request with tools to history
-        writeRequestToHistory(request.messages(), request.toolSpecifications());
+        writeRequestToHistory(request.messages(), request.parameters().toolSpecifications());
 
         AtomicReference<ChatResponse> atomicResponse = new AtomicReference<>();
 
@@ -168,7 +168,7 @@ public class Coder {
      * @return The LLM response text, trimmed. Returns an empty string on error/cancellation.
      */
     public String sendMessage(List<ChatMessage> messages) {
-        var result = sendMessage(Models.quickModel(), messages, List.of());
+        var result = sendMessage(Models.quickModel(), messages, List.of(), false);
         if (result.cancelled() || result.error() != null || result.chatResponse() == null || result.chatResponse().aiMessage() == null) {
             throw new IllegalStateException();
         }
@@ -179,7 +179,7 @@ public class Coder {
      * Send a message to a specific model without tools.
      */
     public StreamingResult sendMessage(StreamingChatLanguageModel model, List<ChatMessage> messages) {
-        return sendMessage(model, messages, List.of());
+        return sendMessage(model, messages, List.of(), false);
     }
 
 
@@ -191,13 +191,14 @@ public class Coder {
      * @param tools    List of tools to enable for the LLM
      * @return The LLM response as a string
      */
-    public StreamingResult sendMessage(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools) {
+    public StreamingResult sendMessage(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools, boolean echo) {
 
-        var result = sendMessageWithRetry(model, messages, tools, false, MAX_ATTEMPTS);
+        var result = sendMessageWithRetry(model, messages, tools, echo, MAX_ATTEMPTS);
         var cr = result.chatResponse();
         // poor man's ToolChoice.REQUIRED (not supported by langchain4j for Anthropic)
         // Also needed for our DeepSeek emulation if it returns a response without a tool call
         while (!result.cancelled && result.error == null && !tools.isEmpty() && !cr.aiMessage().hasToolExecutionRequests()) {
+            logger.debug("Tool use requested but no tool called");
             io.systemOutput("Enforcing tool selection");
             var extraMessages = new ArrayList<>(messages);
             extraMessages.add(cr.aiMessage());
@@ -304,7 +305,7 @@ public class Coder {
         if (!tools.isEmpty()) {
             // Check if this is a DeepSeek model that needs function calling emulation
             if (modelName.toLowerCase().contains("deepseek")) {
-                return emulateToolsUsingStructuredOutput(model, messages, tools);
+                return emulateToolsUsingStructuredOutput(model, messages, tools, echo);
             }
 
             // For models with native function calling
@@ -325,7 +326,7 @@ public class Coder {
      * Emulates function calling for models that support structured output but not native function calling
      * Used primarily for DeepSeek models
      */
-    private StreamingResult emulateToolsUsingStructuredOutput(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools) {
+    private StreamingResult emulateToolsUsingStructuredOutput(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools, boolean echo) {
         assert !tools.isEmpty();
         for (var tool: tools) {
             assert tool.parameters() != null;
@@ -414,7 +415,7 @@ public class Coder {
                 .parameters(requestParams)
                 .build();
 
-        var response = doSingleStreamingCall(model, request, false);
+        var response = doSingleStreamingCall(model, request, echo);
 
         // Parse the JSON response and convert it to a tool execution request
         try {

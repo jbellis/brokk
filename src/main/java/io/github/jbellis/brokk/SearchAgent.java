@@ -674,7 +674,7 @@ public class SearchAgent {
 
         // Ask LLM for next action with tools
         var tools = createToolSpecifications();
-        var result = coder.sendMessage(model, messages, tools);
+        var result = coder.sendMessage(model, messages, tools, false);
         if (result.cancelled()) {
             Thread.currentThread().interrupt();
             return List.of();

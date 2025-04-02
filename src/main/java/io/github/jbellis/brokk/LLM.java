@@ -73,7 +73,7 @@ public class LLM {
 
             // Actually send the request to the LLM
             var toolSpecs = ToolSpecifications.toolSpecificationsFrom(tools);
-            var streamingResult = coder.sendMessage(model, allMessages, toolSpecs);
+            var streamingResult = coder.sendMessage(model, allMessages, toolSpecs, true);
             if (streamingResult.cancelled()) {
                 io.systemOutput("Session cancelled.");
                 break;
