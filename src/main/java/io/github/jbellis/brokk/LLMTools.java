@@ -133,7 +133,7 @@ public class LLMTools
     public void replaceLines(
             @P("Full path + name of the file to modify") String filename,
             @P("Lines to replace") String oldLines,
-            @P("Replacement lines") String newLines
+            @P("Replacement lines (will be used as-is, so make sure indentation is appropriate)") String newLines
     ) {
         throw new ToolExecutionException("Direct invocation of replaceLines(String,String,String) is not supported. Use parseToolRequest + applyRequest.");
     }
@@ -157,7 +157,7 @@ public class LLMTools
     public void replaceFunction(
             @P("The fully qualified function name, e.g. com.example.Foo.barMethod") String fullyQualifiedFunctionName,
             @P("List of parameter variable names, e.g. [\"arg1\", \"userId\"]") List<String> functionParameterNames,
-            @P("The new code for the entire function, including signature and braces") String newFunctionBody
+            @P("The new code for the entire function, including signature and braces. Will be used as-is, so make sure indentation is appropriate") String newFunctionBody
     ) {
         throw new ToolExecutionException("Direct invocation of replaceFunction(String,List,String) is not supported. Use parseToolRequest + applyRequest.");
     }

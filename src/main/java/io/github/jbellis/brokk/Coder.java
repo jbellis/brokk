@@ -19,7 +19,6 @@ import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -308,7 +307,7 @@ public class Coder {
         if (!tools.isEmpty()) {
             // Check if this is a DeepSeek model that needs function calling emulation
             if (requiresEmulatedTools(model)) {
-                return emulateToolsUsingStructuredOutput(model, messages, tools, echo);
+                return emulateToolsUsingStructuredOutput(model, messages, tools, toolChoice, echo);
             }
 
             // For models with native function calling
@@ -335,9 +334,9 @@ public class Coder {
      * Emulates function calling for models that support structured output but not native function calling
      * Used primarily for DeepSeek models
      */
-    private StreamingResult emulateToolsUsingStructuredOutput(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools, boolean echo) {
+    private StreamingResult emulateToolsUsingStructuredOutput(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools, ToolChoice toolChoice, boolean echo) {
         assert !tools.isEmpty();
-        for (var tool: tools) {
+        for (var tool : tools) {
             assert tool.parameters() != null;
             assert tool.parameters().properties() != null;
         }
@@ -361,24 +360,78 @@ public class Coder {
         // Create a request with JSON response format
         var requestParams = ChatRequestParameters.builder()
                 .responseFormat(ResponseFormat.builder()
-                        .type(ResponseFormatType.JSON)
-                        .build())
+                                        .type(ResponseFormatType.JSON)
+                                        .build())
                 .build();
-        var request = ChatRequest.builder()
-                .messages(messages)
-                .parameters(requestParams)
-                .build();
-        var response = doSingleStreamingCall(model, request, echo);
 
-        // Parse the JSON response and convert it to a tool execution request
-        try {
-            return parseJsonToTools(response, mapper);
-        } catch (IllegalArgumentException e) {
-            logger.error("Error processing JSON response: " + e.getMessage(), e);
-            // Return the original response if parsing fails
-            // TODO better fix for internal errors?
-            return response;
+        // Try up to 3 times to get a valid JSON response
+        int maxRetries = 3;
+        List<ChatMessage> currentMessages = new ArrayList<>(messages);
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            var request = ChatRequest.builder()
+                    .messages(currentMessages)
+                    .parameters(requestParams)
+                    .build();
+            var response = doSingleStreamingCall(model, request, echo);
+
+            // If cancelled or no chat response, return immediately
+            if (response.cancelled) {
+                return response;
+            }
+
+            if (response.chatResponse == null || response.chatResponse.aiMessage() == null) {
+                logger.debug("No chat response or AI message in response on attempt {}", attempt);
+                continue;
+            }
+
+            // Try to parse the JSON response
+            try {
+                StreamingResult parsedResponse = parseJsonToTools(response, mapper);
+                if (parsedResponse.chatResponse.aiMessage().hasToolExecutionRequests()) {
+                    // Successfully parsed tool calls, return the result
+                    logger.debug("Successfully parsed tool calls on attempt {}", attempt);
+                    return parsedResponse;
+                }
+                // If we get here, the response was valid JSON but didn't contain tool calls
+                throw new IllegalArgumentException("Response contained valid JSON but no tool_calls");
+            } catch (IllegalArgumentException e) {
+                if (toolChoice == ToolChoice.AUTO) {
+                    // If tools are optional, return the original response
+                    logger.debug("Tools are optional, returning original response on attempt {}: {}", attempt, e.getMessage());
+                    return response;
+                }
+
+                // If this is the last attempt, throw the exception
+                if (attempt == maxRetries) {
+                    logger.error("Failed to get valid tool calls after {} attempts: {}", maxRetries, e.getMessage());
+                    return response; // Return the original response with the error
+                }
+
+                // Add the invalid response to the messages
+                String invalidResponse = response.chatResponse.aiMessage().text();
+                logger.debug("Invalid JSON response on attempt {}: {}", attempt, invalidResponse);
+                io.systemOutput("Retry " + attempt + "/" + maxRetries + ": Invalid JSON response, requesting proper format.");
+
+                // Add the invalid response as an assistant message
+                currentMessages.add(new AiMessage(invalidResponse));
+
+                // Add a clearer instruction for the next attempt
+                String retryMessage = "Your previous response was not valid. You MUST respond ONLY with a valid JSON object containing a 'tool_calls' array as follows:\n" +
+                        "{\n  \"tool_calls\": [\n    {\n      \"name\": \"tool_name\",\n      \"arguments\": {\n        \"arg1\": \"value1\",\n        \"arg2\": \"value2\"\n      }\n    }\n  ]\n}\n\nDo not include any explanation or other text outside the JSON object.";
+
+                currentMessages.add(new UserMessage(retryMessage));
+                writeToHistory("Retry Attempt " + attempt, "Invalid JSON: " + invalidResponse + "\n\nRetry with: " + retryMessage);
+            }
         }
+
+        // If we reach here, all retries failed
+        logger.error("All {} attempts to get valid JSON tool calls failed", maxRetries);
+        return new StreamingResult(
+                ChatResponse.builder().aiMessage(new AiMessage("Failed to generate valid tool calls after " + maxRetries + " attempts")).build(),
+                false,
+                new IllegalArgumentException("Failed to generate valid tool calls after " + maxRetries + " attempts")
+        );
     }
 
     private static StreamingResult parseJsonToTools(StreamingResult response, ObjectMapper mapper) {
