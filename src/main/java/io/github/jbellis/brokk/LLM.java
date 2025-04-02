@@ -101,52 +101,52 @@ public class LLM {
             sessionMessages.add(nextRequest);
             sessionMessages.add(llmResponse.aiMessage());
 
-            // -------------------------------------------
-            // A) First pass: parse each tool request
-            // -------------------------------------------
             var toolRequests = llmResponse.aiMessage().toolExecutionRequests();
+            if (toolRequests == null || toolRequests.isEmpty()) {
+                // LLM thinks we're done
+                break;
+            }
+
+            // process tool calls
             var validatedRequests = new ArrayList<LLMTools.ValidatedToolRequest>();
             boolean encounteredReadOnly = false;
+            for (var req : toolRequests) {
+                var parsed = tools.parseToolRequest(req);
+                if (parsed.error() != null) {
+                    // Track the error so we can include a Tool Response
+                    logger.warn("Tool request parse error: {}", parsed.error());
+                    validatedRequests.add(parsed);
+                    continue;
+                }
 
-            if (toolRequests != null && !toolRequests.isEmpty()) {
-                for (var req : toolRequests) {
-                    var parsed = tools.parseToolRequest(req);
-                    if (parsed.error() != null) {
-                        // Track the error so we can include a Tool Response
-                        logger.warn("Tool request parse error: {}", parsed.error());
-                        validatedRequests.add(parsed);
-                        continue;
+                // If we get here, we have a valid ProjectFile
+                var pf = parsed.file();
+                if (pf != null) {
+                    // Check read-only status
+                    if (!contextManager.getEditableFiles().contains(pf)) {
+                        io.systemOutput("Request attempts to edit read-only file: " + pf);
+                        sessionMessages.add(new AiMessage(
+                                "Session aborted: attempt to edit read-only file " + pf
+                        ));
+                        encounteredReadOnly = true;
+                        break;
                     }
-
-                    // If we get here, we have a valid ProjectFile
-                    var pf = parsed.file();
-                    if (pf != null) {
-                        // Check read-only status
-                        if (!contextManager.getEditableFiles().contains(pf)) {
-                            io.systemOutput("Request attempts to edit read-only file: " + pf);
+                    // Store original content for potential history or revert
+                    if (!originalContents.containsKey(pf)) {
+                        try {
+                            originalContents.put(pf, pf.exists() ? pf.read() : "");
+                        } catch (IOException e) {
+                            io.toolError("Failed reading file before applying changes: " + e.getMessage());
+                            // We can either skip or mark an error and break
                             sessionMessages.add(new AiMessage(
-                                    "Session aborted: attempt to edit read-only file " + pf
+                                    "Session aborted: unable to read file " + pf
                             ));
                             encounteredReadOnly = true;
                             break;
                         }
-                        // Store original content for potential history or revert
-                        if (!originalContents.containsKey(pf)) {
-                            try {
-                                originalContents.put(pf, pf.exists() ? pf.read() : "");
-                            } catch (IOException e) {
-                                io.toolError("Failed reading file before applying changes: " + e.getMessage());
-                                // We can either skip or mark an error and break
-                                sessionMessages.add(new AiMessage(
-                                        "Session aborted: unable to read file " + pf
-                                ));
-                                encounteredReadOnly = true;
-                                break;
-                            }
-                        }
                     }
-                    validatedRequests.add(parsed);
                 }
+                validatedRequests.add(parsed);
             }
 
             // If any read-only file or i/o error was encountered, end the session
@@ -154,40 +154,36 @@ public class LLM {
                 break;
             }
 
-            // -------------------------------------------
-            // B) Second pass: apply the valid requests
-            // -------------------------------------------
-            if (!validatedRequests.isEmpty()) {
-                int failures = 0;
-                for (var validated : validatedRequests) {
-                    // Attempt actual edit. (Handles validation errors internally)
-                    var result = tools.executeTool(validated);
-                    if (!result.text().equals("SUCCESS")) {
-                        logger.warn("Tool application failure: {}", result.text());
-                        failures++;
-                    }
+            // apply tools
+            int failures = 0;
+            for (var validated : validatedRequests) {
+                // Attempt actual edit. (Handles validation errors internally)
+                var result = tools.executeTool(validated);
+                if (!result.text().equals("SUCCESS")) {
+                    logger.warn("Tool application failure: {}", result.text());
+                    failures++;
                 }
+            }
 
-                // If every single request was invalid or failed, increment parseErrorAttempts
-                // as an indication that the LLM's instructions might be problematic.
-                if (failures == validatedRequests.size()) {
-                    parseErrorAttempts++;
-                    if (parseErrorAttempts >= MAX_PARSE_ATTEMPTS) {
-                        io.systemOutput("Repeated tool request failures. Stopping session.");
-                        break;
-                    }
-                    // We'll reflect in the next loop iteration
-                    logger.debug("Tool requests had errors. Asking LLM to correct them...");
-                    io.systemOutput("Tool requests had errors. Asking LLM to correct them...");
-                    nextRequest = new UserMessage("""
-                        Some of your tool calls could not be applied. Please revisit your changes
-                        and provide corrected tool usage or updated instructions.
-                        """.stripIndent());
-                    continue;
-                } else {
-                    // If at least one succeeded, reset parseErrorAttempts
-                    parseErrorAttempts = 0;
+            // If every single request was invalid or failed, increment parseErrorAttempts
+            // as an indication that the LLM's instructions might be problematic.
+            if (failures == validatedRequests.size()) {
+                parseErrorAttempts++;
+                if (parseErrorAttempts >= MAX_PARSE_ATTEMPTS) {
+                    io.systemOutput("Repeated tool request failures. Stopping session.");
+                    break;
                 }
+                // We'll reflect in the next loop iteration
+                logger.debug("Tool requests had errors. Asking LLM to correct them...");
+                io.systemOutput("Tool requests had errors. Asking LLM to correct them...");
+                nextRequest = new UserMessage("""
+                    Some of your tool calls could not be applied. Please revisit your changes
+                    and provide corrected tool usage or updated instructions.
+                    """.stripIndent());
+                continue;
+            } else {
+                // If at least one succeeded, reset parseErrorAttempts
+                parseErrorAttempts = 0;
             }
 
             // -------------------------------------------
