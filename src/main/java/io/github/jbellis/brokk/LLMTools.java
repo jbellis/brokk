@@ -152,7 +152,8 @@ public class LLMTools
      * based on analyzing the function location from the analyzer.
      */
     @Tool(value = """
-    Replace the entire function body, identified by fullyQualifiedFunctionName + param names.
+    Replace the entire function body, identified by fullyQualifiedFunctionName + param names. This CANNOT replace a
+    a class or interface or anything besides functions/methods (you have to use replaceLines or replaceFile for that).
     """)
     public void replaceFunction(
             @P("The fully qualified function name, e.g. com.example.Foo.barMethod") String fullyQualifiedFunctionName,
