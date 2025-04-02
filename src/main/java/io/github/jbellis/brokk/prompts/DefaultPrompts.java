@@ -23,6 +23,7 @@ public abstract class DefaultPrompts {
 
     public static final String OVEREAGER_REMINDER = """
     Pay careful attention to the scope of the user's request. Do what he asks, but no more.
+    Do comment new code, but if existing comments are adequate, do not rewrite them.
     """;
 
     public static String reminderForModel(StreamingChatLanguageModel model) {
