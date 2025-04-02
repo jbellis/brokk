@@ -397,7 +397,7 @@ public class Coder {
                 // If we get here, the response was valid JSON but didn't contain tool calls
                 if (toolChoice == ToolChoice.AUTO) {
                     // If tools are optional, return the original response
-                    logger.debug("Tools are optional, returning original response on attempt {}: {}", attempt, e.getMessage());
+                    logger.debug("Tools are optional, returning original response on attempt {}", attempt);
                     return response;
                 }
                 // else throw so catch retries
@@ -587,7 +587,6 @@ public class Coder {
 
     private void writeRequestToHistory(List<ChatMessage> messages, List<ToolSpecification> tools) {
         String requestText = messages.stream()
-                .filter(m -> !(m instanceof ToolExecutionResultMessage))
                 .map(m -> "%s: %s\n".formatted(m.type(), Models.getText(m)))
                 .reduce((a, b) -> a + "\n" + b)
                 .orElse("");

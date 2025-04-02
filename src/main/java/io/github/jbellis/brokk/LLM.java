@@ -150,6 +150,7 @@ public class LLM {
             io.llmOutput("\n");
             int failures = 0;
             var resultMessages = new ArrayList<ToolExecutionResultMessage>();
+            var output = new StringBuilder();
             for (var validated : validatedRequests) {
                 // Attempt actual edit. (Handles validation errors internally)
                 var result = tools.executeTool(validated);
@@ -159,8 +160,9 @@ public class LLM {
                 }
                 resultMessages.add(result);
                 // TODO make this fancier! like, an actual graphical representation of the diff
-                io.llmOutput("\n" + result.toolName() + ": " + result.text());
+                output.append("\n" + result.toolName() + ": " + result.text());
             }
+            io.llmOutput("\n\n```" + output + "```\n\n");
             if (!coder.requiresEmulatedTools(model)) {
                 // need this whether success or failure or the LLM gets confused seeing that it made a call but no results
                 sessionMessages.addAll(resultMessages);
@@ -222,7 +224,10 @@ public class LLM {
         // If we had any conversation at all, store it in the context history
         if (!sessionMessages.isEmpty()) {
             String finalUserInput = isComplete ? userInput : userInput + " [incomplete]";
-            coder.contextManager.addToHistory(sessionMessages, originalContents, finalUserInput);
+            var filtered = sessionMessages.stream()
+                    .filter(m -> !(m instanceof ToolExecutionResultMessage))
+                    .toList();
+            coder.contextManager.addToHistory(filtered, originalContents, finalUserInput);
         }
         if (isComplete) {
             io.systemOutput("Session complete!");
