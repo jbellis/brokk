@@ -129,7 +129,7 @@ public class LLMTools
     /**
      * "replaceLines" - search for a chunk of text and replace it.
      */
-    @Tool(value = "Replace the first occurrence of oldLines in the specified file with newLines (both are full lines). If oldLines is empty, newLines is appended.")
+    @Tool(value = "Replace the first occurrence of oldLines in the specified file with newLines (both are full lines). If oldLines is empty, newLines is appended. If replacing sequential lines, make one call for all of them.")
     public void replaceLines(
             @P("Full path + name of the file to modify") String filename,
             @P("Lines to replace") String oldLines,
