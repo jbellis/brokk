@@ -171,7 +171,7 @@ class LLMToolsTest {
     }
 
     @Test
-    void testApplyEditsCreatesNewFile(@TempDir Path tempDir) throws IOException, EditBlock.NoMatchException {
+    void testApplyEditsCreatesNewFile(@TempDir Path tempDir) throws IOException, EditBlock.NoMatchException, EditBlock.AmbiguousMatchException {
         TestContextManager ctx = new TestContextManager(tempDir, Set.of("fileA.txt"));
         var tools = new LLMTools(ctx);
 

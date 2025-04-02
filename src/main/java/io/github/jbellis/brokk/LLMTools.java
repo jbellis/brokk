@@ -130,7 +130,7 @@ public class LLMTools {
         throw new ToolExecutionException("Direct invocation of replaceLines(String,String,String) is not supported. Use parseToolRequest + applyRequest.");
     }
 
-    public void replaceLines(ProjectFile file, String oldLines, String newLines) throws EditBlock.NoMatchException {
+    public void replaceLines(ProjectFile file, String oldLines, String newLines) throws EditBlock.NoMatchException, EditBlock.AmbiguousMatchException {
         try {
             EditBlock.replaceInFile(file, oldLines, newLines);
             logger.info("replaceLines: updated text in {}", file);

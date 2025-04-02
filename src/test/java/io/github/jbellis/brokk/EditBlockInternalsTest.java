@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -78,7 +79,7 @@ class EditBlockInternalsTest {
     }
 
     @Test
-    void testPerfectReplace() {
+    void testPerfectReplace() throws EditBlock.AmbiguousMatchException {
         String[] whole = { "A\n", "B\n", "C\n" };
         String[] part  = { "B\n" };
         String[] repl  = { "B-REPLACED\n" };
@@ -91,7 +92,7 @@ class EditBlockInternalsTest {
     }
 
     @Test
-    void testReplaceIgnoringWhitespace_includingBlankLine() {
+    void testReplaceIgnoringWhitespace_includingBlankLine() throws EditBlock.AmbiguousMatchException {
         // This is closer to the scenario that breaks in your test:
         // There's an extra blank line in 'search' that doesn't appear in the original.
         String[] whole = {
@@ -128,7 +129,7 @@ class EditBlockInternalsTest {
     }
 
     @Test
-    void testReplaceMostSimilarChunk() {
+    void testReplaceMostSimilarChunk() throws EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         String whole = """
                 line1
                     line2
@@ -150,7 +151,7 @@ class EditBlockInternalsTest {
     }
 
     @Test
-    void testDoReplaceWithBlankLineAndIndent() {
+    void testDoReplaceWithBlankLineAndIndent() throws EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         // "doReplace" is a higher-level method that calls stripQuotedWrapping + replaceMostSimilarChunk, etc.
         String original = """
                 line1
@@ -171,7 +172,7 @@ class EditBlockInternalsTest {
     }
 
     @Test
-    void testReplaceSimpleExact() {
+    void testReplaceSimpleExact() throws EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         String original = "This is a sample text.\nAnother line\nYet another line.\n";
         String search = "Another line\n";
         String replace = "Changed line\n";
@@ -182,7 +183,7 @@ class EditBlockInternalsTest {
     }
 
     @Test
-    void testReplaceIgnoringWhitespace() {
+    void testReplaceIgnoringWhitespace() throws EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         String original = """
                 line1
                     line2
@@ -207,7 +208,7 @@ class EditBlockInternalsTest {
     }
 
     @Test
-    void testDeletionIgnoringWhitespace() {
+    void testDeletionIgnoringWhitespace() throws EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         String original = """
                 One
                   Two
@@ -218,7 +219,7 @@ class EditBlockInternalsTest {
     }
 
     @Test
-    void testReplaceFirstOccurrenceOnly() {
+    void testAmbiguousMatch() {
         String original = """
                 line1
                 line2
@@ -227,19 +228,26 @@ class EditBlockInternalsTest {
                 """;
         String search = "line1\n";
         String replace = "new_line\n";
-        String expected = """
-                new_line
+
+        assertThrows(EditBlock.AmbiguousMatchException.class, () -> EditBlock.replaceMostSimilarChunk(original, search, replace));
+    }
+
+    @Test
+    void testNoMatch() {
+        String original = """
+                line1
                 line2
                 line1
                 line3
                 """;
+        String search = "line4\n";
+        String replace = "new_line\n";
 
-        String updated = EditBlock.replaceMostSimilarChunk(original, search, replace);
-        assertEquals(expected, updated);
+        assertThrows(EditBlock.NoMatchException.class, () -> EditBlock.replaceMostSimilarChunk(original, search, replace));
     }
 
     @Test
-    void testEmptySearchCreatesOrAppends() {
+    void testEmptySearchCreatesOrAppends() throws EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         // If beforeText is empty, treat it as create/append
         String original = "one\ntwo\n";
         String search = "";
@@ -254,7 +262,7 @@ class EditBlockInternalsTest {
      * LLM likes to start blocks without the leading whitespace sometimes
      */
     @Test
-    void testReplacePartWithMissingLeadingWhitespace() {
+    void testReplacePartWithMissingLeadingWhitespace() throws EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         String original = """
                 line1
                     line2
@@ -289,7 +297,7 @@ class EditBlockInternalsTest {
      * (Similar to python test_replace_part_with_missing_leading_whitespace_including_blank_line)
      */
     @Test
-    void testReplaceIgnoringWhitespaceIncludingBlankLine() {
+    void testReplaceIgnoringWhitespaceIncludingBlankLine() throws EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         String original = """
                 line1
                     line2
@@ -319,7 +327,7 @@ class EditBlockInternalsTest {
     }
 
     @Test
-    void testReplaceIgnoringTrailingWhitespace() {
+    void testReplaceIgnoringTrailingWhitespace() throws EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         String original = """
                 line1
                     line2  
@@ -343,7 +351,7 @@ class EditBlockInternalsTest {
     }
 
     @Test
-    void testReplaceIgnoringInternalWhitespace() {
+    void testReplaceIgnoringInternalWhitespace() throws EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         String original = """
                 line1
                     a   b 
@@ -372,7 +380,7 @@ class EditBlockInternalsTest {
      * but we can ensure no weird edge crash.
      */
     @Test
-    void testApplyFuzzySearchReplaceIfReplaceAlreadyPresent() {
+    void testApplyFuzzySearchReplaceIfReplaceAlreadyPresent() throws EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         String original = """
                 line1
                 line2
@@ -390,7 +398,7 @@ class EditBlockInternalsTest {
     }
 
     @Test
-    void testEmptySearchOnEmptyFile() {
+    void testEmptySearchOnEmptyFile() throws EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         String original = "";
         String search = "";  // empty
         String replace = "initial content\n";

@@ -5,6 +5,7 @@ import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
+import dev.langchain4j.model.chat.request.ToolChoice;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -131,7 +132,7 @@ public class CoderTest {
                 assertNotNull(model, "Failed to get model instance for: " + modelName);
 
                 // Use the sendMessage variant that includes tools
-                var result = coder.sendMessage(model, messages, toolSpecifications);
+                var result = coder.sendMessage(model, messages, toolSpecifications, ToolChoice.REQUIRED, false);
 
                 assertNotNull(result, "Result should not be null for model: " + modelName);
                 assertFalse(result.cancelled(), "Request should not be cancelled for model: " + modelName);

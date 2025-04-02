@@ -45,16 +45,13 @@ public class EditBlock {
     /**
      * Replace the first occurrence of `beforeText` lines with `afterText` lines in the given file.
      * Throws NoMatchException if `beforeText` is not found in the file content.
+     * Throws AmbiguousMatchException if more than one match is found.
      */
     public static void replaceInFile(ProjectFile file, String beforeText, String afterText)
-            throws IOException, NoMatchException
+            throws IOException, NoMatchException, AmbiguousMatchException
     {
         String original = file.exists() ? file.read() : "";
-        // Attempt the chunk replacement
         String updated = replaceMostSimilarChunk(original, beforeText, afterText);
-        if (updated == null) {
-            throw new NoMatchException("No matching location found");
-        }
         file.write(updated);
     }
 
@@ -68,10 +65,22 @@ public class EditBlock {
     }
 
     /**
+     * Thrown when more than one matching location is found.
+     */
+    public static class AmbiguousMatchException extends Exception {
+        public AmbiguousMatchException(String message) {
+            super(message);
+        }
+    }
+
+    /**
      * Attempts perfect/whitespace replacements, then tries "...", then fuzzy.
      * Returns the post-replacement content, or null if no match found.
+     * Throws AmbiguousMatchException if multiple matches are found.
      */
-    static String replaceMostSimilarChunk(String content, String target, String replace) {
+    static String replaceMostSimilarChunk(String content, String target, String replace)
+            throws AmbiguousMatchException, NoMatchException
+    {
         // 1) prep for line-based matching
         ContentLines originalCL = prep(content);
         ContentLines targetCl = prep(target);
@@ -95,7 +104,6 @@ public class EditBlock {
 
         // 3a) If that failed, attempt dropping a spurious leading blank line from the "search" block:
         if (targetCl.lines.length > 2 && targetCl.lines[0].trim().isEmpty()) {
-            // drop the first line from targetCl
             String[] splicedTarget = Arrays.copyOfRange(targetCl.lines, 1, targetCl.lines.length);
             String[] splicedReplace = Arrays.copyOfRange(replaceCL.lines, 1, replaceCL.lines.length);
 
@@ -104,11 +112,12 @@ public class EditBlock {
                 return attempt;
             }
 
-            // try triple-dot expansions on the spliced block if needed.
-            return tryDotdotdots(content, String.join("", splicedTarget), String.join("", splicedReplace));
+            return tryDotdotdots(content,
+                                 String.join("", splicedTarget),
+                                 String.join("", splicedReplace));
         }
 
-        return null;
+        throw new NoMatchException("No matching location found in content");
     }
 
     /** Counts how many leading lines in 'lines' are completely blank (trim().isEmpty()). */
@@ -167,10 +176,13 @@ public class EditBlock {
 
     /**
      * Tries perfect replace first, then leading-whitespace-insensitive.
+     * Throws AmbiguousMatchException if more than one match is found in either step.
      */
     public static String perfectOrWhitespace(String[] originalLines,
                                              String[] targetLines,
-                                             String[] replaceLines) {
+                                             String[] replaceLines)
+            throws AmbiguousMatchException
+    {
         String perfect = perfectReplace(originalLines, targetLines, replaceLines);
         if (perfect != null) {
             return perfect;
@@ -180,13 +192,18 @@ public class EditBlock {
 
     /**
      * Tries exact line-by-line match. Returns the post-replacement lines on success; null on failure.
+     * Throws AmbiguousMatchException if multiple matches are found.
      */
     public static String perfectReplace(String[] originalLines,
                                         String[] targetLines,
-                                        String[] replaceLines) {
+                                        String[] replaceLines)
+            throws AmbiguousMatchException
+    {
         if (targetLines.length == 0) {
             return null;
         }
+        List<Integer> matches = new ArrayList<>();
+
         outer:
         for (int i = 0; i <= originalLines.length - targetLines.length; i++) {
             for (int j = 0; j < targetLines.length; j++) {
@@ -194,62 +211,77 @@ public class EditBlock {
                     continue outer;
                 }
             }
-            // found match
-            List<String> newLines = new ArrayList<>();
-            // everything before the match
-            newLines.addAll(Arrays.asList(originalLines).subList(0, i));
-            // add replacement
-            newLines.addAll(Arrays.asList(replaceLines));
-            // everything after the match
-            newLines.addAll(Arrays.asList(originalLines).subList(i + targetLines.length, originalLines.length));
-            return String.join("", newLines);
+            matches.add(i);
+            if (matches.size() > 1) {
+                throw new AmbiguousMatchException("Multiple matches found for the search block.");
+            }
         }
-        return null;
+
+        if (matches.isEmpty()) {
+            return null;
+        }
+
+        // Exactly one match
+        int matchStart = matches.get(0);
+        List<String> newLines = new ArrayList<>();
+        // everything before
+        newLines.addAll(Arrays.asList(originalLines).subList(0, matchStart));
+        // add replacement
+        newLines.addAll(Arrays.asList(replaceLines));
+        // everything after
+        newLines.addAll(Arrays.asList(originalLines)
+                                .subList(matchStart + targetLines.length, originalLines.length));
+
+        return String.join("", newLines);
     }
 
     /**
      * Attempt a line-for-line match ignoring whitespace. If found, replace that
      * slice by adjusting each replacement line's indentation to preserve the relative
      * indentation from the 'search' lines.
+     * Throws AmbiguousMatchException if multiple matches are found ignoring whitespace.
      */
-    static String replaceIgnoringWhitespace(String[] originalLines, String[] targetLines, String[] replaceLines) {
-        // Skip leading blank lines in the target and replacement
+    static String replaceIgnoringWhitespace(String[] originalLines,
+                                            String[] targetLines,
+                                            String[] replaceLines)
+            throws AmbiguousMatchException
+    {
         var truncatedTarget = removeLeadingTrailingEmptyLines(targetLines);
         var truncatedReplace = removeLeadingTrailingEmptyLines(replaceLines);
 
         if (truncatedTarget.length == 0) {
-            // No actual lines to match
             return null;
         }
 
-        // Attempt to find a slice in originalLines that matches ignoring whitespace.
+        List<Integer> matches = new ArrayList<>();
         int needed = truncatedTarget.length;
-        for (int start = 0; start <= originalLines.length - needed; start++) {
-            if (!matchesIgnoringWhitespace(originalLines, start, truncatedTarget)) {
-                continue;
-            }
 
-            // Found a match - rebuild the file around it
-            // everything before the match
-            List<String> newLines = new ArrayList<>(Arrays.asList(originalLines).subList(0, start));
-            if (truncatedReplace.length > 0) {
-                // for the very first replacement line, handle the case where the LLM omitted whitespace in its target, e.g.
-                // Original:
-                //   L1
-                //   L2
-                // Target:
-                // L1
-                //   L2
-                var adjusted = getLeadingWhitespace(originalLines[start]) + truncatedReplace[0].trim() + "\n";
-                newLines.add(adjusted);
-                // add the rest of the replacement lines assuming that whitespace is correct
-                newLines.addAll(Arrays.asList(truncatedReplace).subList(1, truncatedReplace.length));
+        for (int start = 0; start <= originalLines.length - needed; start++) {
+            if (matchesIgnoringWhitespace(originalLines, start, truncatedTarget)) {
+                matches.add(start);
+                if (matches.size() > 1) {
+                    throw new AmbiguousMatchException("Multiple matches found (ignoring whitespace).");
+                }
             }
-            // everything after the match
-            newLines.addAll(Arrays.asList(originalLines).subList(start + needed, originalLines.length));
-            return String.join("", newLines);
         }
-        return null;
+
+        if (matches.isEmpty()) {
+            return null;
+        }
+
+        // Exactly one match
+        int matchStart = matches.get(0);
+
+        List<String> newLines = new ArrayList<>(Arrays.asList(originalLines).subList(0, matchStart));
+        if (truncatedReplace.length > 0) {
+            var adjusted = getLeadingWhitespace(originalLines[matchStart])
+                    + truncatedReplace[0].trim() + "\n";
+            newLines.add(adjusted);
+            newLines.addAll(Arrays.asList(truncatedReplace).subList(1, truncatedReplace.length));
+        }
+        newLines.addAll(Arrays.asList(originalLines)
+                                .subList(matchStart + needed, originalLines.length));
+        return String.join("", newLines);
     }
 
     private static String[] removeLeadingTrailingEmptyLines(String[] targetLines) {
