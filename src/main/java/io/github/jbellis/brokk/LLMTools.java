@@ -65,6 +65,7 @@ public class LLMTools
             case "replaceFile" -> parseReplaceFile(request, argMap);
             case "replaceLines" -> parseReplaceLines(request, argMap);
             case "replaceFunction" -> parseReplaceFunction(request, argMap);
+            case "removeFile" -> parseRemoveFile(request, argMap);
             default -> ValidatedToolRequest.error(request, "Unrecognized tool name: " + toolName);
         };
     }
@@ -86,6 +87,7 @@ public class LLMTools
                 case "replaceFile" -> replaceFile(validated.file(), validated.newFileContent());
                 case "replaceLines" -> replaceLines(validated.file(), validated.oldLines(), validated.newLines());
                 case "replaceFunction" -> replaceFunction(validated.functionLocation(), validated.newFunctionBody());
+                case "removeFile" -> removeFile(validated.file());
                 default -> throw new ToolExecutionException("Unsupported tool: " + validated.originalRequest().name()
                 );
             }
@@ -159,6 +161,30 @@ public class LLMTools
         throw new ToolExecutionException("Direct invocation of replaceFunction(String,List,String) is not supported. Use parseToolRequest + applyRequest.");
     }
 
+    /**
+     * "removeFile" - deletes a file from the filesystem.
+     */
+    @Tool(value = "Remove (delete) a file from the filesystem.")
+    public void removeFile(@P("filename") String filename) {
+        throw new ToolExecutionException("Direct invocation of removeFile(String) is not supported. Use parseToolRequest + applyRequest.");
+    }
+    
+    /**
+     * Overload that actually does the file removal after we've validated the file.
+     */
+    public void removeFile(ProjectFile file) {
+        try {
+            if (!file.exists()) {
+                throw new ToolExecutionException("File does not exist: " + file);
+            }
+            
+            java.nio.file.Files.delete(file.absPath());
+            logger.debug("removeFile: deleted {}", file);
+        } catch (IOException e) {
+            throw new ToolExecutionException("Failed deleting file " + file + ": " + e.getMessage());
+        }
+    }
+
     public void replaceFunction(FunctionLocation loc, String newFunctionBody) {
         // read original file
         ProjectFile file = loc.file();
@@ -227,6 +253,36 @@ public class LLMTools
                 null,
                 newText,
                 null
+        );
+    }
+    
+    /**
+     * Utility to parse "removeFile" arguments from the tool request,
+     * resolving the target ProjectFile from the context manager.
+     */
+    private ValidatedToolRequest parseRemoveFile(ToolExecutionRequest req,
+                                                Map<String,Object> argMap)
+    {
+        var filename = (String) argMap.get("filename");
+        if (filename == null) {
+            return ValidatedToolRequest.error(req, "removeFile requires 'filename' field");
+        }
+
+        var pf = resolveProjectFile(filename);
+        if (pf == null) {
+            return ValidatedToolRequest.error(req,
+                                            "Could not uniquely identify an editable file for '" + filename + "'");
+        }
+
+        return new ValidatedToolRequest(
+                req,
+                pf,
+                null,   // functionLocation
+                null,   // error
+                null,   // oldLines
+                null,   // newLines
+                null,   // newFileContent
+                null    // newFunctionBody
         );
     }
 

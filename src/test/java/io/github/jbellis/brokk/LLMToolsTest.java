@@ -11,9 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -51,7 +49,7 @@ class LLMToolsTest {
         Files.writeString(testFile, initialContent);
 
         // Create a TestContextManager with the temp directory and valid file "Test.java"
-        IContextManager contextManager = new TestContextManager(tempDir, Set.of("Test.java")) {
+        IContextManager contextManager = new TestContextManager(tempDir, Set.of("Test.java", "ToDelete.java")) {
             @Override
             public IAnalyzer getAnalyzer() {
                 // Return a stub that only knows about "Test.sayHello" with param ["name"]
@@ -200,5 +198,48 @@ class LLMToolsTest {
         var tools = new LLMTools(ctx);
         assertThrows(EditBlock.NoMatchException.class, () -> tools.replaceLines(f, "DDD", "EEE"));
     }
-}
+    
+    @Test
+    void testRemoveFile() throws IOException {
+        // Create a file to test deletion
+        Path fileToDelete = tempDir.resolve("ToDelete.java");
+        Files.writeString(fileToDelete, "file to be deleted");
+        
+        // Verify it exists before we start
+        assertTrue(Files.exists(fileToDelete));
+        
+        var request = ToolExecutionRequest.builder()
+                .name("removeFile")
+                .arguments("""
+            {
+              "filename": "ToDelete.java"
+            }
+            """)
+                .build();
 
+        var validated = tools.parseToolRequest(request);
+        assertNull(validated.error(), "Expected no parse error for removeFile request");
+
+        var result = tools.executeTool(validated);
+        assertEquals("Success", result.text(), "File removal should succeed");
+
+        // Verify the file was actually deleted
+        assertFalse(Files.exists(fileToDelete), "File should have been deleted");
+    }
+    
+    @Test
+    void testRemoveNonExistentFile() {
+        // Try to remove a file that doesn't exist
+        var request = ToolExecutionRequest.builder()
+                .name("removeFile")
+                .arguments("""
+            {
+              "filename": "NonExistent.java"
+            }
+            """)
+                .build();
+
+        var validated = tools.parseToolRequest(request);
+        assertTrue(validated.error().contains("Could not uniquely identify"));
+    }
+}
