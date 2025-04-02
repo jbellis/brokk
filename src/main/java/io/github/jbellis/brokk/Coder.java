@@ -613,6 +613,13 @@ public class Coder {
         }
     }
 
+    public String emulateToolResults(ArrayList<LLMTools.ValidatedToolRequest> validatedRequests,
+                                     ArrayList<ToolExecutionResultMessage> resultMessages)
+    {
+        // TODO
+        return null;
+    }
+
     /**
      * Represents the outcome of a streaming request.
      */

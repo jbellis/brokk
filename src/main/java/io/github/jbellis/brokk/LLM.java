@@ -177,13 +177,22 @@ public class LLM {
                 // We'll reflect in the next loop iteration
                 logger.debug("Tool requests had errors. Asking LLM to correct them...");
                 io.systemOutput("Tool requests had errors. Asking LLM to correct them...");
-                nextRequest = new UserMessage("""
+                String msg;
+                if (coder.requiresEmulatedTools(model)) {
+                    msg = """
                     Some of your tool calls could not be applied. Please revisit your changes
                     and provide corrected tool usage or updated instructions.  Here are the tool results,
                     in the same order that you provided them:
                     
                     %s
-                    """.formatted(coder.emulateToolResults(validatedRequests, resultMessages)).stripIndent());
+                    """.formatted(coder.emulateToolResults(validatedRequests, resultMessages)).stripIndent().stripIndent();
+                } else {
+                    msg = """
+                    Some of your tool calls could not be applied. Please revisit your changes
+                    and provide corrected tool usage or updated instructions.
+                    """.stripIndent();
+                }
+                nextRequest = new UserMessage(msg);
                 continue;
             } else {
                 // If at least one succeeded, reset parseErrorAttempts
