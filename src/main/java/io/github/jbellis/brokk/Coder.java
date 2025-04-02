@@ -327,7 +327,7 @@ public class Coder {
 
     private boolean requiresEmulatedTools(StreamingChatLanguageModel model) {
         var modelName = Models.nameOf(model);
-        return modelName.toLowerCase().contains("deepseek") || modelName.toLowerCase().contains("gemini");
+        return modelName.toLowerCase().contains("deepseek") || modelName.toLowerCase().contains("gemini") || modelName.toLowerCase().contains("o3-mini");
     }
 
     /**
@@ -417,8 +417,21 @@ public class Coder {
                 currentMessages.add(new AiMessage(invalidResponse));
 
                 // Add a clearer instruction for the next attempt
-                String retryMessage = "Your previous response was not valid. You MUST respond ONLY with a valid JSON object containing a 'tool_calls' array as follows:\n" +
-                        "{\n  \"tool_calls\": [\n    {\n      \"name\": \"tool_name\",\n      \"arguments\": {\n        \"arg1\": \"value1\",\n        \"arg2\": \"value2\"\n      }\n    }\n  ]\n}\n\nDo not include any explanation or other text outside the JSON object.";
+                String retryMessage = """
+                Your previous response was not valid. You MUST respond ONLY with a valid JSON object containing a 'tool_calls' array as follows:
+                {
+                  "tool_calls": [
+                    {
+                      "name": "tool_name",
+                      "arguments": {
+                        "arg1": "value1",
+                        "arg2": "value2"
+                      }
+                    }
+                  ]
+                }
+                Do not include any explanation or other text outside the JSON object.
+                """.stripIndent();
 
                 currentMessages.add(new UserMessage(retryMessage));
                 writeToHistory("Retry Attempt " + attempt, "Invalid JSON: " + invalidResponse + "\n\nRetry with: " + retryMessage);
