@@ -346,7 +346,9 @@ public class Coder {
 
         var instructionsPresent = messages.stream().anyMatch(m -> {
             var t = Models.getText(m);
-            return t.contains("tool_calls") && t.contains("Available tools:") && t.contains("Response format:");
+            return t.contains("tool_calls")
+                    && t.contains("%d available tools:".formatted(tools.size()))
+                    && t.contains("Response format:");
         });
         logger.debug("sending {} messages with {}", messages.size(), instructionsPresent);
         if (!instructionsPresent) {
@@ -411,7 +413,7 @@ public class Coder {
 
                 // Add the invalid response to the messages
                 String invalidResponse = response.chatResponse.aiMessage().text();
-                logger.debug("Invalid JSON response on attempt {}: {}", attempt, invalidResponse);
+                logger.debug("Invalid JSON response on attempt {}: {}", attempt, e);
                 io.systemOutput("Retry " + attempt + "/" + maxRetries + ": Invalid JSON response, requesting proper format.");
 
                 // Add the invalid response as an assistant message
@@ -564,7 +566,7 @@ public class Coder {
         Include all the tool calls necessary to satisfy the request in a single array!
         REMEMBER that you are to provide a JSON object containing a 'tool_calls' array, NOT top-level array.
 
-        Available tools:
+        %d available tools:
         %s
 
         Response format:
@@ -579,7 +581,7 @@ public class Coder {
             }
           ]
         }
-        """.formatted(toolsDescription);
+        """.formatted(tools.size(), toolsDescription);
     }
 
     private static @Nullable JsonNode tryParseJson(ObjectMapper mapper, String jsonResponse) {
