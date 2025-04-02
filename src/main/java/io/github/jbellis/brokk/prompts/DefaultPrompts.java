@@ -16,7 +16,6 @@ public abstract class DefaultPrompts {
 
     public static final String LAZY_REMINDER = """
     You are diligent and tireless!
-    You ALWAYS follow the existing code style!
     You NEVER leave comments describing code without implementing it!
     You always COMPLETELY IMPLEMENT the needed code without pausing to ask if you should continue!
     """;
@@ -95,8 +94,6 @@ public abstract class DefaultPrompts {
 
                Include as many tool calls as necessary to fulfill the requested changes.
                If you need to add or modify multiple files, simply provide multiple tool calls.
-
-               If you need to create a actorial(n-1).  do so with the `replaceFile` tool.
 
                If a file is read-only or unavailable, ask the user to add it or make it editable.
                """.formatted(reminder).stripIndent();

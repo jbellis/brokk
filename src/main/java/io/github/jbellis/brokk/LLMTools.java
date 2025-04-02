@@ -101,10 +101,10 @@ public class LLMTools
         return ToolExecutionResultMessage.from(validated.originalRequest(), "SUCCESS");
     }
 
-    /**
-     * "replaceFile" with fully new contents, overwriting the file entirely.
-     */
-    @Tool(value = "Replace or create the entire file content. Usage: replaceFile(\"path/to/MyClass.java\", \"the entire text...\").")
+    @Tool(value = """
+    Replaces the entire file content.
+    Use this tool to create new files: just provide the full path and content.
+    """)
     public void replaceFile(
             @P("The path of the file to overwrite") String filename,
             @P("The new file content") String text
@@ -126,10 +126,16 @@ public class LLMTools
         }
     }
 
-    /**
-     * "replaceLines" - search for a chunk of text and replace it.
-     */
-    @Tool(value = "Replace the first occurrence of oldLines in the specified file with newLines (both are full lines). If oldLines is empty, newLines is appended. If replacing sequential lines, make one call for all of them.")
+    @Tool(value = """
+    Replace the first occurrence of oldLines in the specified file with newLines (both are full lines).
+    - If oldLines is empty, newLines is appended at the end of the file. 
+    - If replacing sequential lines, make one call for all of them.
+    - Include enough oldLines that the match is unique!
+    - You can use this tool to add new lines by giving existing lines as an "anchor," then repeating
+      the anchor unchanged with new lies appended.
+    - If you want to move code within a file, use 2 calls: one to remove the old code, and another to add it
+      in the new location.
+    """)
     public void replaceLines(
             @P("Full path + name of the file to modify") String filename,
             @P("Lines to replace") String oldLines,
@@ -152,7 +158,7 @@ public class LLMTools
      * based on analyzing the function location from the analyzer.
      */
     @Tool(value = """
-    Replace the entire function body, identified by fullyQualifiedFunctionName + param names. This CANNOT replace a
+    Replace the entire function, identified by fullyQualifiedFunctionName + param names. This CANNOT replace a
     a class or interface or anything besides functions/methods (you have to use replaceLines or replaceFile for that).
     """)
     public void replaceFunction(
