@@ -53,6 +53,7 @@ public class LLM {
         // track build errors to check if we are making progress.
         var buildErrors = new ArrayList<String>();
 
+        // whether session completed normally
         boolean isComplete = false;
 
         // Provide an initial note to the user (or logs) that the session started
@@ -60,6 +61,7 @@ public class LLM {
 
         // apply edits with this
         var tools = new LLMTools(coder.contextManager);
+        outer:
         while (true) {
             if (Thread.currentThread().isInterrupted()) {
                 io.systemOutput("Session interrupted.");
@@ -104,12 +106,12 @@ public class LLM {
             var toolRequests = llmResponse.aiMessage().toolExecutionRequests();
             if (toolRequests == null || toolRequests.isEmpty()) {
                 // LLM thinks we're done
+                isComplete = true;
                 break;
             }
 
             // process tool calls
             var validatedRequests = new ArrayList<LLMTools.ValidatedToolRequest>();
-            boolean encounteredReadOnly = false;
             for (var req : toolRequests) {
                 var parsed = tools.parseToolRequest(req);
                 if (parsed.error() != null) {
@@ -125,36 +127,26 @@ public class LLM {
                     // Check read-only status
                     if (!contextManager.getEditableFiles().contains(pf)) {
                         io.systemOutput("Request attempts to edit read-only file: " + pf);
-                        sessionMessages.add(new AiMessage(
-                                "Session aborted: attempt to edit read-only file " + pf
-                        ));
-                        encounteredReadOnly = true;
-                        break;
+                        sessionMessages.add(new AiMessage("Session aborted: attempt to edit read-only file " + pf));
+                        break outer;
                     }
                     // Store original content for potential history or revert
                     if (!originalContents.containsKey(pf)) {
                         try {
                             originalContents.put(pf, pf.exists() ? pf.read() : "");
                         } catch (IOException e) {
-                            io.toolError("Failed reading file before applying changes: " + e.getMessage());
+                            io.toolError("Failed to read source file while applying changes: " + e.getMessage());
                             // We can either skip or mark an error and break
-                            sessionMessages.add(new AiMessage(
-                                    "Session aborted: unable to read file " + pf
-                            ));
-                            encounteredReadOnly = true;
-                            break;
+                            sessionMessages.add(new AiMessage("Session aborted: unable to read file " + pf));
+                            break outer;
                         }
                     }
                 }
                 validatedRequests.add(parsed);
             }
 
-            // If any read-only file or i/o error was encountered, end the session
-            if (encounteredReadOnly) {
-                break;
-            }
-
             // apply tools
+            io.llmOutput("\n");
             int failures = 0;
             for (var validated : validatedRequests) {
                 // Attempt actual edit. (Handles validation errors internally)
@@ -163,6 +155,8 @@ public class LLM {
                     logger.warn("Tool application failure: {}", result.text());
                     failures++;
                 }
+                // TODO make this fancier! like, an actual graphical representation of the diff
+                io.llmOutput("\n" + result.toolName() + ": " + result.text());
             }
 
             // If every single request was invalid or failed, increment parseErrorAttempts
@@ -212,7 +206,7 @@ public class LLM {
             coder.contextManager.addToHistory(sessionMessages, originalContents, finalUserInput);
         }
         if (isComplete) {
-            io.systemOutput("Session complete! Build is successful.");
+            io.systemOutput("Session complete!");
         } else {
             io.systemOutput("Session ended without success.");
         }
