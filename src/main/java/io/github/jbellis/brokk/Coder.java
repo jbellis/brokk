@@ -467,43 +467,51 @@ public class Coder {
             throw new IllegalArgumentException("Unable to parse response as JSON object");
         }
 
+        JsonNode toolCalls;
         // Check for tool_calls array format
-        if (!root.has("tool_calls") || !root.get("tool_calls").isArray()) {
-            throw new IllegalArgumentException("Response is JSON but does not contain a 'tool_calls' array");
+        if (root.has("tool_calls") && root.get("tool_calls").isArray()) {
+            // happy path, this is what we asked for
+            toolCalls = root.get("tool_calls");
+        } else if (root.isArray()) {
+            // gemini 2.5 REALLY likes to give a top-level array instead
+            toolCalls = root;
+        } else {
+            throw new IllegalArgumentException("Response does not contain a 'tool_calls' array");
         }
 
         // Transform json into list of tool execution requests
         var toolExecutionRequests = new ArrayList<ToolExecutionRequest>();
-        JsonNode toolCalls = root.get("tool_calls");
         for (int i = 0; i < toolCalls.size(); i++) {
             JsonNode toolCall = toolCalls.get(i);
-            if (toolCall.has("name") && toolCall.has("arguments")) {
-                String toolName = toolCall.get("name").asText();
-                JsonNode arguments = toolCall.get("arguments");
-
-                String argumentsJson;
-                if (arguments.isObject()) {
-                    argumentsJson = arguments.toString();
-                } else {
-                    // Handle case where arguments might be a string instead of object
-                    try {
-                        JsonNode parsedArgs = mapper.readTree(arguments.asText());
-                        argumentsJson = parsedArgs.toString();
-                    } catch (Exception e) {
-                        // If parsing fails, use as-is or log warning
-                        logger.warn("Argument is not valid JSON object for tool '{}', treating as string: {}", toolName, arguments.asText(), e);
-                        argumentsJson = arguments.toString(); // Keep original if parsing fails
-                    }
-                }
-
-                var toolExecutionRequest = ToolExecutionRequest.builder()
-                        .id(String.valueOf(i))
-                        .name(toolName)
-                        .arguments(argumentsJson)
-                        .build();
-
-                toolExecutionRequests.add(toolExecutionRequest);
+            if (!toolCall.has("name") || !toolCall.has("arguments")) {
+                throw new IllegalArgumentException("Tool call object is missing 'name' or 'arguments' field");
             }
+
+            String toolName = toolCall.get("name").asText();
+            JsonNode arguments = toolCall.get("arguments");
+
+            String argumentsJson;
+            if (arguments.isObject()) {
+                argumentsJson = arguments.toString();
+            } else {
+                // Handle case where arguments might be a string instead of object
+                try {
+                    JsonNode parsedArgs = mapper.readTree(arguments.asText());
+                    argumentsJson = parsedArgs.toString();
+                } catch (Exception e) {
+                    // If parsing fails, use as-is or log warning
+                    logger.warn("Argument is not valid JSON object for tool '{}', treating as string: {}", toolName, arguments.asText(), e);
+                    argumentsJson = arguments.toString(); // Keep original if parsing fails
+                }
+            }
+
+            var toolExecutionRequest = ToolExecutionRequest.builder()
+                    .id(String.valueOf(i))
+                    .name(toolName)
+                    .arguments(argumentsJson)
+                    .build();
+
+            toolExecutionRequests.add(toolExecutionRequest);
         }
 
         assert !toolExecutionRequests.isEmpty();
