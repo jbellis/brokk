@@ -160,7 +160,7 @@ public class LLM {
                 }
                 resultMessages.add(result);
                 // TODO make this fancier! like, an actual graphical representation of the diff
-                output.append("\n" + result.toolName() + ": " + result.text());
+                output.append("\n%s: %s".formatted(validated.description(), result.text()));
             }
             io.llmOutput("\n\n```" + output + "```\n\n");
             if (!coder.requiresEmulatedTools(model)) {
