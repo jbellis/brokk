@@ -3,6 +3,7 @@ package io.github.jbellis.brokk;
 import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.chat.request.ToolChoice;
@@ -148,6 +149,7 @@ public class LLM {
             // apply tools
             io.llmOutput("\n");
             int failures = 0;
+            var resultMessages = new ArrayList<ToolExecutionResultMessage>();
             for (var validated : validatedRequests) {
                 // Attempt actual edit. (Handles validation errors internally)
                 var result = tools.executeTool(validated);
@@ -155,9 +157,13 @@ public class LLM {
                     logger.warn("Tool application failure: {}", result.text());
                     failures++;
                 }
-                sessionMessages.add(result);
+                resultMessages.add(result);
                 // TODO make this fancier! like, an actual graphical representation of the diff
                 io.llmOutput("\n" + result.toolName() + ": " + result.text());
+            }
+            if (!coder.requiresEmulatedTools(model)) {
+                // need this whether success or failure or the LLM gets confused seeing that it made a call but no results
+                sessionMessages.addAll(resultMessages);
             }
 
             // If every single request was invalid or failed, increment parseErrorAttempts
@@ -173,8 +179,11 @@ public class LLM {
                 io.systemOutput("Tool requests had errors. Asking LLM to correct them...");
                 nextRequest = new UserMessage("""
                     Some of your tool calls could not be applied. Please revisit your changes
-                    and provide corrected tool usage or updated instructions.
-                    """.stripIndent());
+                    and provide corrected tool usage or updated instructions.  Here are the tool results,
+                    in the same order that you provided them:
+                    
+                    %s
+                    """.formatted(coder.emulateToolResults(validatedRequests, resultMessages)).stripIndent());
                 continue;
             } else {
                 // If at least one succeeded, reset parseErrorAttempts

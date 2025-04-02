@@ -325,7 +325,7 @@ public class Coder {
         return response;
     }
 
-    private boolean requiresEmulatedTools(StreamingChatLanguageModel model) {
+    public boolean requiresEmulatedTools(StreamingChatLanguageModel model) {
         var modelName = Models.nameOf(model);
         return modelName.toLowerCase().contains("deepseek") || modelName.toLowerCase().contains("gemini") || modelName.toLowerCase().contains("o3-mini");
     }
