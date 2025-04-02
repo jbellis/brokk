@@ -528,11 +528,11 @@ public class LLMTools
             String oldLines,
             String newLines,
             String newFileContent,
-            String newFunctionBody
+            String newFunctionBody,
+            String description
     ) {
-        public static ValidatedToolRequest error(ToolExecutionRequest req, String msg) {
-            return new ValidatedToolRequest(req, null, null, msg,
-                                            null, null, null, null);
+        public static ValidatedToolRequest error(ToolExecutionRequest req, String msg, String description) {
+            return new ValidatedToolRequest(req, null, null, msg, null, null, null, null, description);
         }
     }
 

@@ -395,14 +395,14 @@ public class Coder {
                     return parsedResponse;
                 }
                 // If we get here, the response was valid JSON but didn't contain tool calls
-                throw new IllegalArgumentException("Response contained valid JSON but no tool_calls");
-            } catch (IllegalArgumentException e) {
                 if (toolChoice == ToolChoice.AUTO) {
                     // If tools are optional, return the original response
                     logger.debug("Tools are optional, returning original response on attempt {}: {}", attempt, e.getMessage());
                     return response;
                 }
-
+                // else throw so catch retries
+                throw new IllegalArgumentException("Response contained valid JSON but no tool_calls");
+            } catch (IllegalArgumentException e) {
                 // If this is the last attempt, throw the exception
                 if (attempt == maxRetries) {
                     logger.error("Failed to get valid tool calls after {} attempts: {}", maxRetries, e.getMessage());
@@ -419,7 +419,10 @@ public class Coder {
 
                 // Add a clearer instruction for the next attempt
                 String retryMessage = """
-                Your previous response was not valid. You MUST respond ONLY with a valid JSON object containing a 'tool_calls' array as follows:
+                Your previous response was not valid: %s
+                You MUST respond ONLY with a valid JSON object containing a 'tool_calls' array. Do not include any other text or explanation.
+                Include all the tool calls necessary to satisfy the request in a single array!
+                REMEMBER that you are to provide a JSON object containing a 'tool_calls' array, NOT top-level array:
                 {
                   "tool_calls": [
                     {
@@ -431,8 +434,7 @@ public class Coder {
                     }
                   ]
                 }
-                Do not include any explanation or other text outside the JSON object.
-                """.stripIndent();
+                """.formatted(e.getMessage()).stripIndent();
 
                 currentMessages.add(new UserMessage(retryMessage));
                 writeToHistory("Retry Attempt " + attempt, "Invalid JSON: " + invalidResponse + "\n\nRetry with: " + retryMessage);
@@ -462,58 +464,55 @@ public class Coder {
             root = tryParseJson(mapper, "{" + jsonResponse + "}");
         }
         if (root == null) {
-            throw new IllegalArgumentException("Unable to parse JSON response");
+            throw new IllegalArgumentException("Unable to parse response as JSON object");
         }
 
         // Check for tool_calls array format
-        if (root.has("tool_calls") && root.get("tool_calls").isArray()) {
-            JsonNode toolCalls = root.get("tool_calls");
-
-            // Create list of tool execution requests
-            var toolExecutionRequests = new ArrayList<ToolExecutionRequest>();
-
-            for (int i = 0; i < toolCalls.size(); i++) {
-                JsonNode toolCall = toolCalls.get(i);
-                if (toolCall.has("name") && toolCall.has("arguments")) {
-                    String toolName = toolCall.get("name").asText();
-                    JsonNode arguments = toolCall.get("arguments");
-
-                    String argumentsJson;
-                    if (arguments.isObject()) {
-                        argumentsJson = arguments.toString();
-                    } else {
-                        // Handle case where arguments might be a string instead of object
-                         try {
-                             JsonNode parsedArgs = mapper.readTree(arguments.asText());
-                             argumentsJson = parsedArgs.toString();
-                         } catch (Exception e) {
-                             // If parsing fails, use as-is or log warning
-                             logger.warn("Argument is not valid JSON object for tool '{}', treating as string: {}", toolName, arguments.asText(), e);
-                            argumentsJson = arguments.toString(); // Keep original if parsing fails
-                         }
-                    }
-
-                    var toolExecutionRequest = ToolExecutionRequest.builder()
-                            .id(String.valueOf(i))
-                            .name(toolName)
-                            .arguments(argumentsJson)
-                            .build();
-
-                    toolExecutionRequests.add(toolExecutionRequest);
-                }
-            }
-
-            assert !toolExecutionRequests.isEmpty();
-            logger.debug("Generated tool execution requests: {}", toolExecutionRequests);
-
-            // Create a properly formatted AiMessage with tool execution requests
-            var aiMessage = new AiMessage("[json]", toolExecutionRequests);
-            var cr = ChatResponse.builder().aiMessage(aiMessage).build();
-            return new StreamingResult(cr, false, null);
+        if (!root.has("tool_calls") || !root.get("tool_calls").isArray()) {
+            throw new IllegalArgumentException("Response is JSON but does not contain a 'tool_calls' array");
         }
-        // If no tool_call found, return original response
-        logger.debug("No tool calls found in response, returning original");
-        return response;
+
+        // Transform json into list of tool execution requests
+        var toolExecutionRequests = new ArrayList<ToolExecutionRequest>();
+        JsonNode toolCalls = root.get("tool_calls");
+        for (int i = 0; i < toolCalls.size(); i++) {
+            JsonNode toolCall = toolCalls.get(i);
+            if (toolCall.has("name") && toolCall.has("arguments")) {
+                String toolName = toolCall.get("name").asText();
+                JsonNode arguments = toolCall.get("arguments");
+
+                String argumentsJson;
+                if (arguments.isObject()) {
+                    argumentsJson = arguments.toString();
+                } else {
+                    // Handle case where arguments might be a string instead of object
+                    try {
+                        JsonNode parsedArgs = mapper.readTree(arguments.asText());
+                        argumentsJson = parsedArgs.toString();
+                    } catch (Exception e) {
+                        // If parsing fails, use as-is or log warning
+                        logger.warn("Argument is not valid JSON object for tool '{}', treating as string: {}", toolName, arguments.asText(), e);
+                        argumentsJson = arguments.toString(); // Keep original if parsing fails
+                    }
+                }
+
+                var toolExecutionRequest = ToolExecutionRequest.builder()
+                        .id(String.valueOf(i))
+                        .name(toolName)
+                        .arguments(argumentsJson)
+                        .build();
+
+                toolExecutionRequests.add(toolExecutionRequest);
+            }
+        }
+
+        assert !toolExecutionRequests.isEmpty();
+        logger.debug("Generated tool execution requests: {}", toolExecutionRequests);
+
+        // Create a properly formatted AiMessage with tool execution requests
+        var aiMessage = new AiMessage("[json]", toolExecutionRequests);
+        var cr = ChatResponse.builder().aiMessage(aiMessage).build();
+        return new StreamingResult(cr, false, null);
     }
 
     private static String getInstructions(List<ToolSpecification> tools, ObjectMapper mapper) {
@@ -554,7 +553,8 @@ public class Coder {
 
         return """
         You MUST respond ONLY with a valid JSON object containing a 'tool_calls' array. Do not include any other text or explanation.
-        Make as many tool calls as appropriate to satisfy the request.
+        Include all the tool calls necessary to satisfy the request in a single array!
+        REMEMBER that you are to provide a JSON object containing a 'tool_calls' array, NOT top-level array.
 
         Available tools:
         %s
@@ -613,11 +613,25 @@ public class Coder {
         }
     }
 
-    public String emulateToolResults(ArrayList<LLMTools.ValidatedToolRequest> validatedRequests,
-                                     ArrayList<ToolExecutionResultMessage> resultMessages)
-    {
-        // TODO
-        return null;
+    /**
+     * Combines tool request validations and their execution results into a summary string.
+     * Each line is in the format: "description: result text"
+     *
+     * @param validatedRequests the list of validated tool requests
+     * @param resultMessages the corresponding list of tool execution result messages
+     * @return a combined summary string
+     */
+    public String emulateToolResults(List<LLMTools.ValidatedToolRequest> validatedRequests, List<dev.langchain4j.data.message.ToolExecutionResultMessage> resultMessages) {
+        var sb = new StringBuilder();
+        for (int i = 0; i < validatedRequests.size() && i < resultMessages.size(); i++) {
+            var vr = validatedRequests.get(i);
+            var term = resultMessages.get(i);
+            sb.append(vr.description())
+                    .append(": ")
+                    .append(term.text())
+                    .append("\n");
+        }
+        return sb.toString().trim();
     }
 
     /**
