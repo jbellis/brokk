@@ -110,7 +110,7 @@ class LLMToolsTest {
                 .build();
 
         var previews = tools.validateToolRequests(List.of(request));
-        assertDoesNotThrow(() -> tools.applyToolOperations(previews));
+        assertDoesNotThrow(() -> tools.executeTools(previews));
 
         // Verify the file actually changed in memory
         assertEquals("hello world", inMemoryFileContents.get("Test.java"),
@@ -127,7 +127,7 @@ class LLMToolsTest {
                 .build();
 
         var previews = tools.validateToolRequests(List.of(request));
-        Exception ex = assertThrows(Exception.class, () -> tools.applyToolOperations(previews));
+        Exception ex = assertThrows(Exception.class, () -> tools.executeTools(previews));
         assertTrue(ex.getMessage().contains("No matching location found"),
                    "Should fail because 'nonexistent' was not found in the file");
     }
@@ -149,7 +149,7 @@ class LLMToolsTest {
                 .build();
 
         var previews = tools.validateToolRequests(List.of(request));
-        assertDoesNotThrow(() -> tools.applyToolOperations(previews));
+        assertDoesNotThrow(() -> tools.executeTools(previews));
 
         String updated = inMemoryFileContents.get("Test.java");
         assertFalse(updated.contains(oldText),
@@ -172,7 +172,7 @@ class LLMToolsTest {
                 .build();
 
         var previews = tools.validateToolRequests(List.of(request));
-        assertDoesNotThrow(() -> tools.applyToolOperations(previews));
+        assertDoesNotThrow(() -> tools.executeTools(previews));
 
         String updated = inMemoryFileContents.get("Test.java");
         assertTrue(updated.contains("Hi there, "),

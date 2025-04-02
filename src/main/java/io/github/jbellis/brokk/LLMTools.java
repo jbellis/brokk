@@ -20,7 +20,6 @@ import java.util.Map;
  * and executes it.
  */
 public class LLMTools {
-
     private static final Logger logger = LogManager.getLogger(LLMTools.class);
 
     private final IContextManager contextManager;
@@ -218,14 +217,14 @@ public class LLMTools {
      * Apply the list of tool operations that have been validated.
      * Throws a ToolExecutionError if any validated tool execution fails.
      */
-    public List<ToolExecutionResultMessage> applyToolOperations(List<ToolOperationPreview> previews) {
+    public List<ToolExecutionResultMessage> executeTools(List<ToolOperationPreview> previews) {
         try {
         return previews.stream()
                 .map(p -> {
                     if (!p.success()) {
                         return ToolExecutionResultMessage.from(p.request, p.errorMessage);
                     }
-                    applyTool(p);
+                    executeTool(p);
                     return ToolExecutionResultMessage.from(p.request, "Success");
                 }).toList();
         } catch (Exception ex) {
@@ -237,7 +236,7 @@ public class LLMTools {
      * Actually runs the existing logic for the named tool.
      * This function *does* modify the file on disk.
      */
-    private void applyTool(ToolOperationPreview preview) {
+    private void executeTool(ToolOperationPreview preview) {
         var toolName = preview.toolName();
         @SuppressWarnings("unchecked")
         var argMap = (Map<String, Object>) preview.parsedArguments();

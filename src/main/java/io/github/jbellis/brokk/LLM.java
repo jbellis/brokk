@@ -1,10 +1,8 @@
 package io.github.jbellis.brokk;
 
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
@@ -143,7 +141,7 @@ public class LLM {
 
                 // Actually apply changes
                 try {
-                    var toolMessages = tools.applyToolOperations(previewResults);
+                    var toolMessages = tools.executeTools(previewResults);
                     sessionMessages.addAll(toolMessages);
                     logger.info("Validated tool operations applied");
                 } catch (Exception ex) {
@@ -153,7 +151,10 @@ public class LLM {
                 }
 
                 if (failedMessages > 0) {
-                    nextRequest = new UserMessage("Some edit request tool calls failed. Please fix them.");
+                    nextRequest = new UserMessage("""
+                    Some edit request tool calls failed, possibly because other edits conflicted with them.
+                    Please look carefully at the current state of the editable files and issue corrected edits, if they are still necessary.
+                    """.stripIndent());
                     continue; // don't bother building
                 }
             }
