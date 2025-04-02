@@ -106,8 +106,8 @@ public class LLMTools
      */
     @Tool(value = "Replace or create the entire file content. Usage: replaceFile(\"path/to/MyClass.java\", \"the entire text...\").")
     public void replaceFile(
-            @P("filename") String filename,
-            @P("text") String text
+            @P("The path of the file to overwrite") String filename,
+            @P("The new file content") String text
     ) {
         // This annotation-based method is no longer used directly at runtime.
         // It's replaced by parseToolRequest/applyRequest. If invoked anyway, throw:
@@ -131,9 +131,9 @@ public class LLMTools
      */
     @Tool(value = "Replace the first occurrence of oldLines in the specified file with newLines (both are full lines). If oldLines is empty, newLines is appended.")
     public void replaceLines(
-            @P("filename") String filename,
-            @P("oldLines") String oldLines,
-            @P("newLines") String newLines
+            @P("Full path + name of the file to modify") String filename,
+            @P("Lines to replace") String oldLines,
+            @P("Replacement lines") String newLines
     ) {
         throw new ToolExecutionException("Direct invocation of replaceLines(String,String,String) is not supported. Use parseToolRequest + applyRequest.");
     }
@@ -152,13 +152,12 @@ public class LLMTools
      * based on analyzing the function location from the analyzer.
      */
     @Tool(value = """
-    Replace the entire function body, identified by fullyQualifiedFunctionName + param names. The new function body
-    must include signature+braces. E.g. "public void sayHello(String name) { ... }"
+    Replace the entire function body, identified by fullyQualifiedFunctionName + param names.
     """)
     public void replaceFunction(
-            @P("fullyQualifiedFunctionName") String fullyQualifiedFunctionName,
-            @P("functionParameterNames") List<String> functionParameterNames,
-            @P("newFunctionBody") String newFunctionBody
+            @P("The fully qualified function name, e.g. com.example.Foo.barMethod") String fullyQualifiedFunctionName,
+            @P("List of parameter variable names, e.g. [\"arg1\", \"userId\"]") List<String> functionParameterNames,
+            @P("The new code for the entire function, including signature and braces") String newFunctionBody
     ) {
         throw new ToolExecutionException("Direct invocation of replaceFunction(String,List,String) is not supported. Use parseToolRequest + applyRequest.");
     }
@@ -167,7 +166,9 @@ public class LLMTools
      * "removeFile" - deletes a file from the filesystem.
      */
     @Tool(value = "Remove (delete) a file from the filesystem.")
-    public void removeFile(@P("filename") String filename) {
+    public void removeFile(
+            @P("Full path + name of the file to remove") String filename
+    ) {
         throw new ToolExecutionException("Direct invocation of removeFile(String) is not supported. Use parseToolRequest + applyRequest.");
     }
     
@@ -333,8 +334,7 @@ public class LLMTools
         var body       = (String) argMap.get("newFunctionBody");
 
         if (fullyQualifiedName == null || paramNames == null || body == null) {
-            return ValidatedToolRequest.error(req,
-                                              "replaceFunction requires 'fullyQualifiedFunctionName','functionParameterNames','newFunctionBody'");
+            return ValidatedToolRequest.error(req, "replaceFunction requires 'fullyQualifiedFunctionName','functionParameterNames','newFunctionBody'");
         }
 
         var analyzer = contextManager.getAnalyzer();
@@ -344,8 +344,7 @@ public class LLMTools
         try {
             var location = analyzer.getFunctionLocation(fullyQualifiedName, paramNames);
             if (!contextManager.getEditableFiles().contains(location.file())) {
-                return ValidatedToolRequest.error(req,
-                                                  "File for " + fullyQualifiedName + " is not editable: " + location.file());
+                return ValidatedToolRequest.error(req, "File for " + fullyQualifiedName + " is not editable: " + location.file());
             }
             return new ValidatedToolRequest(req, location.file(), location, null, null, null, null, body);
         } catch (SymbolNotFoundException e) {
@@ -361,8 +360,7 @@ public class LLMTools
                 if (maybeLoc.size() == 1) {
                     var loc = maybeLoc.get(0);
                     if (!contextManager.getEditableFiles().contains(loc.file())) {
-                        return ValidatedToolRequest.error(req,
-                                                          "File for " + shortName + " is not editable: " + loc.file());
+                        return ValidatedToolRequest.error(req, "File for " + shortName + " is not editable: " + loc.file());
                     }
                     return new ValidatedToolRequest(
                             req, loc.file(), loc, null,
