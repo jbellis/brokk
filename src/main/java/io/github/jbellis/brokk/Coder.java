@@ -7,6 +7,7 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -586,6 +587,7 @@ public class Coder {
 
     private void writeRequestToHistory(List<ChatMessage> messages, List<ToolSpecification> tools) {
         String requestText = messages.stream()
+                .filter(m -> !(m instanceof ToolExecutionResultMessage))
                 .map(m -> "%s: %s\n".formatted(m.type(), Models.getText(m)))
                 .reduce((a, b) -> a + "\n" + b)
                 .orElse("");
