@@ -13,6 +13,7 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ChatRequestParameters;
 import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.chat.request.ResponseFormatType;
+import dev.langchain4j.model.chat.request.ToolChoice;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
@@ -59,7 +60,7 @@ public class Coder {
      * @return The final response from the LLM as a string
      */
     public StreamingResult sendStreaming(StreamingChatLanguageModel model, List<ChatMessage> messages, boolean echo) {
-        return sendMessageWithRetry(model, messages, List.of(), echo, MAX_ATTEMPTS);
+        return sendMessageWithRetry(model, messages, List.of(), ToolChoice.AUTO, echo, MAX_ATTEMPTS);
     }
 
     /**
@@ -168,7 +169,7 @@ public class Coder {
      * @return The LLM response text, trimmed. Returns an empty string on error/cancellation.
      */
     public String sendMessage(List<ChatMessage> messages) {
-        var result = sendMessage(Models.quickModel(), messages, List.of(), false);
+        var result = sendMessage(Models.quickModel(), messages, List.of(), ToolChoice.AUTO, false);
         if (result.cancelled() || result.error() != null || result.chatResponse() == null || result.chatResponse().aiMessage() == null) {
             throw new IllegalStateException();
         }
@@ -179,7 +180,7 @@ public class Coder {
      * Send a message to a specific model without tools.
      */
     public StreamingResult sendMessage(StreamingChatLanguageModel model, List<ChatMessage> messages) {
-        return sendMessage(model, messages, List.of(), false);
+        return sendMessage(model, messages, List.of(), ToolChoice.AUTO, false);
     }
 
 
@@ -191,14 +192,14 @@ public class Coder {
      * @param tools    List of tools to enable for the LLM
      * @return The LLM response as a string
      */
-    public StreamingResult sendMessage(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools, boolean echo) {
+    public StreamingResult sendMessage(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools, ToolChoice toolChoice, boolean echo) {
 
-        var result = sendMessageWithRetry(model, messages, tools, echo, MAX_ATTEMPTS);
+        var result = sendMessageWithRetry(model, messages, tools, toolChoice, echo, MAX_ATTEMPTS);
         var cr = result.chatResponse();
         // poor man's ToolChoice.REQUIRED (not supported by langchain4j for Anthropic)
         // Also needed for our DeepSeek emulation if it returns a response without a tool call
-        while (!result.cancelled && result.error == null && !tools.isEmpty() && !cr.aiMessage().hasToolExecutionRequests()) {
-            logger.debug("Tool use requested but no tool called");
+        while (!result.cancelled && result.error == null && !tools.isEmpty() && !cr.aiMessage().hasToolExecutionRequests() && toolChoice == ToolChoice.REQUIRED) {
+            logger.debug("Enforcing tool selection");
             io.systemOutput("Enforcing tool selection");
             var extraMessages = new ArrayList<>(messages);
             extraMessages.add(cr.aiMessage());
@@ -210,7 +211,7 @@ public class Coder {
                 extraMessages.add(new UserMessage("At least one tool execution request is required"));
             }
 
-            result = sendMessageWithRetry(model, extraMessages, tools, false, MAX_ATTEMPTS);
+            result = sendMessageWithRetry(model, extraMessages, tools, toolChoice, echo, MAX_ATTEMPTS);
             cr = result.chatResponse();
         }
 
@@ -223,6 +224,7 @@ public class Coder {
     private StreamingResult sendMessageWithRetry(StreamingChatLanguageModel model,
                                               List<ChatMessage> messages,
                                               List<ToolSpecification> tools,
+                                              ToolChoice toolChoice,
                                               boolean echo,
                                               int maxAttempts)
     {
@@ -230,7 +232,7 @@ public class Coder {
         int attempt = 0;
         while (attempt++ < maxAttempts) {
             logger.debug("Sending request to {} attempt {} [only last message shown]: {}", Models.nameOf(model), attempt, messages.getLast());
-            var response = doSingleSendMessage(model, messages, tools, echo);
+            var response = doSingleSendMessage(model, messages, tools, toolChoice, echo);
             if (response.cancelled) {
                 writeToHistory("Cancelled", "LLM request cancelled by user");
                 return response;
@@ -297,7 +299,7 @@ public class Coder {
     /**
      * Performs a single message call without retries
      */
-    private StreamingResult doSingleSendMessage(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools, boolean echo) {
+    private StreamingResult doSingleSendMessage(StreamingChatLanguageModel model, List<ChatMessage> messages, List<ToolSpecification> tools, ToolChoice toolChoice, boolean echo) {
         writeRequestToHistory(messages, tools);
         var builder = ChatRequest.builder().messages(messages);
         var modelName = Models.nameOf(model);
@@ -312,6 +314,7 @@ public class Coder {
             var params = OpenAiChatRequestParameters.builder()
                     .toolSpecifications(tools)
                     .parallelToolCalls(true)
+                    .toolChoice(toolChoice)
                     .build();
             builder = builder.parameters(params);
         }

@@ -5,6 +5,7 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
+import dev.langchain4j.model.chat.request.ToolChoice;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
 import io.github.jbellis.brokk.prompts.BuildPrompts;
@@ -73,7 +74,7 @@ public class LLM {
 
             // Actually send the request to the LLM
             var toolSpecs = ToolSpecifications.toolSpecificationsFrom(tools);
-            var streamingResult = coder.sendMessage(model, allMessages, toolSpecs, true);
+            var streamingResult = coder.sendMessage(model, allMessages, toolSpecs, ToolChoice.AUTO, true);
             if (streamingResult.cancelled()) {
                 io.systemOutput("Session cancelled.");
                 break;
@@ -91,7 +92,7 @@ public class LLM {
 
             String llmText = llmResponse.aiMessage().text();
             boolean hasTools = llmResponse.aiMessage().hasToolExecutionRequests();
-            if (llmText.isBlank() && !hasTools) {
+            if (llmText == null || llmText.isBlank() && !hasTools) {
                 io.systemOutput("Blank LLM response. Ending session.");
                 break;
             }
@@ -107,7 +108,7 @@ public class LLM {
             var validatedRequests = new ArrayList<LLMTools.ValidatedToolRequest>();
             boolean encounteredReadOnly = false;
 
-            if (!toolRequests.isEmpty()) {
+            if (toolRequests != null && !toolRequests.isEmpty()) {
                 for (var req : toolRequests) {
                     var parsed = tools.parseToolRequest(req);
                     if (parsed.error() != null) {
