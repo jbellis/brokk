@@ -975,63 +975,67 @@ class JavaAnalyzer private (sourcePath: Path, cpgInit: Cpg)
     cpg.method.fullName(escaped + ":.*").l
   }
 
-  override def findFunctionLocation(
-                                     fqMethodName: String,
-                                     paramNames: java.util.List[String]
-                                   ): java.util.Optional[FunctionLocation] = {
-
+  override def getFunctionLocation(
+                                    fqMethodName: String,
+                                    paramNames: java.util.List[String]
+                                  ): FunctionLocation = {
     import scala.jdk.CollectionConverters.*
 
-    // e.g. "com.example.Foo.doStuff"
-    // We'll chop off everything after a colon if present
     val methodPattern = fqMethodName.replaceAllLiterally("$", "\\$")
     val allCandidates = cpg.method.fullName(s"$methodPattern:.*").l
 
     if (allCandidates.isEmpty) {
-      return java.util.Optional.empty()
+      throw new SymbolNotFoundException(s"No methods found for $fqMethodName")
     }
 
-    // If there's exactly one method node, just pick it (assuming param names might not matter).
-    val single = allCandidates.size == 1
-    val paramList = paramNames.asScala.toList
+    if (allCandidates.size == 1) {
+      return toFunctionLocation(allCandidates.head)
+    }
 
-    // Filter by param names if we have more than one candidate
-    val matched =
-      if (single || paramList.isEmpty) allCandidates
-      else {
-        // For each method, gather param variable names (excluding 'this')
-        allCandidates.filter { m =>
-          val actualNames = m.parameter
-            .filterNot(_.name == "this")
-            .sortBy(_.order)
-            .map(_.name)
-            .l
-            .toList
-          actualNames == paramList
-        }
-      }
+    val paramList = paramNames.asScala.toList
+    val matched = allCandidates.filter { m =>
+      val actualNames = m.parameter
+        .filterNot(_.name == "this")
+        .sortBy(_.order)
+        .map(_.name)
+        .l
+      actualNames == paramList
+    }
 
     if (matched.isEmpty) {
-      // If param name matching found nothing, fallback to returning nothing
-      return java.util.Optional.empty()
+      throw new SymbolNotFoundException(
+        s"No methods found in $fqMethodName matching provided parameter names $paramList"
+      )
     }
 
-    // If exactly one method is matched, use it. If multiple matched, pick the first arbitrarily.
-    val chosen = matched.head
-    val fileOpt = toFile(chosen.typeDecl.filename.head)
+    if (matched.size > 1) {
+      throw new SymbolAmbiguousException(
+        s"Multiple methods match $fqMethodName with parameter names $paramList"
+      )
+    }
+
+    toFunctionLocation(matched.head)
+  }
+
+  /**
+   * Turns a method node into a FunctionLocation.
+   * Throws SymbolNotFoundError if file/line info or code extraction fails.
+   */
+  private def toFunctionLocation(chosen: Method): FunctionLocation = {
+    val fileOpt = toFile(chosen.typeDecl.filename.headOption.getOrElse(""))
     if (fileOpt.isEmpty || chosen.lineNumber.isEmpty || chosen.lineNumberEnd.isEmpty) {
-      return java.util.Optional.empty()
+      throw new SymbolNotFoundException("File or line info missing for chosen method.")
     }
 
     val file = fileOpt.get
     val start = chosen.lineNumber.get
-    val end   = chosen.lineNumberEnd.get
+    val end = chosen.lineNumberEnd.get
 
-    // Read the lines from start..end
     val maybeCode = try {
-      val lines = scala.io.Source.fromFile(file.absPath().toFile)
+      val lines = scala.io.Source
+        .fromFile(file.absPath().toFile)
         .getLines()
-        .drop(start - 1)   // zero-based
+        .drop(start - 1)
         .take((end - start) + 1)
         .mkString("\n")
       Some(lines)
@@ -1040,12 +1044,12 @@ class JavaAnalyzer private (sourcePath: Path, cpgInit: Cpg)
     }
 
     if (maybeCode.isEmpty) {
-      return java.util.Optional.empty()
+      throw new SymbolNotFoundException("Could not read code for chosen method.")
     }
 
-    val funcLoc = FunctionLocation(file, start, end, maybeCode.get)
-    java.util.Optional.of(funcLoc)
+    FunctionLocation(file, start, end, maybeCode.get)
   }
+
 }
 
 object JavaAnalyzer {

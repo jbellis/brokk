@@ -1,22 +1,15 @@
 package io.github.jbellis.brokk;
 
-import com.google.common.annotations.VisibleForTesting;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
-import io.github.jbellis.brokk.git.IGitRepo;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -45,59 +38,38 @@ public class EditBlock {
         return "";
     }
 
-    // Default fence to match triple-backtick usage, e.g. ``` ... ```
-    static final String[] DEFAULT_FENCE = {"```", "```"};
-
     private EditBlock() {
         // utility class
     }
 
     /**
-     * Attempt to locate beforeText in content and replace it with afterText.
-     * If beforeText is empty, just append afterText. If no match found, return null.
+     * Replace the first occurrence of `beforeText` lines with `afterText` lines in the given file.
+     * Throws NoMatchException if `beforeText` is not found in the file content.
      */
-    private static String doReplace(ProjectFile file,
-                                    String content,
-                                    String beforeText,
-                                    String afterText) {
-        if (file != null && !file.exists() && beforeText.trim().isEmpty()) {
-            // Treat as a brand-new filename with empty original content
-            content = "";
-        }
-
-        assert content != null;
-
-        // Strip any surrounding triple-backticks, optional filename line, etc.
-        beforeText = stripQuotedWrapping(beforeText, file == null ? null : file.toString(), EditBlock.DEFAULT_FENCE);
-        afterText = stripQuotedWrapping(afterText, file == null ? null : file.toString(), EditBlock.DEFAULT_FENCE);
-
-        // If there's no "before" text, just append the after-text
-        if (beforeText.trim().isEmpty()) {
-            return content + afterText;
-        }
-
+    public static void replaceInFile(ProjectFile file, String beforeText, String afterText)
+            throws IOException, NoMatchException
+    {
+        String original = file.exists() ? file.read() : "";
         // Attempt the chunk replacement
-        return replaceMostSimilarChunk(content, beforeText, afterText);
+        String updated = replaceMostSimilarChunk(original, beforeText, afterText);
+        if (updated == null) {
+            throw new NoMatchException("No matching location found");
+        }
+        file.write(updated);
     }
 
     /**
-     * Called by Coder
+     * Custom exception thrown when no matching location is found in the file.
      */
-    public static String doReplace(ProjectFile file, String beforeText, String afterText) throws IOException {
-        var content = file.exists() ? file.read() : "";
-        return doReplace(file, content, beforeText, afterText);
-    }
-
-    /**
-     * RepoFile-free overload for testing simplicity
-     */
-    public static String doReplace(String original, String beforeText, String afterText) {
-        return doReplace(null, original, beforeText, afterText);
+    public static class NoMatchException extends Exception {
+        public NoMatchException(String msg) {
+            super(msg);
+        }
     }
 
     /**
      * Attempts perfect/whitespace replacements, then tries "...", then fuzzy.
-     * Returns null if no match found.
+     * Returns the post-replacement content, or null if no match found.
      */
     static String replaceMostSimilarChunk(String content, String target, String replace) {
         // 1) prep for line-based matching
@@ -207,7 +179,7 @@ public class EditBlock {
     }
 
     /**
-     * Tries exact line-by-line match.
+     * Tries exact line-by-line match. Returns the post-replacement lines on success; null on failure.
      */
     public static String perfectReplace(String[] originalLines,
                                         String[] targetLines,
@@ -360,77 +332,6 @@ public class EditBlock {
             return line.substring(delta);
         }
         return replacePrefix.substring(0, -delta) + line;
-    }
-
-    /**
-     * Uses LCS approximation for ratio.
-     */
-    private static double sequenceMatcherRatio(String a, String b) {
-        if (a.isEmpty() && b.isEmpty()) {
-            return 1.0;
-        }
-        int lcs = longestCommonSubsequence(a, b);
-        double denom = a.length() + b.length();
-        return (2.0 * lcs) / denom;
-    }
-
-    /**
-     * Optimized LCS with rolling 1D array instead of a 2D matrix
-     */
-    private static int longestCommonSubsequence(String s1, String s2) {
-        int n1 = s1.length();
-        int n2 = s2.length();
-        if (n1 == 0 || n2 == 0) {
-            return 0;
-        }
-        int[] prev = new int[n2 + 1];
-        int[] curr = new int[n2 + 1];
-
-        for (int i = 1; i <= n1; i++) {
-            // reset row
-            curr[0] = 0;
-            for (int j = 1; j <= n2; j++) {
-                if (s1.charAt(i - 1) == s2.charAt(j - 1)) {
-                    curr[j] = prev[j - 1] + 1;
-                } else {
-                    curr[j] = Math.max(prev[j], curr[j - 1]);
-                }
-            }
-            // swap references
-            int[] temp = prev;
-            prev = curr;
-            curr = temp;
-        }
-        return prev[n2];
-    }
-
-    /**
-     * Removes any extra lines containing the filename or triple-backticks fences.
-     */
-    public static String stripQuotedWrapping(String block, String fname, String[] fence) {
-        if (block == null || block.isEmpty()) {
-            return block;
-        }
-        String[] lines = block.split("\n", -1);
-
-        // If first line ends with the filename’s filename
-        if (fname != null && lines.length > 0) {
-            String fn = new File(fname).getName();
-            if (lines[0].trim().endsWith(fn)) {
-                lines = Arrays.copyOfRange(lines, 1, lines.length);
-            }
-        }
-        // If triple-backtick block
-        if (lines.length >= 2
-                && lines[0].startsWith(fence[0])
-                && lines[lines.length - 1].startsWith(fence[1])) {
-            lines = Arrays.copyOfRange(lines, 1, lines.length - 1);
-        }
-        String result = String.join("\n", lines);
-        if (!result.isEmpty() && !result.endsWith("\n")) {
-            result += "\n";
-        }
-        return result;
     }
 
     private static ContentLines prep(String content) {

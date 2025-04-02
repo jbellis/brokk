@@ -42,23 +42,26 @@ public class LLM {
         // Track original contents of files before any changes
         var originalContents = new HashMap<ProjectFile, String>();
 
+        // We'll collect the conversation as ChatMessages to store in context history.
         var sessionMessages = new ArrayList<ChatMessage>();
+        // The user's initial request
         var nextRequest = new UserMessage("<goal>\n%s\n</goal>".formatted(userInput.trim()));
 
         // track repeated tool failures
         int parseErrorAttempts = 0;
-        List<String> buildErrors = new ArrayList<>();
+        // track build errors to check if we are making progress.
+        var buildErrors = new ArrayList<String>();
+
         boolean isComplete = false;
 
-        // give user some feedback -- this isn't in the main loop because after the first iteration
-        // we give more specific feedback when we need to make another request
-        io.systemOutput("Request sent");
+        // Provide an initial note to the user (or logs) that the session started
+        io.systemOutput("Request sent to LLM. Processing...");
 
         // apply edits with this
         var tools = new LLMTools(coder.contextManager);
         while (true) {
             if (Thread.currentThread().isInterrupted()) {
-                io.systemOutput("Session interrupted");
+                io.systemOutput("Session interrupted.");
                 break;
             }
 
@@ -68,120 +71,158 @@ public class LLM {
             var allMessages = DefaultPrompts.instance.collectMessages(contextManager, sessionMessages, reminder);
             allMessages.add(nextRequest);
 
-            // Actually send the message to the LLM and get the response
+            // Actually send the request to the LLM
             var toolSpecs = ToolSpecifications.toolSpecificationsFrom(tools);
             var streamingResult = coder.sendMessage(model, allMessages, toolSpecs);
             if (streamingResult.cancelled()) {
-                io.systemOutput("Session interrupted");
+                io.systemOutput("Session cancelled.");
                 break;
             }
             if (streamingResult.error() != null) {
                 logger.warn("Error from LLM: {}", streamingResult.error().getMessage());
-                io.systemOutput("LLM returned an error even after retries.");
+                io.systemOutput("LLM returned an error even after retries. Ending session.");
                 break;
             }
             var llmResponse = streamingResult.chatResponse();
             if (llmResponse == null || llmResponse.aiMessage() == null) {
-                io.systemOutput("Empty LLM response even after retries. Stopping session.");
+                io.systemOutput("Empty LLM response even after retries. Ending session.");
                 break;
             }
 
             String llmText = llmResponse.aiMessage().text();
             boolean hasTools = llmResponse.aiMessage().hasToolExecutionRequests();
             if (llmText.isBlank() && !hasTools) {
-                io.systemOutput("Blank LLM response. Stopping session.");
+                io.systemOutput("Blank LLM response. Ending session.");
                 break;
             }
 
-            // We got a valid response
-            logger.debug("response:\n{}", llmResponse);
+            // The LLM has responded successfully, so record both sides of the conversation
             sessionMessages.add(nextRequest);
             sessionMessages.add(llmResponse.aiMessage());
 
-            // 1. Preview (validate) all tool requests
+            // -------------------------------------------
+            // A) First pass: parse each tool request
+            // -------------------------------------------
             var toolRequests = llmResponse.aiMessage().toolExecutionRequests();
-            if (!toolRequests.isEmpty()) {
-                var previewResults = tools.validateToolRequests(toolRequests);
+            var validatedRequests = new ArrayList<LLMTools.ValidatedToolRequest>();
+            boolean encounteredReadOnly = false;
 
-                // Collect any that failed
-                var failedMessages = previewResults.stream().filter(p -> !p.success()).count();
-                if (failedMessages > 0) {
-                    parseErrorAttempts++;
-                    // If everything failed, we might reflect and continue
-                    if (failedMessages == previewResults.size()) {
-                        // If everything failed, reflect or stop
-                        if (parseErrorAttempts >= MAX_PARSE_ATTEMPTS) {
-                            io.systemOutput("Tool request failures keep repeating. Stopping.");
+            if (!toolRequests.isEmpty()) {
+                for (var req : toolRequests) {
+                    var parsed = tools.parseToolRequest(req);
+                    if (parsed.error() != null) {
+                        // Track the error so we can include a Tool Response
+                        logger.warn("Tool request parse error: {}", parsed.error());
+                        validatedRequests.add(parsed);
+                        continue;
+                    }
+
+                    // If we get here, we have a valid ProjectFile
+                    var pf = parsed.file();
+                    if (pf != null) {
+                        // Check read-only status
+                        if (!contextManager.getEditableFiles().contains(pf)) {
+                            io.systemOutput("Request attempts to edit read-only file: " + pf);
+                            sessionMessages.add(new AiMessage(
+                                    "Session aborted: attempt to edit read-only file " + pf
+                            ));
+                            encounteredReadOnly = true;
                             break;
                         }
-                        io.systemOutput("All tool requests failed; requesting fix from LLM...");
-                    } else {
-                        parseErrorAttempts = 0; // we had partial success
-                        // We'll still reflect about the failures
-                        io.systemOutput("Some tool requests failed; continuing with others...");
-                    }
-                } else {
-                    // If none failed, reset the "parseErrorAttempts"
-                    parseErrorAttempts = 0;
-                }
-
-                // Save original content for validated calls
-                previewResults.stream()
-                        .filter(LLMTools.ToolOperationPreview::success)
-                        .forEach(sp -> {
-                    var pf = sp.targetFile();
-                    if (pf != null && !originalContents.containsKey(pf)) {
-                        try {
-                            originalContents.put(pf, pf.exists() ? pf.read() : "");
-                        } catch (IOException e) {
-                            io.toolError("Failed reading file before applying changes: " + e.getMessage());
+                        // Store original content for potential history or revert
+                        if (!originalContents.containsKey(pf)) {
+                            try {
+                                originalContents.put(pf, pf.exists() ? pf.read() : "");
+                            } catch (IOException e) {
+                                io.toolError("Failed reading file before applying changes: " + e.getMessage());
+                                // We can either skip or mark an error and break
+                                sessionMessages.add(new AiMessage(
+                                        "Session aborted: unable to read file " + pf
+                                ));
+                                encounteredReadOnly = true;
+                                break;
+                            }
                         }
                     }
-                });
-
-                // Actually apply changes
-                try {
-                    var toolMessages = tools.executeTools(previewResults);
-                    sessionMessages.addAll(toolMessages);
-                    logger.info("Validated tool operations applied");
-                } catch (Exception ex) {
-                    logger.error("Tool apply error", ex);
-                    io.systemOutput("Fatal tool error: " + ex.getMessage());
-                    break;
-                }
-
-                if (failedMessages > 0) {
-                    nextRequest = new UserMessage("""
-                    Some edit request tool calls failed, possibly because other edits conflicted with them.
-                    Please look carefully at the current state of the editable files and issue corrected edits, if they are still necessary.
-                    """.stripIndent());
-                    continue; // don't bother building
+                    validatedRequests.add(parsed);
                 }
             }
 
-            // Attempt to build
-            var buildReflection = getBuildReflection(contextManager, io, buildErrors);
+            // If any read-only file or i/o error was encountered, end the session
+            if (encounteredReadOnly) {
+                break;
+            }
+
+            // -------------------------------------------
+            // B) Second pass: apply the valid requests
+            // -------------------------------------------
+            if (!validatedRequests.isEmpty()) {
+                boolean anyFailures = false;
+                for (var validated : validatedRequests) {
+                    if (validated.error() != null) {
+                        // Just count it as a parse error for reflection
+                        anyFailures = true;
+                        logger.debug("Skipping invalid tool request for: {}", validated.originalRequest());
+                    } else {
+                        // Attempt actual edit
+                        var result = tools.executeTool(validated);
+                        if (result.text().startsWith("Failed")) {
+                            logger.warn("Tool application failure: {}", result.text());
+                            anyFailures = true;
+                        }
+                    }
+                }
+
+                // If every single request was invalid or had an error, increment parseErrorAttempts
+                // as an indication that the LLM's instructions might be problematic.
+                if (anyFailures && validatedRequests.stream().allMatch(v -> v.error() != null)) {
+                    parseErrorAttempts++;
+                    if (parseErrorAttempts >= MAX_PARSE_ATTEMPTS) {
+                        io.systemOutput("Repeated tool request failures. Stopping session.");
+                        break;
+                    }
+                    // We'll reflect in the next loop iteration
+                    io.systemOutput("Tool requests had errors. Asking LLM to correct them...");
+                    nextRequest = new UserMessage("""
+                        Some of your tool calls could not be applied. Please revisit your changes
+                        and provide corrected tool usage or updated instructions.
+                        """.stripIndent());
+                    continue;
+                } else {
+                    // If at least one succeeded, reset parseErrorAttempts
+                    parseErrorAttempts = 0;
+                }
+            }
+
+            // -------------------------------------------
+            // C) Attempt to build and see if we are done
+            // -------------------------------------------
+            String buildReflection = getBuildReflection(contextManager, io, buildErrors);
             if (buildReflection.isEmpty()) {
-                // success!
+                // Build succeeded!
                 isComplete = true;
                 break;
             }
 
-            // Check if we should continue trying
+            // If we got here, we have build errors. Decide if we keep trying or not.
             if (!shouldContinue(coder, parseErrorAttempts, buildErrors, io)) {
                 break;
             }
 
-            io.systemOutput("Attempting to fix build errors...");
+            // prompt the LLM to fix build errors
+            io.systemOutput("Requesting the LLM to fix build failures...");
             nextRequest = new UserMessage(buildReflection);
         }
 
-        // Write conversation to history if anything happened
+        // If we had any conversation at all, store it in the context history
         if (!sessionMessages.isEmpty()) {
-            if (!isComplete) {
-                userInput += " [incomplete]";
-            }
-            coder.contextManager.addToHistory(sessionMessages, originalContents, userInput);
+            String finalUserInput = isComplete ? userInput : userInput + " [incomplete]";
+            coder.contextManager.addToHistory(sessionMessages, originalContents, finalUserInput);
+        }
+        if (isComplete) {
+            io.systemOutput("Session complete! Build is successful.");
+        } else {
+            io.systemOutput("Session ended without success.");
         }
     }
 

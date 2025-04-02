@@ -4,14 +4,21 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import io.github.jbellis.brokk.analyzer.FunctionLocation;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
+import io.github.jbellis.brokk.analyzer.SymbolNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for the LLMTools class.
@@ -75,8 +82,7 @@ class LLMToolsTest {
                 // Return a stub that only knows about "Test.sayHello" with param ["name"]
                 return new IAnalyzer() {
                     @Override
-                    public java.util.Optional<FunctionLocation> findFunctionLocation(String fqMethodName,
-                                                                                     List<String> paramNames) {
+                    public FunctionLocation getFunctionLocation(String fqMethodName, List<String> paramNames) {
                         if (fqMethodName.equals("Test.sayHello")
                                 && paramNames.equals(List.of("name"))) {
                             // We'll say the method is from line 4 to line 6 (just a small range)
@@ -84,11 +90,10 @@ class LLMToolsTest {
                                 public void sayHello(String name) {
                                     System.out.println("Hello " + name);
                                 }""";
-                            return java.util.Optional.of(
-                                    new FunctionLocation(toFile("Test.java"), 4, 6, methodText)
-                            );
+                            return new FunctionLocation(toFile("Test.java"), 4, 6, methodText);
                         }
-                        return java.util.Optional.empty();
+
+                        throw new SymbolNotFoundException("not found");
                     }
                 };
             }
@@ -105,14 +110,21 @@ class LLMToolsTest {
         var request = ToolExecutionRequest.builder()
                 .name("replaceFile")
                 .arguments("""
-                    {"filename":"Test.java","text":"hello world"}
-                """)
+            {
+              "filename": "Test.java",
+              "text": "hello world"
+            }
+            """)
                 .build();
 
-        var previews = tools.validateToolRequests(List.of(request));
-        assertDoesNotThrow(() -> tools.executeTools(previews));
+        var validated = tools.parseToolRequest(request);
+        assertNull(validated.error(),
+                   "Expected no parse error for replaceFile request");
 
-        // Verify the file actually changed in memory
+        var result = tools.executeTool(validated);
+        assertEquals("Success", result.text(),
+                     "File replacement should succeed");
+
         assertEquals("hello world", inMemoryFileContents.get("Test.java"),
                      "File content should match the replaced text");
     }
@@ -122,40 +134,52 @@ class LLMToolsTest {
         var request = ToolExecutionRequest.builder()
                 .name("replaceLines")
                 .arguments("""
-                    {"filename":"Test.java","oldText":"nonexistent","newText":"???"}
-                """)
+            {
+              "filename": "Test.java",
+              "oldLines": "nonexistent",
+              "newLines": "???"
+            }
+            """)
                 .build();
 
-        var previews = tools.validateToolRequests(List.of(request));
-        Exception ex = assertThrows(Exception.class, () -> tools.executeTools(previews));
-        assertTrue(ex.getMessage().contains("No matching location found"),
-                   "Should fail because 'nonexistent' was not found in the file");
+        var validated = tools.parseToolRequest(request);
+        assertNull(validated.error(),
+                   "Expected no parse error for replaceLines request");
+
+        var result = tools.executeTool(validated);
+        assertTrue(result.text().startsWith("Failed to apply: "), "Expected failure result for unknown text");
+        assertTrue(result.text().contains("No matching location"), result.text());
     }
 
     @Test
     void testReplaceLines() {
-        String oldText = "// Some text we will replace";
-        String newText = "// Replaced line successfully";
+        String oldLines = "// Some text we will replace";
+        String newLines = "// Replaced line successfully";
 
         var request = ToolExecutionRequest.builder()
                 .name("replaceLines")
                 .arguments("""
-                    {
-                      "filename": "Test.java",
-                      "oldText": "%s",
-                      "newText": "%s"
-                    }
-                    """.formatted(oldText, newText))
+            {
+              "filename": "Test.java",
+              "oldLines": "%s",
+              "newLines": "%s"
+            }
+            """.formatted(oldLines, newLines))
                 .build();
 
-        var previews = tools.validateToolRequests(List.of(request));
-        assertDoesNotThrow(() -> tools.executeTools(previews));
+        var validated = tools.parseToolRequest(request);
+        assertNull(validated.error(),
+                   "Expected no parse error for replaceLines request");
+
+        var result = tools.executeTool(validated);
+        assertEquals("Success", result.text(),
+                     "Replacing lines should succeed");
 
         String updated = inMemoryFileContents.get("Test.java");
-        assertFalse(updated.contains(oldText),
-                    "Old text should be removed from file content");
-        assertTrue(updated.contains(newText),
-                   "New text should appear in file content");
+        assertFalse(updated.contains(oldLines),
+                    "Old line should be removed from file content");
+        assertTrue(updated.contains(newLines),
+                   "New line should appear in file content");
     }
 
     @Test
@@ -163,16 +187,21 @@ class LLMToolsTest {
         var request = ToolExecutionRequest.builder()
                 .name("replaceFunction")
                 .arguments("""
-                    {
-                      "fullyQualifiedFunctionName": "Test.sayHello",
-                      "functionParameterNames": ["name"],
-                      "newFunctionBody": "public void sayHello(String name) {\\n    System.out.println(\\"Hi there, \\" + name + \\"!!!\\");\\n}"
-                    }
-                    """)
+            {
+              "fullyQualifiedFunctionName": "Test.sayHello",
+              "functionParameterNames": ["name"],
+              "newFunctionBody": "public void sayHello(String name) {\\n    System.out.println(\\"Hi there, \\" + name + \\"!!!\\");\\n}"
+            }
+            """)
                 .build();
 
-        var previews = tools.validateToolRequests(List.of(request));
-        assertDoesNotThrow(() -> tools.executeTools(previews));
+        var validated = tools.parseToolRequest(request);
+        assertNull(validated.error(),
+                   "Expected no parse error for replaceFunction request");
+
+        var result = tools.executeTool(validated);
+        assertEquals("Success", result.text(),
+                     "Replacing function body should succeed");
 
         String updated = inMemoryFileContents.get("Test.java");
         assertTrue(updated.contains("Hi there, "),

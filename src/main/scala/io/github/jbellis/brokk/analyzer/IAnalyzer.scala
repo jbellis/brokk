@@ -64,12 +64,9 @@ trait IAnalyzer {
    * Locates the source file and line range for the given fully-qualified method name.
    * The paramNames list contains the *parameter variable names* (not types).
    * If there is only a single match, or exactly one match with matching param names, return it.
-   * Otherwise return an empty Optional.
+   * Otherwise throw SymbolNotFoundException or SymbolAmbiguousException
    */
-  def findFunctionLocation(
-                            fqMethodName: String,
-                            paramNames: util.List[String]
-                          ): java.util.Optional[FunctionLocation] = {
+  def getFunctionLocation(fqMethodName: String, paramNames: util.List[String]): FunctionLocation = {
     throw new UnsupportedOperationException()
   }
 }

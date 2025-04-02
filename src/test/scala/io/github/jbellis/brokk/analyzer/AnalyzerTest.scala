@@ -458,7 +458,53 @@ class AnalyzerTest {
     assertEquals("<operators>.assignmentModulo", analyzer.resolveMethodName("<operators>.assignmentModulo"))
     assertEquals("<operators>.assignmentLogicalShiftRight", analyzer.resolveMethodName("<operators>.assignmentLogicalShiftRight"))
   }
-  
+
+  @Test
+  def getFunctionLocationSingleMatchTest(): Unit = {
+    val analyzer = getAnalyzer
+    // This method has exactly one parameter (String input) and so exactly one matching overload
+    val location = analyzer.getFunctionLocation("A.method2", java.util.List.of("input"))
+    assertTrue(location.startLine > 0, "Start line should be positive")
+    assertTrue(location.endLine >= location.startLine, "End line should not precede start line")
+    assertTrue(location.code.contains("public String method2(String input)"),
+      s"Method code should contain signature for 'method2(String)'; got:\n${location.code}")
+  }
+
+  @Test
+  def getFunctionLocationOverloadAmbiguousTest(): Unit = {
+    val analyzer = getAnalyzer
+    // "A.method2" has two overloads. Passing no param names means we don't disambiguate
+    assertThrows(classOf[SymbolAmbiguousException], () => {
+      analyzer.getFunctionLocation("A.method2", java.util.Collections.emptyList())
+    })
+  }
+
+  @Test
+  def getFunctionLocationParamMismatchTest(): Unit = {
+    val analyzer = getAnalyzer
+    // "A.method2" has overloads, but none with param name "bogusParam"
+    assertThrows(classOf[SymbolNotFoundException], () => {
+      analyzer.getFunctionLocation("A.method2", java.util.List.of("bogusParam"))
+    })
+  }
+
+  @Test
+  def getFunctionLocationNoSuchMethodTest(): Unit = {
+    val analyzer = getAnalyzer
+    // "A.noSuchMethod" does not exist at all
+    assertThrows(classOf[SymbolNotFoundException], () => {
+      analyzer.getFunctionLocation("A.noSuchMethod", java.util.Collections.emptyList())
+    })
+  }
+
+  @Test
+  def getFunctionLocationConstructorTest(): Unit = {
+    val analyzer = getAnalyzer
+    // "B.<init>" is a constructor with no params
+    val location = analyzer.getFunctionLocation("B.<init>", java.util.Collections.emptyList())
+    assertTrue(location.startLine > 0 && location.endLine > 0)
+    assertTrue(location.code.contains("public B()"), s"Constructor code:\n${location.code}")
+  }
 
   /** Helper to get a prebuilt analyzer */
   private def getAnalyzer = {
