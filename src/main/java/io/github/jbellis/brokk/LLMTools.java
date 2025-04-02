@@ -13,7 +13,9 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -96,7 +98,7 @@ public class LLMTools
             return ToolExecutionResultMessage.from(validated.originalRequest(), "Failed to apply: " + ex.getMessage());
         }
 
-        return ToolExecutionResultMessage.from(validated.originalRequest(), "Success");
+        return ToolExecutionResultMessage.from(validated.originalRequest(), "SUCCESS");
     }
 
     /**
@@ -237,10 +239,11 @@ public class LLMTools
             return ValidatedToolRequest.error(req, "replaceFile requires 'filename' and 'text' fields");
         }
 
-        var pf = resolveProjectFile(filename);
-        if (pf == null) {
-            return ValidatedToolRequest.error(req,
-                                              "Could not uniquely identify an editable file for '" + filename + "'");
+        ProjectFile pf;
+        try {
+            pf = resolveProjectFile(filename);
+        } catch (Exception e) {
+            return ValidatedToolRequest.error(req, e.getMessage());
         }
 
         return new ValidatedToolRequest(
@@ -268,10 +271,11 @@ public class LLMTools
             return ValidatedToolRequest.error(req, "removeFile requires 'filename' field");
         }
 
-        var pf = resolveProjectFile(filename);
-        if (pf == null) {
-            return ValidatedToolRequest.error(req,
-                                            "Could not uniquely identify an editable file for '" + filename + "'");
+        ProjectFile pf;
+        try {
+            pf = resolveProjectFile(filename);
+        } catch (Exception e) {
+            return ValidatedToolRequest.error(req, e.getMessage());
         }
 
         return new ValidatedToolRequest(
@@ -301,12 +305,11 @@ public class LLMTools
             );
         }
 
-        var pf = resolveProjectFile(filename);
-        if (pf == null) {
-            return ValidatedToolRequest.error(
-                    req,
-                    "Could not uniquely identify an editable file for '" + filename + "'"
-            );
+        ProjectFile pf;
+        try {
+            pf = resolveProjectFile(filename);
+        } catch (Exception e) {
+            return ValidatedToolRequest.error(req, e.getMessage());
         }
 
         return new ValidatedToolRequest(
@@ -335,10 +338,7 @@ public class LLMTools
         }
 
         var analyzer = contextManager.getAnalyzer();
-        if (analyzer == null) {
-            return ValidatedToolRequest.error(req,
-                                              "No analyzer available to find function " + fullyQualifiedName);
-        }
+        assert analyzer != null;
 
         // 1) try exact FQ name
         try {
@@ -462,8 +462,7 @@ public class LLMTools
             return editableMatches.getFirst();
         }
         if (editableMatches.size() > 1) {
-            logger.warn("Ambiguous file ignoring path: {} => multiple editable matches", fileNameOnly);
-            return null;
+            throw new SymbolAmbiguousException("No exact match for %s and %s is ambiguous".formatted(filename, fileNameOnly));
         }
 
         // Step 3: look in the repo's tracked files
@@ -482,19 +481,16 @@ public class LLMTools
             // Found exactly one
             // But is it editable in the context manager? If not, user might be trying to edit a read-only file.
             if (!contextManager.getEditableFiles().contains(repoMatches.getFirst())) {
-                // not in editable set => we fail
-                logger.warn("Matched file in repo, but not editable: {}", repoMatches.getFirst());
-                return null;
+                throw new FileNotEditableException("Matched file in repo, but not editable: " + repoMatches);
             }
             return repoMatches.getFirst();
         }
         if (repoMatches.size() > 1) {
-            logger.warn("Ambiguous file ignoring path: {} => multiple repo matches", fileNameOnly);
-            return null;
+            throw new SymbolAmbiguousException("No exact match for %s and %s is ambiguous".formatted(filename, fileNameOnly));
         }
 
         // If we reach here, there's no single match
-        return null;
+        throw new SymbolNotFoundException("File not found: " + filename);
     }
 
     /**
@@ -532,6 +528,12 @@ public class LLMTools
         public static ValidatedToolRequest error(ToolExecutionRequest req, String msg) {
             return new ValidatedToolRequest(req, null, null, msg,
                                             null, null, null, null);
+        }
+    }
+
+    public static class FileNotEditableException extends RuntimeException {
+        public FileNotEditableException(String message) {
+            super(message);
         }
     }
 }

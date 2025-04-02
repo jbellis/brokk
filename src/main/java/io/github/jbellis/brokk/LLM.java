@@ -158,31 +158,26 @@ public class LLM {
             // B) Second pass: apply the valid requests
             // -------------------------------------------
             if (!validatedRequests.isEmpty()) {
-                boolean anyFailures = false;
+                int failures = 0;
                 for (var validated : validatedRequests) {
-                    if (validated.error() != null) {
-                        // Just count it as a parse error for reflection
-                        anyFailures = true;
-                        logger.debug("Skipping invalid tool request for: {}", validated.originalRequest());
-                    } else {
-                        // Attempt actual edit
-                        var result = tools.executeTool(validated);
-                        if (result.text().startsWith("Failed")) {
-                            logger.warn("Tool application failure: {}", result.text());
-                            anyFailures = true;
-                        }
+                    // Attempt actual edit. (Handles validation errors internally)
+                    var result = tools.executeTool(validated);
+                    if (!result.text().equals("SUCCESS")) {
+                        logger.warn("Tool application failure: {}", result.text());
+                        failures++;
                     }
                 }
 
-                // If every single request was invalid or had an error, increment parseErrorAttempts
+                // If every single request was invalid or failed, increment parseErrorAttempts
                 // as an indication that the LLM's instructions might be problematic.
-                if (anyFailures && validatedRequests.stream().allMatch(v -> v.error() != null)) {
+                if (failures == validatedRequests.size()) {
                     parseErrorAttempts++;
                     if (parseErrorAttempts >= MAX_PARSE_ATTEMPTS) {
                         io.systemOutput("Repeated tool request failures. Stopping session.");
                         break;
                     }
                     // We'll reflect in the next loop iteration
+                    logger.debug("Tool requests had errors. Asking LLM to correct them...");
                     io.systemOutput("Tool requests had errors. Asking LLM to correct them...");
                     nextRequest = new UserMessage("""
                         Some of your tool calls could not be applied. Please revisit your changes

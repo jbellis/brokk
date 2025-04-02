@@ -91,7 +91,7 @@ class LLMToolsTest {
         assertNull(validated.error(), "Expected no parse error for replaceFile request");
 
         var result = tools.executeTool(validated);
-        assertEquals("Success", result.text(), "File replacement should succeed");
+        assertEquals("SUCCESS", result.text(), "File replacement should succeed");
 
         // Verify the file content on disk
         String fileContent = Files.readString(tempDir.resolve("Test.java"));
@@ -139,7 +139,7 @@ class LLMToolsTest {
         assertNull(validated.error(), "Expected no parse error for replaceLines request");
 
         var result = tools.executeTool(validated);
-        assertEquals("Success", result.text(), "Replacing lines should succeed");
+        assertEquals("SUCCESS", result.text(), "Replacing lines should succeed");
 
         String updated = Files.readString(tempDir.resolve("Test.java"));
         assertFalse(updated.contains(oldLines), "Old line should be removed from file content");
@@ -163,7 +163,7 @@ class LLMToolsTest {
         assertNull(validated.error(), "Expected no parse error for replaceFunction request");
 
         var result = tools.executeTool(validated);
-        assertEquals("Success", result.text(), "Replacing function body should succeed");
+        assertEquals("SUCCESS", result.text(), "Replacing function body should succeed");
 
         String updated = Files.readString(tempDir.resolve("Test.java"));
         assertTrue(updated.contains("Hi there, "), "New function body should appear in the updated file content");
@@ -221,7 +221,7 @@ class LLMToolsTest {
         assertNull(validated.error(), "Expected no parse error for removeFile request");
 
         var result = tools.executeTool(validated);
-        assertEquals("Success", result.text(), "File removal should succeed");
+        assertEquals("SUCCESS", result.text(), "File removal should succeed");
 
         // Verify the file was actually deleted
         assertFalse(Files.exists(fileToDelete), "File should have been deleted");
@@ -240,6 +240,6 @@ class LLMToolsTest {
                 .build();
 
         var validated = tools.parseToolRequest(request);
-        assertTrue(validated.error().contains("Could not uniquely identify"));
+        assertTrue(validated.error().contains("File not found"));
     }
 }
