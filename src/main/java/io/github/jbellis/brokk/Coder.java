@@ -555,9 +555,9 @@ public class Coder {
                 .collect(Collectors.joining("\n")); // Use collect instead of reduce for safer empty handling
 
         return """
-        You MUST respond ONLY with a valid JSON object containing a 'tool_calls' array. Do not include any other text or explanation.
+        You MUST respond ONLY with a valid JSON object containing a 'tool_calls' array. Your first call should be to `explain`.
         Include all the tool calls necessary to satisfy the request in a single array!
-        REMEMBER that you are to provide a JSON object containing a 'tool_calls' array, NOT top-level array.
+        REMEMBER that you are to provide a JSON object containing a 'tool_calls' array, NOT a top-level array.
 
         %d available tools:
         %s

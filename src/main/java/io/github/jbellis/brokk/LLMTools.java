@@ -484,7 +484,7 @@ public class LLMTools {
         }
     }
 
-    @Tool(value = "Explain your strategy to the user. Call this before other tools.")
+    @Tool(value = "Explain your strategy to the user. ALWAYS CALL THIS BEFORE OTHER TOOLS..")
     public void explain(@P("Explanation") String text) {
         throw new UnsupportedOperationException("runSession should special case `explain`");
     }
