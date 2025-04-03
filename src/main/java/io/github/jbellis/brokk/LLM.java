@@ -119,7 +119,7 @@ public class LLM {
                 var parsed = tools.parseToolRequest(req);
                 if (parsed.error() != null) {
                     // Track the error so we can include a Tool Response
-                    logger.warn("Tool request parse error: {}", parsed.error());
+                    logger.debug("Tool request parse error: {}", parsed.error());
                     validatedRequests.add(parsed);
                     continue;
                 }
@@ -156,12 +156,12 @@ public class LLM {
             for (var validated : validatedRequests) {
                 // Attempt actual edit. (Handles validation errors internally)
                 var result = tools.executeTool(validated);
-                if (result.toolName().equals("explain")) {
+                if (result.toolName().equals("explain") && validated.error() == null) {
                     io.llmOutput("\n\n%s".formatted(result.text()));
                 } else {
+                    // TODO make this fancier! like, an actual graphical representation of the diff
                     output.append("\n%s: %s".formatted(result.toolName(), result.text()));
                     if (!result.text().equals("SUCCESS")) {
-                        // TODO make this fancier! like, an actual graphical representation of the diff
                         logger.warn("Tool application failure: {}", result.text());
                         failures++;
                     }

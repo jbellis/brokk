@@ -492,7 +492,7 @@ public class LLMTools {
     private ValidatedToolRequest parseExplain(ToolExecutionRequest req, Map<String, Object> argMap) {
         var text = (String) argMap.get("text");
         if (text == null) {
-            return ValidatedToolRequest.error(req, "explain requires 'text'", "explain: ???");
+            return ValidatedToolRequest.error(req, "explain requires parameter `text`", "explain: ???");
         }
         var contents = new ValidatedToolRequest.RequestContents(null, null, null, null, text);
         var shortDesc = text.substring(0, Math.min(20, text.length())).replace('\n', ' ');
@@ -505,7 +505,7 @@ public class LLMTools {
      */
     public List<ToolSpecification> getToolSpecifications(StreamingChatLanguageModel model) {
         var all = ToolSpecifications.toolSpecificationsFrom(this);
-        if (requiresEmulatedTools(model)) {
+        if (!requiresEmulatedTools(model)) {
             all = all.stream().filter(spec -> !spec.name().equals("explain")).toList();
         }
         return all;

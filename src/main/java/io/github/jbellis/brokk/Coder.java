@@ -538,19 +538,24 @@ public class Coder {
                             .map(entry -> {
                                 // tool parameters only have a string `description` property
                                 var p = (JsonStringSchema) entry.getValue();
-                                return "    - %s %s%s: %s".formatted(
-                                        "String",
+                                return """
+                                <parameter name="%s" type="%s" required="%s">
+                                %s
+                                </parameter>
+                                """.formatted(
                                         entry.getKey(),
+                                        "String",
                                         tool.parameters().required().contains(entry.getKey()),
                                         p.description());
                             })
                             .collect(Collectors.joining("\n"));
 
                     return """
-                           - %s: %s
-                             Parameters:
-                             %s
-                           """.formatted(tool.name(), tool.description(), parametersInfo.isEmpty() ? "    (No parameters)" : parametersInfo);
+                           <tool name="%s">
+                           %s
+                           %s
+                           </tool>
+                           """.formatted(tool.name(), tool.description(), parametersInfo.isEmpty() ? "(No parameters)" : parametersInfo);
                 })
                 .collect(Collectors.joining("\n")); // Use collect instead of reduce for safer empty handling
 
