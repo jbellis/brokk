@@ -140,18 +140,6 @@ public class LLMTools {
     }
 
     /**
-     * "replaceFunction" - replaces lines from startLine..endLine with new code,
-     * based on analyzing the function location from the analyzer.
-     */
-    @Tool(value = """
-            Replace the entire function, identified by fullyQualifiedFunctionName + param names. This CANNOT replace a
-            a class or interface or anything besides functions/methods (you have to use replaceLines or replaceFile for that).
-            """)
-    public void replaceFunction(@P("The fully qualified function name, e.g. com.example.Foo.barMethod") String fullyQualifiedFunctionName, @P("List of parameter variable names, e.g. [\"arg1\", \"userId\"]") List<String> functionParameterNames, @P("The new code for the entire function, including signature and braces. Will be used as-is, so make sure indentation is appropriate") String newFunctionBody) {
-        throw new ToolExecutionException("Direct invocation of replaceFunction(String,List,String) is not supported. Use parseToolRequest + applyRequest.");
-    }
-
-    /**
      * "removeFile" - deletes a file from the filesystem.
      */
     @Tool(value = "Remove (delete) a file from the filesystem.")
@@ -174,6 +162,20 @@ public class LLMTools {
             throw new ToolExecutionException("Failed deleting file " + file + ": " + e.getMessage());
         }
     }
+
+    // this is broken until we have a realtime parser -- otherwise if any other edit changes the target file
+    // before this runs, the line numbers in the Analyzer will be incorrect
+//    /**
+//     * "replaceFunction" - replaces lines from startLine..endLine with new code,
+//     * based on analyzing the function location from the analyzer.
+//     */
+//    @Tool(value = """
+//            Replace the entire function, identified by fullyQualifiedFunctionName + param names. This CANNOT replace a
+//            a class or interface or anything besides functions/methods (you have to use replaceLines or replaceFile for that).
+//            """)
+//    public void replaceFunction(@P("The fully qualified function name, e.g. com.example.Foo.barMethod") String fullyQualifiedFunctionName, @P("List of parameter variable names, e.g. [\"arg1\", \"userId\"]") List<String> functionParameterNames, @P("The new code for the entire function, including signature and braces. Will be used as-is, so make sure indentation is appropriate") String newFunctionBody) {
+//        throw new ToolExecutionException("Direct invocation of replaceFunction(String,List,String) is not supported. Use parseToolRequest + applyRequest.");
+//    }
 
     public void replaceFunction(FunctionLocation loc, String newFunctionBody) {
         // read original file
