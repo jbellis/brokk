@@ -111,7 +111,7 @@ public class Coder {
             public void onPartialResponse(String token) {
                 ifNotCancelled.accept(() -> {
                     if (echo) {
-                        if (requiresEmulatedTools(model) && emulatedToolInstructionsPresent(request.messages())) {
+                        if (LLMTools.requiresEmulatedTools(model) && emulatedToolInstructionsPresent(request.messages())) {
                             io.llmOutput(".");
                         } else {
                             io.llmOutput(token);
@@ -318,7 +318,7 @@ public class Coder {
 
         if (!tools.isEmpty()) {
             // Check if this is a DeepSeek model that needs function calling emulation
-            if (requiresEmulatedTools(model)) {
+            if (LLMTools.requiresEmulatedTools(model)) {
                 return emulateToolsUsingStructuredOutput(model, messages, tools, toolChoice, echo);
             }
 
@@ -336,12 +336,6 @@ public class Coder {
         var response = doSingleStreamingCall(model, request, echo);
         writeToHistory("Response", response.toString());
         return response;
-    }
-
-    public boolean requiresEmulatedTools(StreamingChatLanguageModel model) {
-        var modelName = Models.nameOf(model);
-        logger.debug("Checking if model {} requires emulated tools", modelName);
-        return modelName.toLowerCase().contains("deepseek") || modelName.toLowerCase().contains("gemini") || modelName.toLowerCase().contains("o3-mini");
     }
 
     /**

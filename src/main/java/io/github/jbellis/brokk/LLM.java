@@ -1,6 +1,5 @@
 package io.github.jbellis.brokk;
 
-import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
@@ -77,7 +76,7 @@ public class LLM {
             //
             // Actually send the request to the LLM
             //
-            var toolSpecs = ToolSpecifications.toolSpecificationsFrom(tools);
+            var toolSpecs = tools.getToolSpecifications(model);
             var streamingResult = coder.sendMessage(model, allMessages, toolSpecs, ToolChoice.AUTO, true);
             if (streamingResult.cancelled()) {
                 io.systemOutput("Session cancelled.");
@@ -157,16 +156,20 @@ public class LLM {
             for (var validated : validatedRequests) {
                 // Attempt actual edit. (Handles validation errors internally)
                 var result = tools.executeTool(validated);
-                if (!result.text().equals("SUCCESS")) {
-                    logger.warn("Tool application failure: {}", result.text());
-                    failures++;
+                if (result.toolName().equals("explain")) {
+                    io.llmOutput("\n\n%s".formatted(result.text()));
+                } else {
+                    output.append("\n%s: %s".formatted(result.toolName(), result.text()));
+                    if (!result.text().equals("SUCCESS")) {
+                        // TODO make this fancier! like, an actual graphical representation of the diff
+                        logger.warn("Tool application failure: {}", result.text());
+                        failures++;
+                    }
                 }
                 resultMessages.add(result);
-                // TODO make this fancier! like, an actual graphical representation of the diff
-                output.append("\n%s: %s".formatted(result.toolName(), result.text()));
             }
             io.llmOutput("\n\n```" + output + "```\n\n");
-            if (!coder.requiresEmulatedTools(model)) {
+            if (!LLMTools.requiresEmulatedTools(model)) {
                 // need this whether success or failure or the LLM gets confused seeing that it made a call but no results
                 sessionMessages.addAll(resultMessages);
             }
@@ -188,7 +191,7 @@ public class LLM {
                 logger.debug("Tool requests had errors. Asking LLM to correct them...");
                 io.systemOutput("Tool requests had errors. Asking LLM to correct them...");
                 String msg;
-                if (coder.requiresEmulatedTools(model)) {
+                if (LLMTools.requiresEmulatedTools(model)) {
                     msg = """
                     Some of your tool calls could not be applied. Please revisit your changes
                     and provide corrected tool usage or updated instructions.  Here are the tool results,
