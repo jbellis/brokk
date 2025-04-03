@@ -321,6 +321,7 @@ public class Coder {
             }
 
             // For models with native function calling
+            logger.debug("Performing native tool calls");
             var params = OpenAiChatRequestParameters.builder()
                     .toolSpecifications(tools)
                     .parallelToolCalls(true)
@@ -337,6 +338,7 @@ public class Coder {
 
     public boolean requiresEmulatedTools(StreamingChatLanguageModel model) {
         var modelName = Models.nameOf(model);
+        logger.debug("Checking if model {} requires emulated tools", modelName);
         return modelName.toLowerCase().contains("deepseek") || modelName.toLowerCase().contains("gemini") || modelName.toLowerCase().contains("o3-mini");
     }
 
@@ -351,15 +353,14 @@ public class Coder {
             assert tool.parameters().properties() != null;
         }
 
-        ObjectMapper mapper = new ObjectMapper();
-
         var instructionsPresent = messages.stream().anyMatch(m -> {
             var t = Models.getText(m);
             return t.contains("tool_calls")
                     && t.contains("%d available tools:".formatted(tools.size()))
                     && t.contains("Response format:");
         });
-        logger.debug("sending {} messages with {}", messages.size(), instructionsPresent);
+        logger.debug("Tool emulation sending {} messages with {}", messages.size(), instructionsPresent);
+        ObjectMapper mapper = new ObjectMapper();
         if (!instructionsPresent) {
             // Inject instructions for the model re how to format function calls
             var instructions = getInstructions(tools, mapper);
