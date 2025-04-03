@@ -111,7 +111,7 @@ public class Coder {
             public void onPartialResponse(String token) {
                 ifNotCancelled.accept(() -> {
                     if (echo) {
-                        if (requiresEmulatedTools(model) && tools != null && !tools.isEmpty()) {
+                        if (requiresEmulatedTools(model) && emulatedToolInstructionsPresent(request.messages())) {
                             io.llmOutput(".");
                         } else {
                             io.llmOutput(token);
@@ -355,12 +355,7 @@ public class Coder {
             assert tool.parameters().properties() != null;
         }
 
-        var instructionsPresent = messages.stream().anyMatch(m -> {
-            var t = Models.getText(m);
-            return t.contains("tool_calls")
-                    && t.contains("%d available tools:".formatted(tools.size()))
-                    && t.contains("Response format:");
-        });
+        var instructionsPresent = emulatedToolInstructionsPresent(messages);
         logger.debug("Tool emulation sending {} messages with {}", messages.size(), instructionsPresent);
         ObjectMapper mapper = new ObjectMapper();
         if (!instructionsPresent) {
@@ -464,6 +459,15 @@ public class Coder {
                                    false,
                                    new IllegalArgumentException("Failed to generate valid tool calls after " + maxRetries + " attempts")
         );
+    }
+
+    private static boolean emulatedToolInstructionsPresent(List<ChatMessage> messages) {
+        return messages.stream().anyMatch(m -> {
+            var t = Models.getText(m);
+            return t.contains("tool_calls")
+                    && t.matches(".*\\d+ available tools:.*")
+                    && t.contains("Response format:");
+        });
     }
 
     private static StreamingResult parseJsonToTools(StreamingResult result, ObjectMapper mapper) {
