@@ -360,7 +360,7 @@ public class Coder {
         ObjectMapper mapper = new ObjectMapper();
         if (!instructionsPresent) {
             // Inject instructions for the model re how to format function calls
-            var instructions = getInstructions(tools, mapper);
+            var instructions = getInstructions(tools);
             var modified = new UserMessage(Models.getText(messages.getLast()) + "\n\n" + instructions);
             messages = new ArrayList<>(messages); // so we can modify it
             messages.set(messages.size() - 1, modified);
@@ -465,7 +465,7 @@ public class Coder {
         return messages.stream().anyMatch(m -> {
             var t = Models.getText(m);
             return t.contains("tool_calls")
-                    && t.matches(".*\\d+ available tools:.*")
+                    && t.matches("(?s).*\\d+ available tools:.*")
                     && t.contains("Response format:");
         });
     }
@@ -537,7 +537,7 @@ public class Coder {
         return new StreamingResult(cr, result.originalResponse, false, null);
     }
 
-    private static String getInstructions(List<ToolSpecification> tools, ObjectMapper mapper) {
+    private static String getInstructions(List<ToolSpecification> tools) {
         String toolsDescription = tools.stream()
                 .map(tool -> {
                     var parametersInfo = tool.parameters().properties().entrySet().stream()
