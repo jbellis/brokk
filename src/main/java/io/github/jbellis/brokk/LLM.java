@@ -168,7 +168,9 @@ public class LLM {
                 }
                 resultMessages.add(result);
             }
-            io.llmOutput("\n\n```" + output + "```\n\n");
+            if (!output.isEmpty()) {
+                io.llmOutput("\n\n```" + output + "```\n\n");
+            }
             if (!LLMTools.requiresEmulatedTools(model)) {
                 // need this whether success or failure or the LLM gets confused seeing that it made a call but no results
                 sessionMessages.addAll(resultMessages);

@@ -377,21 +377,21 @@ public class Coder {
                     .messages(currentMessages)
                     .parameters(requestParams)
                     .build();
-            var response = doSingleStreamingCall(model, request, echo);
+            var result = doSingleStreamingCall(model, request, echo);
 
             // If cancelled or no chat response, return immediately
-            if (response.cancelled) {
-                return response;
+            if (result.cancelled) {
+                return result;
             }
 
-            if (response.chatResponse == null || response.chatResponse.aiMessage() == null) {
+            if (result.chatResponse == null || result.chatResponse.aiMessage() == null) {
                 logger.debug("No chat response or AI message in response on attempt {}", attempt);
                 continue;
             }
 
             // Try to parse the JSON response
             try {
-                StreamingResult parsedResponse = parseJsonToTools(response, mapper);
+                StreamingResult parsedResponse = parseJsonToTools(result, mapper);
                 if (parsedResponse.chatResponse.aiMessage().hasToolExecutionRequests()) {
                     // Successfully parsed tool calls, return the result
                     logger.debug("Successfully parsed tool calls on attempt {}", attempt);
@@ -401,19 +401,20 @@ public class Coder {
                 if (toolChoice == ToolChoice.AUTO) {
                     // If tools are optional, return the original response
                     logger.debug("Tools are optional, returning original response on attempt {}", attempt);
-                    return response;
+                    return result;
                 }
                 // else throw so catch retries
                 throw new IllegalArgumentException("Response contained valid JSON but no tool_calls");
             } catch (IllegalArgumentException e) {
                 // If this is the last attempt, throw the exception
                 if (attempt == maxRetries) {
-                    logger.error("Failed to get valid tool calls after {} attempts: {}", maxRetries, e.getMessage());
-                    return response; // Return the original response with the error
+                    var msg = "Failed to get valid tool calls after %d attempts: %s".formatted(maxRetries, e.getMessage());
+                    logger.error(msg);
+                    return new StreamingResult(result.chatResponse, false, new RuntimeException(msg));
                 }
 
                 // Add the invalid response to the messages
-                String invalidResponse = response.chatResponse.aiMessage().text();
+                String invalidResponse = result.chatResponse.aiMessage().text();
                 logger.debug("Invalid JSON response on attempt {}: {}", attempt, e);
                 io.systemOutput("Retry " + attempt + "/" + maxRetries + ": Invalid JSON response, requesting proper format.");
 
