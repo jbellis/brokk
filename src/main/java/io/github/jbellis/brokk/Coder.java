@@ -14,6 +14,7 @@ import dev.langchain4j.model.chat.request.ChatRequestParameters;
 import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.chat.request.ResponseFormatType;
 import dev.langchain4j.model.chat.request.ToolChoice;
+import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
@@ -99,7 +100,8 @@ public class Coder {
         });
 
         // Write request with tools to history
-        writeRequestToHistory(request.messages(), request.parameters().toolSpecifications());
+        var tools = request.parameters().toolSpecifications();
+        writeRequestToHistory(request.messages(), tools);
 
         AtomicReference<ChatResponse> atomicResponse = new AtomicReference<>();
 
@@ -108,7 +110,7 @@ public class Coder {
             public void onPartialResponse(String token) {
                 ifNotCancelled.accept(() -> {
                     if (echo) {
-                        if (requiresEmulatedTools(model) && !request.parameters().toolSpecifications().isEmpty()) {
+                        if (requiresEmulatedTools(model) && tools != null && !tools.isEmpty()) {
                             io.llmOutput(".");
                         } else {
                             io.llmOutput(token);
@@ -528,33 +530,24 @@ public class Coder {
                 .map(tool -> {
                     var parametersInfo = tool.parameters().properties().entrySet().stream()
                             .map(entry -> {
-                                try {
-                                    var node = mapper.valueToTree(entry.getValue());
-                                    // Safely get description
-                                    var descriptionNode = node.get("description");
-                                    String description = (descriptionNode != null && descriptionNode.isTextual())
-                                            ? ": " + descriptionNode.asText()
-                                            : "";
-                                    return "    - %s (type: %s)%s".formatted(
-                                            entry.getKey(),
-                                            node.path("type").asText("unknown"), // Include type if available
-                                            description);
-                                } catch (Exception e) {
-                                    logger.warn("Error processing parameter {} for tool {}", entry.getKey(), tool.name(), e);
-                                    return "    - %s".formatted(entry.getKey());
-                                }
+                                // tool parameters only have a string `description` property
+                                var p = (JsonStringSchema) entry.getValue();
+                                return "    - %s (type: %s)%s".formatted(
+                                        entry.getKey(),
+                                        "String",
+                                        p.description());
                             })
                             .collect(Collectors.joining("\n"));
 
                     String requiredParams = "";
                     if (tool.parameters().required() != null && !tool.parameters().required().isEmpty()) {
-                        requiredParams = "\n    Required: " + String.join(", ", tool.parameters().required());
+                        requiredParams = " (required: " + String.join(", ", tool.parameters().required() + ")");
                     }
 
                     return """
                            - %s: %s
-                             Parameters:%s
-                           %s
+                             Parameters%s:
+                             %s
                            """.formatted(tool.name(), tool.description(), requiredParams, parametersInfo.isEmpty() ? "    (No parameters)" : "\n" + parametersInfo);
                 })
                 .collect(Collectors.joining("\n")); // Use collect instead of reduce for safer empty handling
