@@ -459,15 +459,15 @@ public class Coder {
 
         // If we reach here, all retries failed
         logger.error("All {} attempts to get valid JSON tool calls failed", maxRetries);
-        return new StreamingResult(
-                ChatResponse.builder().aiMessage(new AiMessage("Failed to generate valid tool calls after " + maxRetries + " attempts")).build(),
-                false,
-                new IllegalArgumentException("Failed to generate valid tool calls after " + maxRetries + " attempts")
+        var msg = new AiMessage("Failed to generate valid tool calls after " + maxRetries + " attempts");
+        return new StreamingResult(ChatResponse.builder().aiMessage(msg).build(),
+                                   false,
+                                   new IllegalArgumentException("Failed to generate valid tool calls after " + maxRetries + " attempts")
         );
     }
 
-    private static StreamingResult parseJsonToTools(StreamingResult response, ObjectMapper mapper) {
-        String jsonResponse = response.chatResponse.aiMessage().text();
+    private static StreamingResult parseJsonToTools(StreamingResult result, ObjectMapper mapper) {
+        String jsonResponse = result.chatResponse.aiMessage().text();
         logger.debug("Raw JSON response from model: {}", jsonResponse);
         JsonNode root;
         try {
@@ -530,7 +530,7 @@ public class Coder {
         // Create a properly formatted AiMessage with tool execution requests
         var aiMessage = new AiMessage("[json]", toolExecutionRequests);
         var cr = ChatResponse.builder().aiMessage(aiMessage).build();
-        return new StreamingResult(cr, false, null);
+        return new StreamingResult(cr, result.originalResponse, false, null);
     }
 
     private static String getInstructions(List<ToolSpecification> tools, ObjectMapper mapper) {
@@ -630,9 +630,14 @@ public class Coder {
     /**
      * Represents the outcome of a streaming request.
      */
-    public record StreamingResult(ChatResponse chatResponse, boolean cancelled, Throwable error) {
+    public record StreamingResult(ChatResponse chatResponse, ChatResponse originalResponse, boolean cancelled, Throwable error) {
+        public StreamingResult(ChatResponse chatResponse, boolean cancelled, Throwable error) {
+            this(chatResponse, chatResponse, cancelled, error);
+        }
+
         public StreamingResult {
             assert cancelled || error != null || chatResponse != null;
+            assert (originalResponse == null) == (chatResponse == null);
         }
     }
 }

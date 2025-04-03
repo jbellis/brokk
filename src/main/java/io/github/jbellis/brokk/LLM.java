@@ -102,7 +102,7 @@ public class LLM {
 
             // The LLM has responded successfully, so record both sides of the conversation
             sessionMessages.add(nextRequest);
-            sessionMessages.add(llmResponse.aiMessage());
+            sessionMessages.add(streamingResult.originalResponse().aiMessage());
 
             var toolRequests = llmResponse.aiMessage().toolExecutionRequests();
             if (toolRequests == null || toolRequests.isEmpty()) {
