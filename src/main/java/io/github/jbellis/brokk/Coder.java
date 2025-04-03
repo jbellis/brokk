@@ -7,7 +7,6 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -20,7 +19,6 @@ import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -79,10 +77,10 @@ public class Coder {
             return "";
         }
     }
-    
+
     private StreamingResult doSingleStreamingCall(StreamingChatLanguageModel model,
-                                                 ChatRequest request,
-                                                 boolean echo)
+                                                  ChatRequest request,
+                                                  boolean echo)
     {
         // latch for awaiting the complete response
         var latch = new CountDownLatch(1);
@@ -224,11 +222,11 @@ public class Coder {
      * Wrapper for chat calls with retry logic and exponential backoff
      */
     private StreamingResult sendMessageWithRetry(StreamingChatLanguageModel model,
-                                              List<ChatMessage> messages,
-                                              List<ToolSpecification> tools,
-                                              ToolChoice toolChoice,
-                                              boolean echo,
-                                              int maxAttempts)
+                                                 List<ChatMessage> messages,
+                                                 List<ToolSpecification> tools,
+                                                 ToolChoice toolChoice,
+                                                 boolean echo,
+                                                 int maxAttempts)
     {
         Throwable error = null;
         int attempt = 0;
@@ -267,7 +265,7 @@ public class Coder {
             backoffSeconds = Math.min(backoffSeconds, 16);
 
             io.systemOutput(String.format("LLM issue on attempt %d of %d (will retry in %.1f seconds).",
-                                  attempt, maxAttempts, (double) backoffSeconds));
+                                          attempt, maxAttempts, (double) backoffSeconds));
 
             // Busywait with countdown
             long startTime = System.currentTimeMillis();
@@ -424,14 +422,16 @@ public class Coder {
                 Your previous response was not valid: %s
                 You MUST respond ONLY with a valid JSON object containing a 'tool_calls' array. Do not include any other text or explanation.
                 Include all the tool calls necessary to satisfy the request in a single array!
-                REMEMBER that you are to provide a JSON object containing a 'tool_calls' array, NOT top-level array:
+                REMEMBER that you are to provide a JSON object containing a 'tool_calls' array, NOT top-level array.
+                Here is the format, where $foo indicates that you will make appropriate substitutions for the given tool call
                 {
                   "tool_calls": [
                     {
-                      "name": "tool_name",
+                      "name": "$tool_name",
                       "arguments": {
-                        "arg1": "value1",
-                        "arg2": "value2"
+                        "$arg1": "$value1",
+                        "$arg2": "$value2",
+                        ...
                       }
                     }
                   ]
@@ -456,17 +456,11 @@ public class Coder {
         String jsonResponse = response.chatResponse.aiMessage().text();
         logger.debug("Raw JSON response from model: {}", jsonResponse);
         JsonNode root;
-        root = tryParseJson(mapper, jsonResponse);
-        if (root == null) {
-            // Try to extract JSON from noise
-            root = tryParseJson(mapper, jsonResponse.substring(jsonResponse.indexOf('{'), jsonResponse.lastIndexOf('}') + 1));
-        }
-        if (root == null) {
-            // Try to wrap JSON in an object
-            root = tryParseJson(mapper, "{" + jsonResponse + "}");
-        }
-        if (root == null) {
-            throw new IllegalArgumentException("Unable to parse response as JSON object");
+        try {
+            root = mapper.readTree(jsonResponse);
+        } catch (JsonProcessingException e) {
+            logger.debug("Invalid JSON", e);
+            throw new IllegalArgumentException("Invalid JSON: " + e.getMessage());
         }
 
         JsonNode toolCalls;
@@ -584,30 +578,19 @@ public class Coder {
         """.formatted(tools.size(), toolsDescription);
     }
 
-    private static @Nullable JsonNode tryParseJson(ObjectMapper mapper, String jsonResponse) {
-        JsonNode root;
-        try {
-            root = mapper.readTree(jsonResponse);
-        } catch (JsonProcessingException e) {
-            logger.debug("Error parsing raw JSON response", e);
-            root = null;
-        }
-        return root;
-    }
-
     private void writeRequestToHistory(List<ChatMessage> messages, List<ToolSpecification> tools) {
         String requestText = messages.stream()
                 .map(m -> "%s: %s\n".formatted(m.type(), Models.getText(m)))
                 .reduce((a, b) -> a + "\n" + b)
                 .orElse("");
-                
+
         if (tools != null && !tools.isEmpty()) {
             requestText += "\nTools:\n" + tools.stream()
-                .map(t -> "- %s: %s".formatted(t.name(), t.description()))
-                .reduce((a, b) -> a + "\n" + b)
-                .orElse("");
+                    .map(t -> "- %s: %s".formatted(t.name(), t.description()))
+                    .reduce((a, b) -> a + "\n" + b)
+                    .orElse("");
         }
-        
+
         writeToHistory("Request", requestText);
     }
 
