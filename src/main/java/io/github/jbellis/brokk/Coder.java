@@ -108,7 +108,11 @@ public class Coder {
             public void onPartialResponse(String token) {
                 ifNotCancelled.accept(() -> {
                     if (echo) {
-                        io.llmOutput(token);
+                        if (requiresEmulatedTools(model) && !request.parameters().toolSpecifications().isEmpty()) {
+                            io.llmOutput(".");
+                        } else {
+                            io.llmOutput(token);
+                        }
                     }
                 });
             }
