@@ -119,12 +119,11 @@ public class LLMTools {
     @Tool(value = """
     Replace the first occurrence of oldLines in the specified file with newLines (both are full lines).
     - If oldLines is empty, newLines is appended at the end of the file.
-    - If replacing sequential lines, make one call for all of them.
-    - Include enough oldLines that the match is unique!
-    - You can use this tool to add new lines by giving existing lines as an "anchor," then repeating
-      the anchor unchanged with new lines appended.
-    - If you want to move code within a file, use 2 calls: one to remove the old code, and another to add it
-      in the new location.
+    - If replacing sequential lines, make one call for all of them. Never make multiple calls to replaceLines when they can be combined to one!
+    - Include enough oldLines that the match is unique.
+    - You can use this tool to add new lines by giving existing lines as an "anchor," then repeating the anchor unchanged with new lines appended.
+    - If you want to move code within a file, use 2 calls: one to remove the old code, and another to add it in the new location.
+    - Never call replaceLines with newLines == oldLines, that is just a waste of time!
     """)
     public void replaceLines(@P("Full path + name of the file to modify") String filename, @P("Lines to replace") String oldLines, @P("Replacement lines (will be used as-is, so make sure indentation is appropriate)") String newLines) {
         throw new ToolExecutionException("Direct invocation of replaceLines(String,String,String) is not supported. Use parseToolRequest + applyRequest.");
