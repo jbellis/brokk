@@ -126,7 +126,12 @@ public class Coder {
                         io.llmOutput("\n");
                     }
                     atomicResponse.set(response);
-                    writeToHistory("Response", response.toString());
+                    if (response == null) {
+                        // I think this isn't supposed to happen, but it does
+                        logger.debug("Null response!");
+                    } else {
+                        writeToHistory("Response", response.toString());
+                    }
                     latch.countDown();
                 });
             }

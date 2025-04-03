@@ -357,23 +357,17 @@ public class LLM {
             return "";
         }
 
-        io.llmOutput("""
+        var msg = """
             %s
             ```
             %s
             ```
-            """.stripIndent().formatted(result.error(), result.output()));
+            """.stripIndent().formatted(result.error(), result.output());
+        io.llmOutput(msg);
         io.systemOutput("Build failed (details above)");
         buildErrors.add(result.error() + "\n\n" + result.output());
 
-        StringBuilder query = new StringBuilder("The build failed. Here is the history of build attempts:\n\n");
-        for (int i = 0; i < buildErrors.size(); i++) {
-            query.append("=== Attempt ").append(i + 1).append(" ===\n")
-                    .append(buildErrors.get(i))
-                    .append("\n\n");
-        }
-        query.append("Please fix these build errors.");
-        return query.toString();
+        return "The build failed:\n%s\n\nPlease fix these build errors.".formatted(msg);
     }
 
     /**
