@@ -272,7 +272,7 @@ public class LLMTools {
             return ValidatedToolRequest.error(req, e.getMessage(), "replaceLines: " + filename);
         }
         var firstLine = oldLines.split("\n", -1)[0];
-        return new ValidatedToolRequest(req, pf, null, null, new ValidatedToolRequest.RequestContents(oldLines, newLines, null, null), "replaceLines: " + filename + ", " + firstLine);
+        return new ValidatedToolRequest(req, pf, null, null, new ValidatedToolRequest.RequestContents(oldLines, newLines, null, null), "replaceLines: " + filename + ", " + firstLine + "...");
     }
 
     private ValidatedToolRequest parseReplaceFunction(ToolExecutionRequest req, Map<String, Object> argMap) {
