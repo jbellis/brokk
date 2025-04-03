@@ -60,7 +60,6 @@ public class LLM {
         // Provide an initial note to the user (or logs) that the session started
         io.systemOutput("Request sent to LLM. Processing...");
 
-        // apply edits with this
         var tools = new LLMTools(coder.contextManager);
         outer:
         while (true) {
@@ -75,7 +74,9 @@ public class LLM {
             var allMessages = DefaultPrompts.instance.collectMessages(contextManager, sessionMessages, reminder);
             allMessages.add(nextRequest);
 
+            //
             // Actually send the request to the LLM
+            //
             var toolSpecs = ToolSpecifications.toolSpecificationsFrom(tools);
             var streamingResult = coder.sendMessage(model, allMessages, toolSpecs, ToolChoice.AUTO, true);
             if (streamingResult.cancelled()) {
@@ -111,7 +112,9 @@ public class LLM {
                 break;
             }
 
-            // process tool calls
+            //
+            // Process tool calls
+            //
             var validatedRequests = new ArrayList<LLMTools.ValidatedToolRequest>();
             for (var req : toolRequests) {
                 var parsed = tools.parseToolRequest(req);
@@ -146,7 +149,7 @@ public class LLM {
                 validatedRequests.add(parsed);
             }
 
-            // apply tools
+            // Execute tools
             io.llmOutput("\n");
             int failures = 0;
             var resultMessages = new ArrayList<ToolExecutionResultMessage>();
@@ -160,7 +163,7 @@ public class LLM {
                 }
                 resultMessages.add(result);
                 // TODO make this fancier! like, an actual graphical representation of the diff
-                output.append("\n%s(%s): %s".formatted(result.toolName(), validated.file().getFileName(), result.text()));
+                output.append("\n%s: %s".formatted(result.toolName(), result.text()));
             }
             io.llmOutput("\n\n```" + output + "```\n\n");
             if (!coder.requiresEmulatedTools(model)) {
@@ -176,7 +179,12 @@ public class LLM {
                     io.systemOutput("Repeated tool request failures. Stopping session.");
                     break;
                 }
-                // We'll reflect in the next loop iteration
+            }
+            if (failures > 0) {
+                if (failures < validatedRequests.size()) {
+                    // If at least one succeeded, reset parseErrorAttempts -- we're making progress!
+                    parseErrorAttempts = 0;
+                }
                 logger.debug("Tool requests had errors. Asking LLM to correct them...");
                 io.systemOutput("Tool requests had errors. Asking LLM to correct them...");
                 String msg;
@@ -196,14 +204,11 @@ public class LLM {
                 }
                 nextRequest = new UserMessage(msg);
                 continue;
-            } else {
-                // If at least one succeeded, reset parseErrorAttempts
-                parseErrorAttempts = 0;
             }
 
-            // -------------------------------------------
-            // C) Attempt to build and see if we are done
-            // -------------------------------------------
+            //
+            // Attempt to build and see if we are done
+            //
             String buildReflection = getBuildReflection(contextManager, io, buildErrors);
             if (buildReflection.isEmpty()) {
                 // Build succeeded!

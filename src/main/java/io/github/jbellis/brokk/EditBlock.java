@@ -4,7 +4,6 @@ import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -213,7 +212,7 @@ public class EditBlock {
             }
             matches.add(i);
             if (matches.size() > 1) {
-                throw new AmbiguousMatchException("Multiple matches found for the oldLines");
+                throw new AmbiguousMatchException("Multiple exact matches found for the oldLines");
             }
         }
 
@@ -250,6 +249,7 @@ public class EditBlock {
         var truncatedReplace = removeLeadingTrailingEmptyLines(replaceLines);
 
         if (truncatedTarget.length == 0) {
+            // FIXME perform append, we should have a test for this???
             return null;
         }
 
@@ -260,7 +260,7 @@ public class EditBlock {
             if (matchesIgnoringWhitespace(originalLines, start, truncatedTarget)) {
                 matches.add(start);
                 if (matches.size() > 1) {
-                    throw new AmbiguousMatchException("Multiple matches found (ignoring whitespace).");
+                    throw new AmbiguousMatchException("No exact matches found, and multiple matches found ignoring whitespace");
                 }
             }
         }
