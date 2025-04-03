@@ -8,6 +8,7 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.exception.HttpException;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ChatRequestParameters;
@@ -127,8 +128,9 @@ public class Coder {
                     }
                     atomicResponse.set(response);
                     if (response == null) {
-                        // I think this isn't supposed to happen, but it does
-                        logger.debug("Null response!");
+                        // I think this isn't supposed to happen, but seeing it when litellm throws back a 400.
+                        // Fake an exception so the caller can treat it like other errors
+                        errorRef.set(new HttpException(400, "BadRequestError"));
                     } else {
                         writeToHistory("Response", response.toString());
                     }
