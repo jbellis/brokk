@@ -51,4 +51,8 @@ class DisabledAnalyzer extends IAnalyzer {
 
   override def getCallgraphFrom(methodName: String, depth: Int): java.util.Map[String, java.util.List[CallSite]] =
     Collections.emptyMap()
+
+  override def getSymbols(sources: java.util.Set[CodeUnit]): java.util.Set[String] = {
+    Collections.emptySet()
+  }
 }

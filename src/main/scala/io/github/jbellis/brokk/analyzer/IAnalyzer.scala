@@ -69,6 +69,16 @@ trait IAnalyzer {
   def getFunctionLocation(fqMethodName: String, paramNames: util.List[String]): FunctionLocation = {
     throw new UnsupportedOperationException()
   }
+
+  /**
+   * Gets a set of relevant symbol names (classes, methods, fields) defined within the given source CodeUnits.
+   *
+   * @param sources A set of CodeUnit objects representing the source files or classes to analyze.
+   * @return A set of fully-qualified symbol names found within the sources.
+   */
+  def getSymbols(sources: java.util.Set[CodeUnit]): java.util.Set[String] = {
+    throw new UnsupportedOperationException()
+  }
 }
 
 /**

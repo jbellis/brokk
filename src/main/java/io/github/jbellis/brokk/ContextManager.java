@@ -1399,7 +1399,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
     /**
      * push context changes with a function that modifies the current context
      */
-    private void pushContext(Function<Context, Context> contextGenerator)
+    public void pushContext(Function<Context, Context> contextGenerator)
     {
         Context newContext = contextHistory.pushContext(contextGenerator);
         if (newContext != null) {

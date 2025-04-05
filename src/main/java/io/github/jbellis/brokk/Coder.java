@@ -19,6 +19,7 @@ import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
+import io.github.jbellis.brokk.analyzer.CodeUnit;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -30,6 +31,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -69,10 +71,10 @@ public class Coder {
      * Transcribes an audio file using the configured STT model (OpenAI Whisper if available).
      * Returns the transcribed text or an error message on failure.
      */
-    public String transcribeAudio(Path audioFile) {
+    public String transcribeAudio(Path audioFile, Set<String> symbols) {
         var sttModel = Models.sttModel();
         try {
-            return sttModel.transcribe(audioFile);
+            return sttModel.transcribe(audioFile, symbols);
         } catch (Exception e) {
             logger.error("Failed to transcribe audio: {}", e.getMessage(), e);
             io.toolError("Error transcribing audio: " + e.getMessage());

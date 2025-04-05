@@ -355,7 +355,8 @@ public class LLM {
         }
 
         // Save to context history - pendingHistory already contains both the instruction and the response
-        cm.addToHistory(pendingHistory, originalContents, "Quick Edit: " + file.getFileName(), responseText);
+        var parsed = new Context.ParsedOutput(responseText, new ContextFragment.StringFragment(responseText, "ai Response"));
+        cm.pushContext(ctx -> ctx.addHistory(messages, originalContents, parsed, cm.submitSummarizeTaskForConversation("Quick Edit: " + instructions)));
         return newStripped;
     }
 

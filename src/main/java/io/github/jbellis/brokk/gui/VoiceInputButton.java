@@ -4,6 +4,7 @@ import io.github.jbellis.brokk.ContextManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Set;
 import java.util.function.Consumer;
 
 import javax.sound.sampled.*;
@@ -12,6 +13,7 @@ import java.awt.*;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.stream.Collectors;
 
 /**
  * A button that captures voice input from the microphone and transcribes it to a text area.
@@ -174,9 +176,28 @@ public class VoiceInputButton extends JButton {
                     var tempFile = Files.createTempFile("brokk-stt-", ".wav");
                     AudioSystem.write(ais, AudioFileFormat.Type.WAVE, tempFile.toFile());
 
-                    // call coder
-                    var transcript = contextManager.getCoder().transcribeAudio(tempFile);
-                    logger.debug("Successfully transcribed audio: {}", transcript);
+                    // Attempt to get symbols from editable files in context
+                    var sources = contextManager.selectedContext().allFragments()
+                            .flatMap(f -> f.sources(contextManager.getProject()).stream())
+                            .collect(Collectors.toSet());
+
+                    // Get full symbols first
+                    var fullSymbols = contextManager.getAnalyzer().getSymbols(sources);
+
+                    // Extract short names from sources and returned symbols
+                    Set<String> shortSymbols = sources.stream()
+                            .map(io.github.jbellis.brokk.analyzer.CodeUnit::shortName)
+                            .collect(Collectors.toSet());
+                    fullSymbols.stream()
+                            .map(s -> {
+                                var parts = s.split("\\.");
+                                return parts.length > 0 ? parts[parts.length - 1] : null;
+                            })
+                            .filter(java.util.Objects::nonNull)
+                            .forEach(shortSymbols::add);
+
+                    var transcript = contextManager.getCoder().transcribeAudio(tempFile, shortSymbols);
+                    logger.debug("Successfully transcribed audio with symbols: {}", transcript);
 
                     // put it in the target text area
                     SwingUtilities.invokeLater(() -> {

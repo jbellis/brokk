@@ -888,6 +888,40 @@ abstract class AbstractAnalyzer protected (sourcePath: Path, private[brokk] val 
   }
 
   override def close(): Unit = cpg.close()
+
+  /**
+   * Gets a set of relevant symbol names (classes, methods, fields) defined within the given source CodeUnits.
+   */
+  override def getSymbols(sources: java.util.Set[CodeUnit]): java.util.Set[String] = {
+    import scala.jdk.CollectionConverters.*
+
+    val sourceUnits = sources.asScala
+    val sourceFiles = sourceUnits.map(_.source).toSet
+    val symbols = mutable.Set[String]()
+
+    // Add short names of the source units themselves
+    sourceUnits.foreach(cu => symbols += cu.shortName())
+
+    // Find TypeDecls within the specified source files
+    cpg.typeDecl
+      .filter(td => toFile(td).exists(sourceFiles.contains))
+      .foreach { td =>
+        symbols += td.fullName.split('.').last // Add class short name
+
+        // Add method short names (resolved)
+        td.method
+          .nameNot("<init>", "<clinit>", "<lambda>.*") // Exclude constructors, static initializers, lambdas
+          .foreach { m =>
+            val resolvedName = resolveMethodName(chopColon(m.fullName))
+            symbols += resolvedName.split('.').last // Add method short name
+          }
+
+        // Add field short names
+        td.member.foreach(f => symbols += f.name) // Add just the field name
+      }
+
+    symbols.asJava
+  }
 }
 
 /**

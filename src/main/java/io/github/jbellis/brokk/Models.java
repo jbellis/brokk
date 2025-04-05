@@ -259,7 +259,11 @@ public final class Models {
      * Simple interface for speech-to-text operations.
      */
     public interface SpeechToTextModel {
-        String transcribe(Path audioFile) throws IOException;
+        /**
+         * Transcribes audio, providing additional context symbols.
+         * Default implementation calls the basic transcribe method, ignoring symbols.
+         */
+        String transcribe(Path audioFile, java.util.Set<String> symbols) throws IOException;
     }
 
     /**
@@ -268,8 +272,8 @@ public final class Models {
      */
     public static class UnavailableSTT implements SpeechToTextModel {
         @Override
-        public String transcribe(Path audioFile) {
-            return "Speech-to-text is unavailable (no OpenAI key).";
+        public String transcribe(Path audioFile, java.util.Set<String> symbols) {
+            return "Speech-to-text is unavailable (unable to connect to Brokk).";
         }
     }
 
@@ -301,7 +305,7 @@ public final class Models {
         }
 
         @Override
-        public String transcribe(Path audioFile) throws IOException {
+        public String transcribe(Path audioFile, java.util.Set<String> symbols) throws IOException {
             logger.info("Beginning transcription for file: {} using model {}", audioFile, modelLocation);
 
             byte[] audioBytes = Files.readAllBytes(audioFile);
@@ -316,14 +320,14 @@ public final class Models {
                     {
                       "role": "user",
                       "content": [
-                        {"type": "text", "text": "Transcribe this audio."},
+                        {"type": "text", "text": "%s"},
                         {"type": "input_audio", "input_audio": {"data": "%s", "format": "%s"}}
                       ]
                     }
                   ],
                   "stream": false
                 }
-                """.formatted(modelLocation, encodedString, audioFormat).stripIndent();
+                """.formatted(modelLocation, buildPromptText(symbols), encodedString, audioFormat).stripIndent();
 
             RequestBody body = RequestBody.create(jsonBody, JSON);
             Request request = new Request.Builder()
@@ -367,6 +371,14 @@ public final class Models {
                  logger.error("IOException during LiteLLM STT request: {}", e.getMessage(), e);
                  throw e; // Re-throw IOExceptions
             }
+        }
+
+        private static String buildPromptText(java.util.Set<String> symbols) {
+            if (symbols == null || symbols.isEmpty()) {
+                return "Transcribe this audio.";
+            }
+            var symbolListString = String.join(", ", symbols);
+            return String.format("Transcribe this audio. Pay attention to these technical terms or symbols: %s. You don't have to quote them specially but if you do, use backticks markdown-style.", symbolListString);
         }
     }
 }

@@ -2,12 +2,17 @@
 package io.github.jbellis.brokk.difftool.diff;
 
 
+import com.github.difflib.DiffUtils;
+import com.github.difflib.patch.AbstractDelta;
+import com.github.difflib.patch.Patch;
 import io.github.jbellis.brokk.difftool.doc.AbstractBufferDocument;
 
 import java.nio.CharBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class JMDiff {
     public static int BUFFER_SIZE = 100000;
@@ -16,23 +21,9 @@ public class JMDiff {
     //   store a 'line' without it's ignored characters.
     static final private CharBuffer inputLine = CharBuffer.allocate(BUFFER_SIZE);
     static final private CharBuffer outputLine = CharBuffer.allocate(BUFFER_SIZE);
-    // Instance variables:
-    private final List<JMDiffAlgorithmIF> algorithms;
 
     public JMDiff() {
-        MyersDiff myersDiff;
-
-        myersDiff = new MyersDiff();
-        myersDiff.checkMaxTime(true);
-
-        // MyersDiff is the fastest but can be very slow when 2 files
-        // are very different.
-        algorithms = new ArrayList<>();
-        //algorithms.add(myersDiff);
-
-        // EclipseDiff looks like Myersdiff but is slower.
-        // It performs much better if the files are totally different
-        algorithms.add(new EclipseDiff());
+        // Constructor remains, but no longer initializes algorithms
     }
 
     public JMRevision diff(List<String> a, List<String> b, Ignore ignore)
@@ -43,96 +34,155 @@ public class JMDiff {
         if (b == null) {
             b = Collections.emptyList();
         }
+        // Note: Ignore object is not used in this path currently, but kept for API compatibility
         return diff(a.toArray(), b.toArray(), ignore);
     }
 
     public JMRevision diff(Object[] a, Object[] b, Ignore ignore) {
-        JMRevision revision;
+        Object[] orgFiltered;
+        Object[] revFiltered;
 
-        boolean filtered;
-        Object[] org;
-        Object[] rev;
+        Object[] orgRaw = a;
+        Object[] revRaw = b;
 
-        org = a;
-        rev = b;
-
-        if (org == null) {
-            org = new Object[]{};
+        if (orgRaw == null) {
+            orgRaw = new Object[]{};
         }
-        if (rev == null) {
-            rev = new Object[]{};
+        if (revRaw == null) {
+            revRaw = new Object[]{};
         }
 
-        filtered = org instanceof AbstractBufferDocument.Line[]
-                && rev instanceof AbstractBufferDocument.Line[];
-
+        boolean filtered = orgRaw instanceof AbstractBufferDocument.Line[]
+                && revRaw instanceof AbstractBufferDocument.Line[];
 
         if (filtered) {
-            org = filter(ignore, org);
-            rev = filter(ignore, rev);
+            orgFiltered = filter(ignore, orgRaw);
+            revFiltered = filter(ignore, revRaw);
+        } else {
+            // If not Line[], assume they are already filtered or don't need filtering
+            // This might need adjustment depending on how non-Line[] inputs are handled.
+            // For now, treat them as pre-filtered for the purpose of diffing.
+            orgFiltered = orgRaw;
+            revFiltered = revRaw;
         }
 
-        for (JMDiffAlgorithmIF algorithm : algorithms) {
-            try {
-                revision = algorithm.diff(org, rev);
-                revision.setIgnore(ignore);
-                revision.update(a, b);
-                if (filtered) {
-                    adjustRevision(revision, a, (JMString[]) org, b, (JMString[]) rev);
-                }
+        // Convert filtered arrays to List<String> for java-diff-utils
+        List<String> listA = Stream.of(orgFiltered)
+                                   .map(Object::toString)
+                                   .collect(Collectors.toList());
+        List<String> listB = Stream.of(revFiltered)
+                                   .map(Object::toString)
+                                   .collect(Collectors.toList());
 
-                return revision;
-            } catch (Exception ex) {
-                ex.printStackTrace();
-            }
+        // Perform diff using java-diff-utils
+        Patch<String> patch = DiffUtils.diff(listA, listB);
+
+        // Convert the result back to JMRevision
+        JMRevision revision = convertPatchToJMRevision(patch, orgRaw, revRaw);
+        revision.setIgnore(ignore);
+
+        // Adjust line numbers if filtering was applied
+        if (filtered) {
+            adjustRevision(revision, orgRaw, (JMString[]) orgFiltered, revRaw, (JMString[]) revFiltered);
         }
 
-        return null;
+        return revision;
     }
 
-    private void adjustRevision(JMRevision revision, Object[] orgArray,
-                                JMString[] orgArrayFiltered, Object[] revArray,
-                                JMString[] revArrayFiltered) {
+    /**
+     * Converts a Patch object from java-diff-utils to the internal JMRevision format.
+     *
+     * @param patch         The patch generated by java-diff-utils.
+     * @param originalRaw   The original raw (unfiltered) array of objects.
+     * @param revisedRaw    The revised raw (unfiltered) array of objects.
+     * @return A JMRevision representing the diff.
+     */
+    private JMRevision convertPatchToJMRevision(Patch<String> patch, Object[] originalRaw, Object[] revisedRaw) {
+        JMRevision jmRevision = new JMRevision(originalRaw, revisedRaw);
+
+        for (AbstractDelta<String> delta : patch.getDeltas()) {
+            var sourceChunk = delta.getSource();
+            var targetChunk = delta.getTarget();
+
+            // Create JMChunk instances using position and size from java-diff-utils Chunk
+            JMChunk originalJMChunk = new JMChunk(sourceChunk.getPosition(), sourceChunk.size());
+            JMChunk revisedJMChunk = new JMChunk(targetChunk.getPosition(), targetChunk.size());
+
+            // Create and add JMDelta
+            JMDelta jmDelta = new JMDelta(originalJMChunk, revisedJMChunk);
+            jmRevision.add(jmDelta);
+        }
+
+        return jmRevision;
+    }
+
+
+    private void adjustRevision(JMRevision revision, Object[] orgArray, JMString[] orgArrayFiltered, Object[] revArray, JMString[] revArrayFiltered) {
         JMChunk chunk;
         int anchor;
         int size;
         int index;
+        int adjustedAnchor;
+        int adjustedSize;
 
         for (JMDelta delta : revision.getDeltas()) {
+            // Adjust Original Chunk
             chunk = delta.getOriginal();
-            index = chunk.getAnchor();
+            index = chunk.getAnchor(); // Index in the filtered array
             if (index < orgArrayFiltered.length) {
-                anchor = orgArrayFiltered[index].lineNumber;
+                adjustedAnchor = orgArrayFiltered[index].lineNumber; // Map back to original line number
             } else {
-                anchor = orgArray.length;
+                // If the anchor is beyond the filtered array, map it to the end of the original array
+                adjustedAnchor = orgArray.length;
             }
 
-            size = chunk.getSize();
+            size = chunk.getSize(); // Size in the filtered array
             if (size > 0) {
-                index += chunk.getSize() - 1;
-                if (index < orgArrayFiltered.length) {
-                    size = orgArrayFiltered[index].lineNumber - anchor + 1;
+                int endIndex = index + size - 1;
+                if (endIndex < orgArrayFiltered.length) {
+                    // Calculate size based on original line numbers
+                    adjustedSize = orgArrayFiltered[endIndex].lineNumber - adjustedAnchor + 1;
+                } else if (index < orgArrayFiltered.length) {
+                    // If end is out but start is in, size goes to the end of the original array
+                    adjustedSize = orgArray.length - adjustedAnchor;
+                } else {
+                     // If start is also out, size is 0 in the original context
+                    adjustedSize = 0;
                 }
+            } else {
+                adjustedSize = 0;
             }
-            chunk.setAnchor(anchor);
-            chunk.setSize(size);
+            chunk.setAnchor(adjustedAnchor);
+            chunk.setSize(adjustedSize);
 
+            // Adjust Revised Chunk
             chunk = delta.getRevised();
-            index = chunk.getAnchor();
+            index = chunk.getAnchor(); // Index in the filtered array
             if (index < revArrayFiltered.length) {
-                anchor = revArrayFiltered[index].lineNumber;
+                adjustedAnchor = revArrayFiltered[index].lineNumber; // Map back to original line number
             } else {
-                anchor = revArray.length;
+                 // If the anchor is beyond the filtered array, map it to the end of the revised array
+                adjustedAnchor = revArray.length;
             }
-            size = chunk.getSize();
-            if (size > 0) {
-                index += chunk.getSize() - 1;
-                if (index < revArrayFiltered.length) {
-                    size = revArrayFiltered[index].lineNumber - anchor + 1;
-                }
-            }
-            chunk.setAnchor(anchor);
-            chunk.setSize(size);
+
+            size = chunk.getSize(); // Size in the filtered array
+             if (size > 0) {
+                int endIndex = index + size - 1;
+                if (endIndex < revArrayFiltered.length) {
+                    // Calculate size based on original line numbers
+                    adjustedSize = revArrayFiltered[endIndex].lineNumber - adjustedAnchor + 1;
+                 } else if (index < revArrayFiltered.length) {
+                    // If end is out but start is in, size goes to the end of the revised array
+                     adjustedSize = revArray.length - adjustedAnchor;
+                 } else {
+                    // If start is also out, size is 0 in the revised context
+                     adjustedSize = 0;
+                 }
+            } else {
+                 adjustedSize = 0;
+             }
+            chunk.setAnchor(adjustedAnchor);
+            chunk.setSize(adjustedSize);
         }
     }
 
@@ -150,9 +200,16 @@ public class JMDiff {
                 inputLine.clear();
                 inputLine.put(o.toString());
                 removeIgnoredChars(inputLine, ignore, outputLine);
-                if (outputLine.remaining() == 0) {
-                    continue;
+                // Skip entirely blank lines if ignoreBlankLines is true AFTER filtering whitespace/EOL
+                if (outputLine.remaining() == 0 && ignore.ignoreBlankLines) {
+                   continue;
                 }
+                 // Represent originally blank lines (that weren't ignored) with a newline if ignoreBlankLines is false
+                if (outputLine.remaining() == 0 && !ignore.ignoreBlankLines) {
+                     outputLine.clear();
+                     outputLine.put('\n');
+                     outputLine.flip();
+                 }
 
                 jms = new JMString();
                 jms.s = outputLine.toString();
@@ -175,12 +232,16 @@ public class JMDiff {
 
         @Override
         public boolean equals(Object o) {
-            return s.equals(((JMString) o).s);
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            JMString jmString = (JMString) o;
+            return s.equals(jmString.s);
         }
 
         @Override
         public String toString() {
-            return "[" + lineNumber + "] " + s;
+           // Don't include line number here, it interferes with DiffUtils equality
+           return s;
         }
     }
 
@@ -196,96 +257,124 @@ public class JMDiff {
      *          ignored. It is a parameter that can be reused (which is important for
      *          performance)
      */
-    public static void removeIgnoredChars(CharBuffer inputLine, Ignore ignore,
-                                          CharBuffer outputLine) {
-        boolean whitespaceAtBegin;
-        boolean blankLine;
-        int lineEndingEndIndex;
-        int whitespaceEndIndex;
+    public static void removeIgnoredChars(CharBuffer inputLine, Ignore ignore, CharBuffer outputLine) {
         int length;
-        char c;
-        boolean whiteSpaceInBetweenIgnored;
+        int contentEndIndex = -1; // Index after the last non-EOL char
+        int contentStartIndex = -1; // Index of the first non-whitespace char
+        boolean containsNonWhitespace = false;
 
         inputLine.flip();
         outputLine.clear();
-
         length = inputLine.remaining();
-        lineEndingEndIndex = length;
-        blankLine = true;
-        whiteSpaceInBetweenIgnored = false;
 
-        for (int index = lineEndingEndIndex - 1; index >= 0; index--) {
-            if (!isEOL(inputLine.charAt(index))) {
+        // Find the effective content range, ignoring trailing EOLs
+        for (int i = length - 1; i >= 0; i--) {
+            if (!isEOL(inputLine.charAt(i))) {
+                contentEndIndex = i;
                 break;
             }
-
-            lineEndingEndIndex--;
         }
 
-        whitespaceEndIndex = lineEndingEndIndex;
-        for (int index = whitespaceEndIndex - 1; index >= 0; index--) {
-            if (!Character.isWhitespace(inputLine.charAt(index))) {
+        // If the line is all EOLs or empty
+        if (contentEndIndex == -1) {
+            if (!ignore.ignoreEOL && length > 0) {
+                // Keep the first EOL if not ignored
+                outputLine.put(inputLine.get(0));
+            } // else: output remains empty if EOLs are ignored or line is empty
+            outputLine.flip();
+            return;
+        }
+
+        // Find the start of content, ignoring leading whitespace
+        for (int i = 0; i <= contentEndIndex; i++) {
+            if (!Character.isWhitespace(inputLine.charAt(i))) {
+                contentStartIndex = i;
+                containsNonWhitespace = true;
                 break;
             }
-
-            whitespaceEndIndex--;
         }
 
-        whitespaceAtBegin = true;
-        for (int i = 0; i < length; i++) {
-            c = inputLine.get(i);
+        // If the line consists only of whitespace (and potentially ignored EOLs)
+        if (!containsNonWhitespace) {
+             if (!ignore.ignoreWhitespaceAtBegin && !ignore.ignoreWhitespaceAtEnd && !ignore.ignoreWhitespaceInBetween) {
+                 // Keep the whitespace if no whitespace ignore flags are set
+                 for (int i = 0; i <= contentEndIndex; i++) {
+                     outputLine.put(inputLine.get(i));
+                 }
+             } // else: output remains empty if any whitespace ignore is active
+             outputLine.flip();
+             return;
+        }
 
-            if (i < whitespaceEndIndex) {
-                if (Character.isWhitespace(c)) {
-                    if (whitespaceAtBegin) {
-                        if (ignore.ignoreWhitespaceAtBegin) {
-                            continue;
-                        }
-                    } else {
-                        if (ignore.ignoreWhitespaceInBetween) {
-                            whiteSpaceInBetweenIgnored = true;
-                            continue;
-                        }
-                    }
+        boolean lastWrittenWasSpace = false;
+        for (int i = 0; i <= contentEndIndex; i++) {
+            char c = inputLine.get(i);
+            boolean isWhitespace = Character.isWhitespace(c);
+
+            // Leading whitespace check
+            if (i < contentStartIndex) {
+                if (ignore.ignoreWhitespaceAtBegin) {
+                    continue;
                 }
+                // else: fall through to handle as normal whitespace
+            }
 
-                whitespaceAtBegin = false;
-                blankLine = false;
-
-                // The character won't be ignored!
-            } else if (i < lineEndingEndIndex) {
+            // Trailing whitespace check (before EOLs, which were already handled)
+            boolean isTrailingWhitespace = true;
+            for (int j = i; j <= contentEndIndex; j++) {
+                if (!Character.isWhitespace(inputLine.get(j))) {
+                    isTrailingWhitespace = false;
+                    break;
+                }
+            }
+            if (isTrailingWhitespace && isWhitespace) {
                 if (ignore.ignoreWhitespaceAtEnd) {
                     continue;
                 }
-                blankLine = false;
+                // else: fall through to handle as normal whitespace
+            }
 
-                // The character won't be ignored!
-            } else {
-                if (ignore.ignoreEOL) {
-                    continue;
+            // In-between whitespace check
+            if (isWhitespace) {
+                if (ignore.ignoreWhitespaceInBetween) {
+                    if (!lastWrittenWasSpace) { // Write only one space for multiple ignored spaces
+                       // We don't actually write the space here, we let the next non-space character handle it if needed
+                       lastWrittenWasSpace = true; // Mark that we encountered whitespace
+                    }
+                     continue; // Skip writing this whitespace character
+                } else {
+                    // Keep whitespace if not ignoring in-between
+                    outputLine.put(c);
+                    lastWrittenWasSpace = true; // Track that a space was written
                 }
-                // The character won't be ignored!
+            } else {
+                 // Non-whitespace character
+                 if (lastWrittenWasSpace && ignore.ignoreWhitespaceInBetween) {
+                    // If we skipped spaces due to ignoreWhitespaceInBetween, add a single space delimiter now
+                     // outputLine.put(' '); // Decided against adding synthetic space
+                 }
+                char charToWrite = ignore.ignoreCase ? Character.toLowerCase(c) : c;
+                outputLine.put(charToWrite);
+                lastWrittenWasSpace = false;
             }
-
-            if (ignore.ignoreCase) {
-                c = Character.toLowerCase(c);
-            }
-
-            if (whiteSpaceInBetweenIgnored) {
-                //outputLine.put(' ');
-                whiteSpaceInBetweenIgnored = false;
-            }
-            outputLine.put(c);
         }
 
-        if (outputLine.position() == 0 && !ignore.ignoreBlankLines) {
-            outputLine.put('\n');
-        }
-
-        if (blankLine && ignore.ignoreBlankLines) {
-            outputLine.clear();
+        // Append EOL if not ignored (only if original line had one)
+        if (!ignore.ignoreEOL && length > contentEndIndex + 1) {
+            // Add the first EOL char encountered after content
+             for (int i = contentEndIndex + 1; i < length; i++) {
+                 if (isEOL(inputLine.charAt(i))) {
+                     outputLine.put(inputLine.get(i));
+                     // Handle CRLF specifically if needed, assuming we only keep one EOL char type
+                     if (inputLine.get(i) == '\r' && i + 1 < length && inputLine.get(i + 1) == '\n') {
+                          // outputLine.put('\n'); // Optional: Normalize to LF or keep original pair
+                     }
+                     break; // Only add one EOL marker
+                 }
+             }
         }
 
         outputLine.flip();
     }
+
 }
