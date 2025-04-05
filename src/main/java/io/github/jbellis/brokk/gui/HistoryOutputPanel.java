@@ -494,7 +494,25 @@ public class HistoryOutputPanel extends JPanel {
      */
     public void updateTheme(boolean isDark) {
         llmStreamArea.updateTheme(isDark);
-        // Potentially update systemArea theme if needed
+        llmStreamArea.updateTheme(isDark);
+    }
+
+    /**
+     * Shows the loading spinner with a message in the Markdown area.
+     */
+    public void showSpinner(String message) {
+        if (llmStreamArea != null) {
+            llmStreamArea.showSpinner(message);
+        }
+    }
+
+    /**
+     * Hides the loading spinner in the Markdown area.
+     */
+    public void hideSpinner() {
+        if (llmStreamArea != null) {
+            llmStreamArea.hideSpinner();
+        }
     }
 
     /**
