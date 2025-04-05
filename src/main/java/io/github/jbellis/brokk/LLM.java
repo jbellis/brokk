@@ -81,6 +81,7 @@ public class LLM {
             // Actually send the request to the LLM
             //
             var toolSpecs = tools.getToolSpecifications(model);
+            io.showOutputSpinner("Thinking ...");
             var streamingResult = coder.sendMessage(model, allMessages, toolSpecs, ToolChoice.AUTO, true);
             if (streamingResult.cancelled()) {
                 io.hideOutputSpinner();
