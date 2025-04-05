@@ -113,8 +113,8 @@ class MarkdownOutputPanel extends JPanel implements Scrollable
         }
 
         // Update spinner background if visible
-        if (spinnerPanel != null && spinnerVisible) {
-            spinnerPanel.setBackground(textBackgroundColor);
+        if (spinnerPanel != null) {
+            spinnerPanel.updateBackgroundColor(textBackgroundColor);
         }
 
         revalidate();
@@ -423,11 +423,8 @@ class MarkdownOutputPanel extends JPanel implements Scrollable
 
     // --- Spinner Logic ---
 
-    // A flag to track if we are currently showing a spinner
-    private boolean spinnerVisible = false;
-
     // We keep a reference to the spinner panel itself, so we can remove it later
-    private JPanel spinnerPanel = null;
+    private SpinnerIndicatorPanel spinnerPanel = null;
 
     /**
      * Shows a small spinner (or message) at the bottom of the panel,
@@ -438,16 +435,18 @@ class MarkdownOutputPanel extends JPanel implements Scrollable
      */
     public void showSpinner(String message)
     {
-        if (spinnerVisible) {
-            return; // already showing
+        if (spinnerPanel != null) {
+            // Already showing, update the message and return
+            spinnerPanel.setMessage(message);
+            return;
         }
-        spinnerPanel = buildSpinnerPanel(message);
+        // Create a new spinner instance each time
+        spinnerPanel = new SpinnerIndicatorPanel(message, isDarkTheme, textBackgroundColor);
 
         // Add to the end of this panel. Since we have a BoxLayout (Y_AXIS),
         // it shows up below the existing text or code blocks.
         this.add(spinnerPanel);
 
-        spinnerVisible = true;
         this.revalidate();
         this.repaint();
     }
@@ -457,47 +456,14 @@ class MarkdownOutputPanel extends JPanel implements Scrollable
      */
     public void hideSpinner()
     {
-        if (!spinnerVisible) {
+        if (spinnerPanel == null) {
             return; // not showing
         }
-        if (spinnerPanel != null) {
-            this.remove(spinnerPanel);
-        }
-        spinnerVisible = false;
+        this.remove(spinnerPanel);
         spinnerPanel = null;
 
         this.revalidate();
         this.repaint();
-    }
-
-    /**
-     * Creates a panel with an optional spinner icon and the given message.
-     */
-    private JPanel buildSpinnerPanel(String message)
-    {
-        var panel = new JPanel();
-        panel.setLayout(new FlowLayout(FlowLayout.LEFT, 10, 5));
-        panel.setAlignmentX(LEFT_ALIGNMENT);
-
-        // TODO: Load a real spinner icon based on theme
-        // var spinnerIcon = new ImageIcon(getClass().getResource(isDarkTheme ? "/icons/spinner-dark.gif" : "/icons/spinner.gif"));
-        var spinnerIcon = new ImageIcon(getClass().getResource("/icons/spinner.gif"));
-        var spinnerLabel = new JLabel(spinnerIcon);
-
-        // var spinnerLabel = new JLabel("⏳"); // Fallback text-based spinner
-        spinnerLabel.setFont(spinnerLabel.getFont().deriveFont(Font.BOLD));
-
-        var textLabel = new JLabel((message != null && !message.isBlank()) ? message : "Please wait...");
-
-        panel.add(spinnerLabel);
-        panel.add(textLabel);
-
-        // Set background to match the main panel's text area
-        if (textBackgroundColor != null) {
-            panel.setBackground(textBackgroundColor);
-        }
-
-        return panel;
     }
 
     // --- Scrollable interface methods ---

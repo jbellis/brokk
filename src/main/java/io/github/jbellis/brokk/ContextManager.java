@@ -263,7 +263,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
         return userActionExecutor.submit(() -> {
             pushContext(ctx -> Context.createInProgressContext(this, ctx));
             io.historyOutputPanel.setLlmOutput("# %s\n%s\n\n# %s\n".formatted(action, input, action.equals("Run") ? "Output" : "Response"));
-            io.showSpinner("Thinking ...");
+            io.showOutputSpinner("Thinking ...");
             io.disableHistoryPanel();
 
             try {

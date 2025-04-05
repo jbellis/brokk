@@ -7,7 +7,6 @@ import io.github.jbellis.brokk.ContextManager;
 import io.github.jbellis.brokk.IConsoleIO;
 import io.github.jbellis.brokk.Project;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
-import io.github.jbellis.brokk.difftool.ui.JMHighlightPainter;
 import io.github.jbellis.brokk.git.GitRepo;
 import io.github.jbellis.brokk.gui.dialogs.PreviewPanel;
 import org.apache.logging.log4j.LogManager;
@@ -469,13 +468,13 @@ public class Chrome implements AutoCloseable, IConsoleIO {
 
     @Override
     public void actionComplete() {
-        hideSpinner(); // Ensure spinner is hidden on completion
+        hideOutputSpinner(); // Ensure spinner is hidden on completion
         SwingUtilities.invokeLater(() -> instructionsPanel.clearCommandResultText());
     }
 
     @Override
     public void toolErrorRaw(String msg) {
-        hideSpinner(); // Ensure spinner is hidden on error
+        hideOutputSpinner(); // Ensure spinner is hidden on error
         systemOutput(msg);
     }
 
@@ -483,7 +482,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
     public void llmOutput(String token) {
         // Hide spinner on first token
         if (token != null && !token.isEmpty()) {
-            hideSpinner();
+            hideOutputSpinner();
         }
         SwingUtilities.invokeLater(() -> historyOutputPanel.appendLlmOutput(token));
     }
@@ -660,7 +659,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
     /**
      * Shows the inline loading spinner in the output panel.
      */
-    public void showSpinner(String message) {
+    public void showOutputSpinner(String message) {
         if (historyOutputPanel != null) {
             historyOutputPanel.showSpinner(message);
         }
@@ -669,7 +668,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
     /**
      * Hides the inline loading spinner in the output panel.
      */
-    public void hideSpinner() {
+    public void hideOutputSpinner() {
         if (historyOutputPanel != null) {
             historyOutputPanel.hideSpinner();
         }

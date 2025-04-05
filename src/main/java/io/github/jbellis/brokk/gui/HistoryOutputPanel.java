@@ -494,7 +494,6 @@ public class HistoryOutputPanel extends JPanel {
      */
     public void updateTheme(boolean isDark) {
         llmStreamArea.updateTheme(isDark);
-        llmStreamArea.updateTheme(isDark);
     }
 
     /**
