@@ -17,4 +17,8 @@ public interface IConsoleIO {
     default void systemOutput(String message) {
         llmOutput("\n" + message);
     }
+    
+    void showOutputSpinner(String message);
+
+    void hideOutputSpinner();
 }

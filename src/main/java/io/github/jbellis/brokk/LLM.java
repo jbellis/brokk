@@ -66,6 +66,7 @@ public class LLM {
         outer:
         while (true) {
             if (Thread.currentThread().isInterrupted()) {
+                io.hideOutputSpinner();
                 io.systemOutput("Session interrupted.");
                 break;
             }
@@ -82,16 +83,19 @@ public class LLM {
             var toolSpecs = tools.getToolSpecifications(model);
             var streamingResult = coder.sendMessage(model, allMessages, toolSpecs, ToolChoice.AUTO, true);
             if (streamingResult.cancelled()) {
+                io.hideOutputSpinner();
                 io.systemOutput("Session cancelled.");
                 break;
             }
             if (streamingResult.error() != null) {
+                io.hideOutputSpinner();
                 logger.warn("Error from LLM: {}", streamingResult.error().getMessage());
                 io.systemOutput("LLM returned an error even after retries. Ending session.");
                 break;
             }
             var llmResponse = streamingResult.chatResponse();
             if (llmResponse == null || llmResponse.aiMessage() == null) {
+                io.hideOutputSpinner();
                 io.systemOutput("Empty LLM response even after retries. Ending session.");
                 break;
             }
@@ -99,6 +103,7 @@ public class LLM {
             String llmText = llmResponse.aiMessage().text();
             boolean hasTools = llmResponse.aiMessage().hasToolExecutionRequests();
             if (llmText == null || llmText.isBlank() && !hasTools) {
+                io.hideOutputSpinner();
                 io.systemOutput("Blank LLM response. Ending session.");
                 break;
             }
@@ -131,6 +136,7 @@ public class LLM {
                 if (pf != null) {
                     // Check read-only status
                     if (contextManager.getReadonlyFiles().contains(pf)) {
+                        io.hideOutputSpinner();
                         io.systemOutput("Request attempts to edit read-only file: " + pf + ". You should make it editable, or clarify your instructions so the AI doesn't think it needs to edit it.");
                         sessionMessages.add(new AiMessage("Session aborted: attempt to edit read-only file " + pf));
                         break outer;
@@ -140,6 +146,7 @@ public class LLM {
                         try {
                             originalContents.put(pf, pf.exists() ? pf.read() : "");
                         } catch (IOException e) {
+                            io.hideOutputSpinner();
                             io.toolError("Failed to read source file while applying changes: " + e.getMessage());
                             // We can either skip or mark an error and break
                             sessionMessages.add(new AiMessage("Session aborted: unable to read file " + pf));
@@ -151,7 +158,7 @@ public class LLM {
             }
 
             // Execute tools
-            io.llmOutput("\n");
+            io.showOutputSpinner("Editing files ...");
             int failures = 0;
             var resultMessages = new ArrayList<ToolExecutionResultMessage>();
             var output = new StringBuilder();
@@ -160,6 +167,7 @@ public class LLM {
                 var result = tools.executeTool(validated);
                 if (result.toolName().equals("explain") && validated.error() == null) {
                     io.llmOutput("\n\n%s".formatted(result.text()));
+                    io.showOutputSpinner("Editing files ...");
                 } else {
                     // TODO make this fancier! like, an actual graphical representation of the diff
                     output.append("\n%s: %s".formatted(result.toolName(), result.text()));
@@ -172,6 +180,7 @@ public class LLM {
             }
             if (isComplete) {
                 // stop now that we've processed any `explain` tools
+                io.hideOutputSpinner();
                 break;
             }
             if (!output.isEmpty()) {
@@ -187,6 +196,7 @@ public class LLM {
             if (failures == validatedRequests.size()) {
                 parseErrorAttempts++;
                 if (parseErrorAttempts >= MAX_PARSE_ATTEMPTS) {
+                    io.hideOutputSpinner();
                     io.systemOutput("Repeated tool request failures. Stopping session.");
                     break;
                 }
@@ -223,12 +233,14 @@ public class LLM {
             String buildReflection = getBuildReflection(contextManager, io, buildErrors);
             if (buildReflection.isEmpty()) {
                 // Build succeeded!
+                io.hideOutputSpinner();
                 isComplete = true;
                 break;
             }
 
             // If we got here, we have build errors. Decide if we keep trying or not.
             if (!shouldContinue(coder, parseErrorAttempts, buildErrors, io)) {
+                io.hideOutputSpinner();
                 break;
             }
 
@@ -237,6 +249,8 @@ public class LLM {
             nextRequest = new UserMessage(buildReflection);
         }
 
+        io.hideOutputSpinner();
+        
         // If we had any conversation at all, store it in the context history
         if (!sessionMessages.isEmpty()) {
             String finalUserInput = isComplete ? userInput : userInput + " [incomplete]";

@@ -115,7 +115,7 @@ public class Coder {
                 ifNotCancelled.accept(() -> {
                     if (echo) {
                         if (LLMTools.requiresEmulatedTools(model) && emulatedToolInstructionsPresent(request.messages())) {
-                            io.llmOutput(". ");
+                            io.showOutputSpinner("Editing files ...");
                         } else {
                             io.llmOutput(token);
                         }
@@ -126,6 +126,7 @@ public class Coder {
             @Override
             public void onCompleteResponse(ChatResponse response) {
                 ifNotCancelled.accept(() -> {
+                    io.hideOutputSpinner();
                     if (echo) {
                         io.llmOutput("\n");
                     }
@@ -149,6 +150,7 @@ public class Coder {
             @Override
             public void onError(Throwable error) {
                 ifNotCancelled.accept(() -> {
+                    io.hideOutputSpinner();
                     writeToHistory("Error", error.getClass() + ": " + error.getMessage());
                     io.toolErrorRaw("LLM error: " + error.getMessage());
                     // Instead of interrupting, just record it so we can retry from the caller
