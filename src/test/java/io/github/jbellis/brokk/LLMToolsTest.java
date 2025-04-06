@@ -92,6 +92,7 @@ class LLMToolsTest {
 
         var result = tools.executeTool(validated);
         assertEquals("SUCCESS", result.text(), "File replacement should succeed");
+        assertEquals(LLMTools.Action.EDIT, result.getAction(), "Action should be EDIT");
 
         // Verify the file content on disk
         String fileContent = Files.readString(tempDir.resolve("Test.java"));
@@ -117,6 +118,7 @@ class LLMToolsTest {
         var result = tools.executeTool(validated);
         assertTrue(result.text().startsWith("Failed: "), "Expected failure result for unknown text");
         assertTrue(result.text().contains("No matching"), result.text());
+        assertEquals(LLMTools.Action.NONE, result.getAction(), "Action should be NONE for failed tool execution");
     }
 
     @Test
@@ -140,6 +142,7 @@ class LLMToolsTest {
 
         var result = tools.executeTool(validated);
         assertEquals("SUCCESS", result.text(), "Replacing lines should succeed");
+        assertEquals(LLMTools.Action.EDIT, result.getAction(), "Action should be EDIT");
 
         String updated = Files.readString(tempDir.resolve("Test.java"));
         assertFalse(updated.contains(oldLines), "Old line should be removed from file content");
@@ -164,6 +167,7 @@ class LLMToolsTest {
 
         var result = tools.executeTool(validated);
         assertEquals("SUCCESS", result.text(), "Replacing function body should succeed");
+        assertEquals(LLMTools.Action.EDIT, result.getAction(), "Action should be EDIT");
 
         String updated = Files.readString(tempDir.resolve("Test.java"));
         assertTrue(updated.contains("Hi there, "), "New function body should appear in the updated file content");
@@ -171,21 +175,31 @@ class LLMToolsTest {
     }
 
     @Test
-    void testApplyEditsCreatesNewFile(@TempDir Path tempDir) throws IOException, EditBlock.NoMatchException, EditBlock.AmbiguousMatchException {
+    void testApplyEditsCreatesNewFile(@TempDir Path tempDir) throws IOException, EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         TestContextManager ctx = new TestContextManager(tempDir, Set.of("fileA.txt"));
         var tools = new LLMTools(ctx);
 
         // existing filename
         Path existingFile = tempDir.resolve("fileA.txt");
         Files.writeString(existingFile, "Original text\n");
-        tools.replaceLines(ctx.toFile("fileA.txt"), "Original text", "Updated");
+        
+        var request = ToolExecutionRequest.builder()
+                .name("replaceLines")
+                .arguments("{}") // Arguments don't matter for this test
+                .build();
+                
+        var result = tools.replaceLines(request, ctx.toFile("fileA.txt"), "Original text", "Updated");
+        assertEquals(LLMTools.Action.EDIT, result.getAction());
+        
         String actualA = Files.readString(existingFile);
         assertTrue(actualA.contains("Updated"));
 
         // new filename
-        tools.replaceLines(ctx.toFile("newFile.txt"), "", "Created content");
+        result = tools.replaceFile(request, ctx.toFile("newFile.txt"), "Created content");
+        assertEquals(LLMTools.Action.NEW, result.getAction());
+        
         String newFileText = Files.readString(tempDir.resolve("newFile.txt"));
-        assertEquals("Created content\n", newFileText);
+        assertEquals("Created content", newFileText);
     }
 
     @Test
@@ -196,18 +210,24 @@ class LLMToolsTest {
         TestContextManager ctx = new TestContextManager(tempDir, Set.of("fileA.txt"));
         var f = ctx.toFile("fileA.txt");
         var tools = new LLMTools(ctx);
-        assertThrows(EditBlock.NoMatchException.class, () -> tools.replaceLines(f, "DDD", "EEE"));
+        
+        var request = ToolExecutionRequest.builder()
+                .name("replaceLines")
+                .arguments("{}") // Arguments don't matter for this test
+                .build();
+                
+        assertThrows(EditBlock.NoMatchException.class, () -> tools.replaceLines(request, f, "DDD", "EEE"));
     }
-    
+
     @Test
     void testRemoveFile() throws IOException {
         // Create a file to test deletion
         Path fileToDelete = tempDir.resolve("ToDelete.java");
         Files.writeString(fileToDelete, "file to be deleted");
-        
+
         // Verify it exists before we start
         assertTrue(Files.exists(fileToDelete));
-        
+
         var request = ToolExecutionRequest.builder()
                 .name("removeFile")
                 .arguments("""
@@ -222,11 +242,12 @@ class LLMToolsTest {
 
         var result = tools.executeTool(validated);
         assertEquals("SUCCESS", result.text(), "File removal should succeed");
+        assertEquals(LLMTools.Action.REMOVE, result.getAction(), "Action should be REMOVE");
 
         // Verify the file was actually deleted
         assertFalse(Files.exists(fileToDelete), "File should have been deleted");
     }
-    
+
     @Test
     void testRemoveNonExistentFile() {
         // Try to remove a file that doesn't exist

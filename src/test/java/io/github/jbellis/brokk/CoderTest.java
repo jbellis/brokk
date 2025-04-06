@@ -34,6 +34,8 @@ public class CoderTest {
         }
         @Override public void llmOutput(String token) {}
         @Override public void systemOutput(String message) {}
+        @Override public void showOutputSpinner(String message) {}
+        @Override public void hideOutputSpinner() {}
     }
 
     private static Coder coder;
