@@ -120,6 +120,7 @@ public class Coder {
 
         // Write request details to history
         var tools = request.parameters().toolSpecifications();
+
         writeRequestToHistory(request.messages(), tools);
 
         if (Thread.currentThread().isInterrupted()) {
@@ -130,10 +131,17 @@ public class Coder {
             public void onPartialResponse(String token) {
                 ifNotCancelled.accept(() -> {
                     if (echo) {
-                        if (LLMTools.requiresEmulatedTools(model) && emulatedToolInstructionsPresent(request.messages())) {
+                        boolean isEditToolCall = tools != null && tools.stream().anyMatch(tool ->
+                                "replaceFile".equals(tool.name()) || "replaceLines".equals(tool.name()));
+                        boolean isEmulatedEditToolCall = LLMTools.requiresEmulatedTools(model) && emulatedEditToolInstructionsPresent(request.messages());
+                        if (isEditToolCall || isEmulatedEditToolCall) {
                             io.showOutputSpinner("Editing files ...");
+                            if (!isEmulatedEditToolCall) {
+                                io.llmOutput(token);
+                            }
                         } else {
                             io.llmOutput(token);
+                            io.hideOutputSpinner();
                         }
                     }
                 });
@@ -269,6 +277,7 @@ public class Coder {
             logger.debug("Sending request to {} attempt {} [only last message shown]: {}",
                          Models.nameOf(model), attempt, messages.getLast());
 
+            io.showOutputSpinner("Thinking...");
             var response = doSingleSendMessage(model, messages, tools, toolChoice, echo);
             if (response.cancelled) {
                 writeToHistory("Cancelled", "LLM request cancelled by user");
@@ -489,10 +498,10 @@ public class Coder {
         return new StreamingResult(fail, outputTokenCount, false, lastError);
     }
 
-    private static boolean emulatedToolInstructionsPresent(List<ChatMessage> messages) {
+    private static boolean emulatedEditToolInstructionsPresent(List<ChatMessage> messages) {
         return messages.stream().anyMatch(m -> {
             var t = Models.getText(m);
-            return t.contains("tool_calls")
+            return t.contains("tool_calls") && t.contains("replaceFile") && t.contains("replaceLines")
                     && t.matches("(?s).*\\d+ available tools:.*")
                     && t.contains("top-level JSON");
         });

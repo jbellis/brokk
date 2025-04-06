@@ -66,8 +66,6 @@ public class LLM {
         outer:
         while (true) {
             if (Thread.currentThread().isInterrupted()) {
-                io.hideOutputSpinner();
-                io.systemOutput("Session interrupted.");
                 break;
             }
 
@@ -81,22 +79,18 @@ public class LLM {
             // Actually send the request to the LLM
             //
             var toolSpecs = tools.getToolSpecifications(model);
-            io.showOutputSpinner("Thinking ...");
             var streamingResult = coder.sendMessage(model, allMessages, toolSpecs, ToolChoice.AUTO, true);
             if (streamingResult.cancelled()) {
-                io.hideOutputSpinner();
                 io.systemOutput("Session cancelled.");
                 break;
             }
             if (streamingResult.error() != null) {
-                io.hideOutputSpinner();
                 logger.warn("Error from LLM: {}", streamingResult.error().getMessage());
                 io.systemOutput("LLM returned an error even after retries. Ending session.");
                 break;
             }
             var llmResponse = streamingResult.chatResponse();
             if (llmResponse == null || llmResponse.aiMessage() == null) {
-                io.hideOutputSpinner();
                 io.systemOutput("Empty LLM response even after retries. Ending session.");
                 break;
             }
@@ -104,7 +98,6 @@ public class LLM {
             String llmText = llmResponse.aiMessage().text();
             boolean hasTools = llmResponse.aiMessage().hasToolExecutionRequests();
             if (llmText == null || llmText.isBlank() && !hasTools) {
-                io.hideOutputSpinner();
                 io.systemOutput("Blank LLM response. Ending session.");
                 break;
             }
@@ -137,7 +130,6 @@ public class LLM {
                 if (pf != null) {
                     // Check read-only status
                     if (contextManager.getReadonlyFiles().contains(pf)) {
-                        io.hideOutputSpinner();
                         io.systemOutput("Request attempts to edit read-only file: " + pf + ". You should make it editable, or clarify your instructions so the AI doesn't think it needs to edit it.");
                         sessionMessages.add(new AiMessage("Session aborted: attempt to edit read-only file " + pf));
                         break outer;
@@ -147,7 +139,6 @@ public class LLM {
                         try {
                             originalContents.put(pf, pf.exists() ? pf.read() : "");
                         } catch (IOException e) {
-                            io.hideOutputSpinner();
                             io.toolError("Failed to read source file while applying changes: " + e.getMessage());
                             // We can either skip or mark an error and break
                             sessionMessages.add(new AiMessage("Session aborted: unable to read file " + pf));
@@ -159,37 +150,39 @@ public class LLM {
             }
 
             // Execute tools
-            io.showOutputSpinner("Editing files ...");
             int failures = 0;
-            var resultMessages = new ArrayList<ToolExecutionResultMessage>();
-            var output = new StringBuilder();
+            var resultMessages = new ArrayList<LLMTools.ExtToolExecutionResultMessage>();
+            
+            // Process all tool requests
             for (var validated : validatedRequests) {
-                // Attempt actual edit. (Handles validation errors internally)
+                // Attempt actual edit (handles validation errors internally)
                 var result = tools.executeTool(validated);
+                
                 if (result.toolName().equals("explain") && validated.error() == null) {
                     io.llmOutput("\n\n%s".formatted(result.text()));
-                    io.showOutputSpinner("Editing files ...");
-                } else {
-                    // TODO make this fancier! like, an actual graphical representation of the diff
-                    output.append("\n%s: %s".formatted(result.toolName(), result.text()));
-                    if (!result.text().equals("SUCCESS")) {
-                        logger.warn("Tool application failure: {}", result.text());
-                        failures++;
-                    }
+                } else if (!result.text().equals("SUCCESS")) {
+                    logger.warn("Tool application failure: {}", result.text());
+                    failures++;
                 }
+                
                 resultMessages.add(result);
             }
+            
+            // Display tool results in JSON format
+            displayToolResults(resultMessages, io);
+            
             if (isComplete) {
                 // stop now that we've processed any `explain` tools
-                io.hideOutputSpinner();
                 break;
             }
-            if (!output.isEmpty()) {
-                io.llmOutput("\n\n```" + output + "```\n\n");
-            }
+            
             if (!LLMTools.requiresEmulatedTools(model)) {
                 // need this whether success or failure or the LLM gets confused seeing that it made a call but no results
-                sessionMessages.addAll(resultMessages);
+                // ExtToolExecutionResultMessage extends ToolExecutionResultMessage, but we need to convert the collection
+                for (var resultMessage : resultMessages) {
+                    // Add each message individually to satisfy Java's type system
+                    sessionMessages.add(resultMessage);
+                }
             }
 
             // If every single request was invalid or failed, increment parseErrorAttempts
@@ -197,7 +190,6 @@ public class LLM {
             if (failures == validatedRequests.size()) {
                 parseErrorAttempts++;
                 if (parseErrorAttempts >= MAX_PARSE_ATTEMPTS) {
-                    io.hideOutputSpinner();
                     io.systemOutput("Repeated tool request failures. Stopping session.");
                     break;
                 }
@@ -211,13 +203,18 @@ public class LLM {
                 io.systemOutput("Tool requests had errors. Asking LLM to correct them...");
                 String msg;
                 if (LLMTools.requiresEmulatedTools(model)) {
+                    // Convert ExtToolExecutionResultMessage list to ToolExecutionResultMessage list
+                    var toolResultMessages = resultMessages.stream()
+                            .map(ext -> (ToolExecutionResultMessage) ext)
+                            .collect(Collectors.toList());
+                    
                     msg = """
                     Some of your tool calls could not be applied. Please revisit your changes
                     and provide corrected tool usage or updated instructions.  Here are the tool results,
                     in the same order that you provided them:
-                    
+
                     %s
-                    """.formatted(coder.emulateToolResults(validatedRequests, resultMessages)).stripIndent().stripIndent();
+                    """.formatted(coder.emulateToolResults(validatedRequests, toolResultMessages)).stripIndent().stripIndent();
                 } else {
                     msg = """
                     Some of your tool calls could not be applied. Please revisit your changes
@@ -234,14 +231,12 @@ public class LLM {
             String buildReflection = getBuildReflection(contextManager, io, buildErrors);
             if (buildReflection.isEmpty()) {
                 // Build succeeded!
-                io.hideOutputSpinner();
                 isComplete = true;
                 break;
             }
 
             // If we got here, we have build errors. Decide if we keep trying or not.
             if (!shouldContinue(coder, parseErrorAttempts, buildErrors, io)) {
-                io.hideOutputSpinner();
                 break;
             }
 
@@ -250,8 +245,7 @@ public class LLM {
             nextRequest = new UserMessage(buildReflection);
         }
 
-        io.hideOutputSpinner();
-        
+
         // If we had any conversation at all, store it in the context history
         if (!sessionMessages.isEmpty()) {
             String finalUserInput = isComplete ? userInput : userInput + " [incomplete]";
@@ -264,6 +258,70 @@ public class LLM {
         } else {
             io.systemOutput("Session ended without success.");
         }
+    }
+
+    /**
+     * Groups the tool execution results by file and action, then displays them as JSON objects
+     */
+    private static void displayToolResults(List<LLMTools.ExtToolExecutionResultMessage> resultMessages, IConsoleIO io) {
+        // Group by file, then action, and filter out NONE actions and non-SUCCESS results
+        var groupedResults = resultMessages.stream()
+                .filter(r -> r.getAction() != LLMTools.Action.NONE && r.text().equals("SUCCESS"))
+                .collect(Collectors.groupingBy(
+                        LLMTools.ExtToolExecutionResultMessage::getFile,
+                        Collectors.groupingBy(LLMTools.ExtToolExecutionResultMessage::getAction)
+                ));
+        
+        // Create a json object for each file+action group
+        for (var fileEntry : groupedResults.entrySet()) {
+            var file = fileEntry.getKey();
+            for (var actionEntry : fileEntry.getValue().entrySet()) {
+                var action = actionEntry.getKey();
+                var group = actionEntry.getValue();
+                
+                if (!group.isEmpty()) {
+                    var json = createToolCallJson(file, action, group);
+                    io.llmOutput("\n```toolcall\n%s\n```\n".formatted(json));
+                }
+            }
+        }
+    }
+
+    /**
+     * Creates a JSON object for a file+action group
+     */
+    private static String createToolCallJson(ProjectFile file, LLMTools.Action action, List<LLMTools.ExtToolExecutionResultMessage> group) {
+        var firstResult = group.getFirst();
+        String fileStr = file.toString().replace("\\", "/"); // Use forward slashes
+        String actionStr = action.name().toLowerCase();
+        
+        // Calculate lines based on action type
+        Integer lines = null;
+        if (action == LLMTools.Action.EDIT) {
+            // For EDIT, sum all lines in the group
+            lines = group.stream()
+                    .map(LLMTools.ExtToolExecutionResultMessage::getLines)
+                    .filter(l -> l != null)
+                    .mapToInt(Integer::intValue)
+                    .sum();
+        } else if (action == LLMTools.Action.NEW) {
+            // For NEW, use lines from the first result
+            lines = firstResult.getLines();
+        }
+        // For REMOVE, lines remains null
+        
+        // Build the JSON
+        var jsonBuilder = new StringBuilder("{\n");
+        jsonBuilder.append("\t\"action\": \"").append(actionStr).append("\",\n");
+        jsonBuilder.append("\t\"file\": \"").append(fileStr).append("\"");
+        
+        if (lines != null) {
+            jsonBuilder.append(",\n");
+            jsonBuilder.append("\t\"lines\": ").append(lines);
+        }
+        
+        jsonBuilder.append("\n}");
+        return jsonBuilder.toString();
     }
 
     private static boolean isToolsEmpty(List<ToolExecutionRequest> toolRequests) {
@@ -310,7 +368,7 @@ public class LLM {
 
         // Record the original content so we can undo if necessary
         var originalContents = Map.of(file, fileContents);
-        
+
         // Initialize pending history with the instruction
         var pendingHistory = new ArrayList<ChatMessage>();
         pendingHistory.add(new UserMessage(instructionsMsg));
@@ -331,7 +389,7 @@ public class LLM {
             cm.addToHistory(pendingHistory, originalContents, "Quick Edit (failed): " + file.getFileName());
             return fileContents;
         }
-        
+
         // Add the response to pending history
         pendingHistory.add(new AiMessage(responseText));
 

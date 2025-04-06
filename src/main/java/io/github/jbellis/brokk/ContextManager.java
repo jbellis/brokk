@@ -261,7 +261,6 @@ public class ContextManager implements IContextManager, AutoCloseable {
     public Future<?> submitAction(String action, String input, Runnable task) {
         return userActionExecutor.submit(() -> {
             io.setLlmOutput("# %s\n%s\n\n# %s\n".formatted(action, input, action.equals("Run") ? "Output" : "Response"));
-            io.showOutputSpinner("Thinking ...");
             io.disableHistoryPanel();
 
             try {
@@ -272,6 +271,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
                 logger.error("Error in " + action, e);
                 io.toolErrorRaw("Error in " + action + " processing: " + e.getMessage());
             } finally {
+                io.hideOutputSpinner(); // in the case of error or stop
                 io.actionComplete();
                 io.enableUserActionButtons();
                 io.enableHistoryPanel();

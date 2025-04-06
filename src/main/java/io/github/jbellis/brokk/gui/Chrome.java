@@ -443,7 +443,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
 
         // Cmd/Ctrl+Shift+Z => redo
         var redoKeyStroke = KeyStroke.getKeyStroke(KeyEvent.VK_Z,
-                                                   Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.SHIFT_DOWN_MASK);
+                Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.SHIFT_DOWN_MASK);
         rootPane.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(redoKeyStroke, "globalRedo");
         rootPane.getActionMap().put("globalRedo", new AbstractAction() {
             @Override
@@ -474,22 +474,16 @@ public class Chrome implements AutoCloseable, IConsoleIO {
 
     @Override
     public void actionComplete() {
-        hideOutputSpinner(); // Ensure spinner is hidden on completion
         SwingUtilities.invokeLater(() -> instructionsPanel.clearCommandResultText());
     }
 
     @Override
     public void toolErrorRaw(String msg) {
-        hideOutputSpinner(); // Ensure spinner is hidden on error
         systemOutput(msg);
     }
 
     @Override
     public void llmOutput(String token) {
-        // Hide spinner on first token
-        if (token != null && !token.isEmpty()) {
-            hideOutputSpinner();
-        }
         SwingUtilities.invokeLater(() -> historyOutputPanel.appendLlmOutput(token));
     }
 
@@ -670,18 +664,22 @@ public class Chrome implements AutoCloseable, IConsoleIO {
      * Shows the inline loading spinner in the output panel.
      */
     public void showOutputSpinner(String message) {
-        if (historyOutputPanel != null) {
-            historyOutputPanel.showSpinner(message);
-        }
+        SwingUtilities.invokeLater(() -> {
+            if (historyOutputPanel != null) {
+                historyOutputPanel.showSpinner(message);
+            }
+        });
     }
 
     /**
      * Hides the inline loading spinner in the output panel.
      */
     public void hideOutputSpinner() {
-        if (historyOutputPanel != null) {
-            historyOutputPanel.hideSpinner();
-        }
+        SwingUtilities.invokeLater(() -> {
+            if (historyOutputPanel != null) {
+                historyOutputPanel.hideSpinner();
+            }
+        });
     }
 
     public void focusInput() {
