@@ -1,6 +1,6 @@
 package io.github.jbellis.brokk.difftool.utils;
 
-import io.github.jbellis.brokk.difftool.diff.JMDelta;
+import com.github.difflib.patch.AbstractDelta;
 
 import java.awt.*;
 
@@ -40,16 +40,12 @@ public class ColorUtil {
         return color;
     }
 
-    public static Color getColor(JMDelta delta, boolean isDark) {
-        if (delta.isDelete()) {
-            return Colors.getDeleted(isDark);
-        }
-
-        if (delta.isChange()) {
-            return Colors.getChanged(isDark);
-        }
-
-        return Colors.getAdded(isDark);
+    public static Color getColor(AbstractDelta<String> delta, boolean darkTheme) {
+        return switch (delta.getType()) {
+            case INSERT -> Colors.getAdded(darkTheme);
+            case DELETE -> Colors.getDeleted(darkTheme);
+            case CHANGE -> Colors.getChanged(darkTheme);
+            case EQUAL -> throw new IllegalStateException();
+        };
     }
-
 }

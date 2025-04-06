@@ -5,23 +5,24 @@ import io.github.jbellis.brokk.difftool.doc.StringDocument;
 
 public class StringNode implements Comparable<StringNode>, BufferNode {
     private final String name;
-    private String content;
-    private StringDocument document;
+    private final String content;
+    private final StringDocument document;
 
     public StringNode(String name, String content) {
         this.name = name;
         this.content = (content != null) ? content : "";
+
+        // Create once:
+        this.document = new StringDocument(this.content, name);
+    }
+
+    @Override
+    public StringDocument getDocument() {
+        return document;
     }
 
     public String getName() {
         return name;
-    }
-
-    public StringDocument getDocument() {
-        if (document == null) {
-            document = new StringDocument(content, name);
-        }
-        return document;
     }
 
     public long getSize() {

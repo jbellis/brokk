@@ -295,7 +295,7 @@ public class BrokkDiffPanel extends JPanel implements PropertyChangeListener {
                     compare(); // Ensure compare() gets the correct parameters
                 }
             } catch (InterruptedException | ExecutionException e) {
-                e.printStackTrace();
+                throw new RuntimeException(e);
             } finally {
                 remove(loadingLabel);
                 revalidate();

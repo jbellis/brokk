@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -30,12 +31,18 @@ import java.util.stream.Stream;
  */
 public class Context implements Serializable {
     private static final Logger logger = LogManager.getLogger(Context.class);
+    private static final AtomicInteger idCounter = new AtomicInteger(0);
+    private static int newId() {
+        return idCounter.incrementAndGet();
+    }
 
     @Serial
     private static final long serialVersionUID = 1L;
+
     public static final int MAX_AUTO_CONTEXT_FILES = 100;
     private static final String WELCOME_ACTION = "Welcome to Brokk";
     private static final String WELCOME_BACK = "Welcome back";
+    public static final String SUMMARIZING = "(Summarizing)";
 
     transient final IContextManager contextManager;
     final List<ContextFragment.ProjectPathFragment> editableFiles;
@@ -55,8 +62,8 @@ public class Context implements Serializable {
 
     /** description of the action that created this context, can be a future (like PasteFragment) */
     transient final Future<String> action;
-    public static final String SUMMARIZING = "(Summarizing)";
-    public static final String IN_PROGRESS_ACTION = "Response in progress";
+    /** Unique transient identifier for this context instance */
+    transient final int id;
 
     public record ParsedOutput(String output, ContextFragment.VirtualFragment parsedFragment) {
         public ParsedOutput {
@@ -70,23 +77,10 @@ public class Context implements Serializable {
      * Constructor for initial empty context
      */
     public Context(IContextManager contextManager, int autoContextFileCount, String initialOutputText) {
-        this(contextManager, List.of(), List.of(), List.of(), AutoContext.EMPTY, autoContextFileCount, new ArrayList<>(), Map.of(),
+        this(newId(), // Generate a new ID for the initial context
+             contextManager, List.of(), List.of(), List.of(), AutoContext.EMPTY, autoContextFileCount, new ArrayList<>(), Map.of(),
              getWelcomeOutput(initialOutputText),
              CompletableFuture.completedFuture(WELCOME_ACTION));
-    }
-
-    /** Constructor for placeholder context */
-    public static Context createInProgressContext(IContextManager contextManager, Context currentContext) {
-        return new Context(contextManager,
-                           currentContext.editableFiles,
-                           currentContext.readonlyFiles,
-                           currentContext.virtualFragments,
-                           currentContext.autoContext, // Keep existing auto-context, don't rebuild yet
-                           currentContext.autoContextFileCount,
-                           currentContext.historyMessages,
-                           Map.of(),
-                           null, // No parsed output for placeholder
-                           CompletableFuture.completedFuture(IN_PROGRESS_ACTION));
     }
 
     private static @NotNull ParsedOutput getWelcomeOutput(String initialOutputText) {
@@ -100,18 +94,19 @@ public class Context implements Serializable {
         this(contextManager, autoContextFileCount, "placeholder");
     }
 
-    private Context(
-            IContextManager contextManager,
-            List<ContextFragment.ProjectPathFragment> editableFiles,
-            List<ContextFragment.PathFragment> readonlyFiles,
-            List<ContextFragment.VirtualFragment> virtualFragments,
-            AutoContext autoContext,
-            int autoContextFileCount,
-            List<ChatMessage> historyMessages,
-            Map<ProjectFile, String> originalContents,
-            ParsedOutput parsedOutput,
-            Future<String> action
-    ) {
+    private Context(int id,
+                    IContextManager contextManager,
+                    List<ContextFragment.ProjectPathFragment> editableFiles,
+                    List<ContextFragment.PathFragment> readonlyFiles,
+                    List<ContextFragment.VirtualFragment> virtualFragments,
+                    AutoContext autoContext,
+                    int autoContextFileCount,
+                    List<ChatMessage> historyMessages,
+                    Map<ProjectFile, String> originalContents,
+                    ParsedOutput parsedOutput,
+                    Future<String> action)
+    {
+        assert id > 0;
         assert contextManager != null;
         assert editableFiles != null;
         assert readonlyFiles != null;
@@ -121,6 +116,7 @@ public class Context implements Serializable {
         assert historyMessages != null;
         assert originalContents != null;
         assert action != null;
+        this.id = id;
         this.contextManager = contextManager;
         this.editableFiles = List.copyOf(editableFiles);
         this.readonlyFiles = List.copyOf(readonlyFiles);
@@ -238,7 +234,7 @@ public class Context implements Serializable {
     public Context addSearchFragment(Future<String> query, ParsedOutput parsed) {
         var newFragments = new ArrayList<>(virtualFragments);
         newFragments.add(parsed.parsedFragment);
-        return new Context(contextManager, editableFiles, readonlyFiles, newFragments, autoContext, autoContextFileCount, historyMessages, Map.of(), parsed, query).refresh();
+        return new Context(newId(), contextManager, editableFiles, readonlyFiles, newFragments, autoContext, autoContextFileCount, historyMessages, Map.of(), parsed, query).refresh();
     }
 
     public Context removeBadFragment(ContextFragment f) {
@@ -295,7 +291,8 @@ public class Context implements Serializable {
             return this;
         }
 
-        return new Context(contextManager,
+        return new Context(newId(),
+                           contextManager,
                            editableFiles,
                            readonlyFiles,
                            virtualFragments,
@@ -417,13 +414,14 @@ public class Context implements Serializable {
 
     /**
      * Creates a new context with custom collections and action description,
-     * refreshing auto-context if needed
+     * refreshing auto-context if needed.
      */
     private Context withFragments(List<ContextFragment.ProjectPathFragment> newEditableFiles,
                                   List<ContextFragment.PathFragment> newReadonlyFiles,
                                   List<ContextFragment.VirtualFragment> newVirtualFragments,
                                   Future<String> action) {
         return new Context(
+                newId(),
                 contextManager,
                 newEditableFiles,
                 newReadonlyFiles,
@@ -444,10 +442,13 @@ public class Context implements Serializable {
 
     /**
      * Produces a new Context object with a fresh AutoContext if enabled.
+     * This new context will retain the ID of the original context.
      */
     public Context refresh() {
         AutoContext acPlaceholder = isAutoContextEnabled() ? AutoContext.REBUILDING : AutoContext.DISABLED;
-        var newContext = new Context(contextManager,
+        // Create placeholder context, preserving the current ID
+        var newContext = new Context(this.id, // Preserve the ID
+                                     contextManager,
                                      editableFiles,
                                      readonlyFiles,
                                      virtualFragments,
@@ -459,7 +460,9 @@ public class Context implements Serializable {
                                      action);
         contextManager.submitBackgroundTask("Computing AutoContext", () -> {
             var newAutoContext = buildAutoContext();
-            var replacement = new Context(contextManager,
+            // Construct the final replacement context, preserving the ID from the placeholder context (which is the original ID)
+            var replacement = new Context(newContext.id, // Preserve the ID
+                                          contextManager,
                                           editableFiles,
                                           readonlyFiles,
                                           virtualFragments,
@@ -485,16 +488,11 @@ public class Context implements Serializable {
                 && historyMessages.isEmpty();
     }
 
-    /**
-     * Adding to the history DOES NOT create a new context object, it modifies history messages in place
-     * for this and any other contexts that share the same history instance.
-     * Otherwise popping context off with /undo
-     * would clear out the most recent conversation round trip which is not what we want.
-     */
     public Context addHistory(List<ChatMessage> newMessages, Map<ProjectFile, String> originalContents, ParsedOutput parsed, Future<String> action) {
         var newHistory = new ArrayList<>(historyMessages);
         newHistory.addAll(newMessages);
         return new Context(
+                newId(),
                 contextManager,
                 editableFiles,
                 readonlyFiles,
@@ -508,11 +506,9 @@ public class Context implements Serializable {
         ).refresh();
     }
 
-    /**
-     * Clearing the history DOES create a new context object so you can /undo it
-     */
     public Context clearHistory() {
         return new Context(
+                newId(), // New ID for cleared history
                 contextManager,
                 editableFiles,
                 readonlyFiles,
@@ -527,7 +523,10 @@ public class Context implements Serializable {
     }
 
     public Context withOriginalContents(Map<ProjectFile, String> fileContents) {
+        // This context is temporary/internal for undo, does not represent a new user action,
+        // so it retains the same ID and does not call refresh.
         return new Context(
+                this.id, // Retain the same ID
                 contextManager,
                 editableFiles,
                 readonlyFiles,
@@ -561,6 +560,13 @@ public class Context implements Serializable {
         }
         return SUMMARIZING;
     }
+
+    /**
+     * Get the unique transient identifier for this context instance.
+     */
+    public int getId() {
+        return id;
+    }
     
     /**
      * Returns all fragments in display order:
@@ -591,7 +597,8 @@ public class Context implements Serializable {
     }
 
     public Context withParsedOutput(ParsedOutput parsedOutput, Future<String> action) {
-        return new Context(contextManager,
+        return new Context(newId(),
+                           contextManager,
                            editableFiles,
                            readonlyFiles,
                            virtualFragments,
@@ -666,6 +673,10 @@ public class Context implements Serializable {
             var actionField = Context.class.getDeclaredField("action");
             actionField.setAccessible(true);
             actionField.set(this, CompletableFuture.completedFuture(WELCOME_BACK));
+
+            var idField = Context.class.getDeclaredField("id");
+            idField.setAccessible(true);
+            idField.set(this, newId()); // Assign new ID on deserialization
         } catch (NoSuchFieldException | IllegalAccessException e) {
             throw new IOException("Failed to initialize fields during deserialization", e);
         }
@@ -674,9 +685,11 @@ public class Context implements Serializable {
     /**
      * Creates a new Context with the specified context manager.
      * Used to initialize the context manager reference after deserialization.
+     * This does not represent a new state, so it retains the ID.
      */
     public Context withContextManager(IContextManager contextManager) {
         return new Context(
+                this.id, // Retain ID from deserialized object
                 contextManager,
                 editableFiles,
                 readonlyFiles,
@@ -689,7 +702,7 @@ public class Context implements Serializable {
                 action
         );
     }
-    
+
     /**
      * Creates a new Context that copies specific elements from the provided context.
      * This creates a reset point by:
@@ -702,8 +715,9 @@ public class Context implements Serializable {
     public static Context createFrom(Context sourceContext, Context currentContext) {
         assert sourceContext != null;
         assert currentContext != null;
-        
-        return new Context(currentContext.contextManager,
+
+        return new Context(newId(), // New ID for the reset point
+                           currentContext.contextManager,
                            sourceContext.editableFiles,
                            sourceContext.readonlyFiles,
                            sourceContext.virtualFragments,

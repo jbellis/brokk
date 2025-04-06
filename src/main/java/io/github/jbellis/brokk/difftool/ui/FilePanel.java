@@ -1,9 +1,8 @@
 
 package io.github.jbellis.brokk.difftool.ui;
 
-import io.github.jbellis.brokk.difftool.diff.JMChunk;
-import io.github.jbellis.brokk.difftool.diff.JMDelta;
-import io.github.jbellis.brokk.difftool.diff.JMRevision;
+import com.github.difflib.patch.AbstractDelta;
+import com.github.difflib.patch.Chunk;
 import io.github.jbellis.brokk.difftool.doc.BufferDocumentChangeListenerIF;
 import io.github.jbellis.brokk.difftool.doc.BufferDocumentIF;
 import io.github.jbellis.brokk.difftool.utils.Colors;
@@ -17,7 +16,6 @@ import javax.swing.*;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
 import javax.swing.text.Highlighter;
-import javax.swing.text.PlainDocument;
 import java.awt.*;
 import java.awt.event.ActionListener;
 import java.awt.event.FocusAdapter;
@@ -113,8 +111,6 @@ public class FilePanel implements BufferDocumentChangeListenerIF {
             // Initialize configuration including theme-specific highlight painters
             initConfiguration();
         } catch (Exception ex) {
-            ex.printStackTrace();
-
             JOptionPane.showMessageDialog(diffPanel, "Could not read file: "
                                                   + bufferDocument.getName()
                                                   + "\n" + ex.getMessage(),
@@ -133,18 +129,21 @@ public class FilePanel implements BufferDocumentChangeListenerIF {
         getHighlighter().repaint();
     }
 
-    private void paintRevisionHighlights() {
+    /**
+     * Repaint highlights: we get the patch from BufferDiffPanel, then highlight
+     * each delta's relevant lines in *this* panel (ORIGINAL or REVISED).
+     */
+    private void paintRevisionHighlights()
+    {
+        var doc = bufferDocument;
+        if (doc == null) return;
 
-        if (bufferDocument == null) {
-            return;
-        }
+        // Access the shared patch from the parent BufferDiffPanel
+        var patch = diffPanel.getPatch();
+        if (patch == null) return;
 
-        JMRevision revision = diffPanel.getCurrentRevision();
-        if (revision == null) {
-            return;
-        }
-
-        for (JMDelta delta : revision.getDeltas()) {
+        for (var delta : patch.getDeltas()) {
+            // Are we the "original" side or the "revised" side?
             if (BufferDocumentIF.ORIGINAL.equals(name)) {
                 new HighlightOriginal(delta).highlight();
             } else if (BufferDocumentIF.REVISED.equals(name)) {
@@ -154,149 +153,95 @@ public class FilePanel implements BufferDocumentChangeListenerIF {
     }
 
     abstract class AbstractHighlight {
-        protected JMDelta delta;
+        protected final AbstractDelta<String> delta;
 
-        public AbstractHighlight(JMDelta delta) {
+        AbstractHighlight(AbstractDelta<String> delta) {
             this.delta = delta;
         }
 
-        protected void highlight() {
-            int fromOffset;
-            int toOffset;
-            JMRevision changeRev;
-            JMChunk changeOriginal;
-            int fromOffset2;
-            int toOffset2;
-            fromOffset = bufferDocument.getOffsetForLine(getPrimaryChunk().getAnchor());
-            if (fromOffset < 0) {
-                return;
-            }
+        public void highlight() {
+            // Retrieve the chunk relevant to this side
+            var chunk = getChunk(delta);
+            var fromOffset = bufferDocument.getOffsetForLine(chunk.getPosition());
+            if (fromOffset < 0) return;
+            var toOffset = bufferDocument.getOffsetForLine(chunk.getPosition() + chunk.size());
+            if (toOffset < 0) return;
 
-            toOffset = bufferDocument.getOffsetForLine(getPrimaryChunk().getAnchor() + getPrimaryChunk().getSize());
-            if (toOffset < 0) {
-                return;
-            }
+            // Check if chunk is effectively "empty line" in the old code
+            boolean isEmpty = (chunk.size() == 0);
 
-            boolean isEndAndIsLastNewLine = isEndAndIsLastNewLine(toOffset);
-            boolean isDark = diffPanel.isDarkTheme();
+            // End offset might be the doc length; check trailing newline logic:
+            boolean isEndAndNewline = isEndAndLastNewline(toOffset);
 
-            JMHighlightPainter highlight = null;
-            if (delta.isChange()) {
-                if (delta.getOriginal().getSize() < MAXSIZE_CHANGE_DIFF
-                        && delta.getRevised().getSize() < MAXSIZE_CHANGE_DIFF) {
-                    changeRev = delta.getChangeRevision();
-                    if (changeRev != null) {
-                        for (JMDelta changeDelta : changeRev.getDeltas()) {
-                            changeOriginal = getPrimaryChunk(changeDelta);
-                            if (changeOriginal.getSize() <= 0) {
-                                continue;
-                            }
+            // Decide color. For Insert vs Delete vs Change we do:
+            var isDark = diffPanel.isDarkTheme();
+            var type = delta.getType(); // DeltaType.INSERT, DELETE, CHANGE
+            var painter = switch (type) {
+                case INSERT ->
+                        isEmpty
+                                ? new JMHighlightPainter.JMHighlightLinePainter(Colors.getAdded(isDark))
+                                : isEndAndNewline
+                                ? new JMHighlightPainter.JMHighlightNewLinePainter(Colors.getAdded(isDark))
+                                : new JMHighlightPainter(Colors.getAdded(isDark));
 
-                            fromOffset2 = fromOffset + changeOriginal.getAnchor();
-                            toOffset2 = fromOffset2 + changeOriginal.getSize();
+                case DELETE ->
+                        isEmpty
+                                ? new JMHighlightPainter.JMHighlightLinePainter(Colors.getDeleted(isDark))
+                                : isEndAndNewline
+                                ? new JMHighlightPainter.JMHighlightNewLinePainter(Colors.getDeleted(isDark))
+                                : new JMHighlightPainter(Colors.getDeleted(isDark));
 
-                            setHighlight(JMHighlighter.LAYER1, fromOffset2, toOffset2,
-                                         new JMHighlightPainter(Colors.getChanged(isDark)));
-                        }
-                    }
-                }
-
-                highlight = isEndAndIsLastNewLine ? 
-                    new JMHighlightPainter.JMHighlightNewLinePainter(Colors.getChanged(isDark)) : 
-                    new JMHighlightPainter(Colors.getChanged(isDark));
-            } else {
-                if (isEmptyLine()) {
-                    toOffset = fromOffset + 1;
-                }
-                if (delta.isAdd()) {
-                    highlight = getAddedHighlightPainter(isOriginal(), isEndAndIsLastNewLine, isDark);
-                } else if (delta.isDelete()) {
-                    highlight = getDeleteHighlightPainter(!isOriginal(), isEndAndIsLastNewLine, isDark);
-                }
-            }
-
-            setHighlight(fromOffset, toOffset, highlight);
+                case CHANGE ->
+                        isEndAndNewline
+                                ? new JMHighlightPainter.JMHighlightNewLinePainter(Colors.getChanged(isDark))
+                                : new JMHighlightPainter(Colors.getChanged(isDark));
+                case EQUAL -> throw new IllegalStateException();
+            };
+            setHighlight(fromOffset, toOffset, painter);
         }
 
-
-        private boolean isEndAndIsLastNewLine(int toOffset) {
-            boolean isEndAndIsLastNewLine = false;
+        // Check if the last char is a newline *and* if offset is doc length
+        private boolean isEndAndLastNewline(int toOffset) {
             try {
-                PlainDocument document = bufferDocument.getDocument();
+                var docLen = bufferDocument.getDocument().getLength();
                 int endOffset = toOffset - 1;
-                boolean changeReachEnd = endOffset == document.getLength();
-                if (endOffset < 0 || endOffset >= document.getLength()) {
+                if (endOffset < 0 || endOffset >= docLen) {
                     return false;
                 }
-                boolean lastCharIsNewLine = "\n".equals(document.getText(endOffset, 1));
-                isEndAndIsLastNewLine = changeReachEnd && lastCharIsNewLine;
+                // If the final character is a newline & chunk touches doc-end
+                boolean lastCharIsNL = "\n".equals(bufferDocument.getDocument().getText(endOffset, 1));
+                return (endOffset == docLen - 1) && lastCharIsNL;
             } catch (BadLocationException e) {
-                e.printStackTrace();
+                // This exception indicates an issue with offsets, likely a bug
+                throw new RuntimeException("Bad location accessing document text", e);
             }
-            return isEndAndIsLastNewLine;
         }
 
-
-        private JMChunk getPrimaryChunk() {
-            return getPrimaryChunk(delta);
-        }
-
-        private boolean isOriginal() {
-            return delta.getOriginal() == getPrimaryChunk();
-        }
-
-        private JMHighlightPainter getAddedHighlightPainter(boolean line, boolean isLastNewLine, boolean isDark) {
-            Color addedColor = Colors.getAdded(isDark);
-            return line
-                    ? new JMHighlightPainter.JMHighlightLinePainter(addedColor)
-                    : isLastNewLine
-                    ? new JMHighlightPainter.JMHighlightNewLinePainter(addedColor)
-                    : new JMHighlightPainter(addedColor);
-        }
-
-        private JMHighlightPainter getDeleteHighlightPainter(boolean line, boolean isLastNewLine, boolean isDark) {
-            Color deletedColor = Colors.getDeleted(isDark);
-            return line
-                    ? new JMHighlightPainter.JMHighlightLinePainter(deletedColor)
-                    : isLastNewLine
-                    ? new JMHighlightPainter.JMHighlightNewLinePainter(deletedColor)
-                    : new JMHighlightPainter(deletedColor);
-        }
-
-        protected abstract JMChunk getPrimaryChunk(JMDelta changeDelta);
-
-        public abstract boolean isEmptyLine();
+        protected abstract Chunk<String> getChunk(AbstractDelta<String> d);
     }
 
     class HighlightOriginal extends AbstractHighlight {
-
-        public HighlightOriginal(JMDelta delta) {
+        HighlightOriginal(AbstractDelta<String> delta) {
             super(delta);
         }
 
-        public boolean isEmptyLine() {
-            return delta.isAdd();
-        }
-
-        protected JMChunk getPrimaryChunk(JMDelta changeDelta) {
-            return changeDelta.getOriginal();
+        @Override
+        protected Chunk<String> getChunk(AbstractDelta<String> d) {
+            return d.getSource(); // For the original side
         }
     }
 
     class HighlightRevised extends AbstractHighlight {
-
-        public HighlightRevised(JMDelta delta) {
+        HighlightRevised(AbstractDelta<String> delta) {
             super(delta);
         }
 
-        public boolean isEmptyLine() {
-            return delta.isDelete();
-        }
-
-        protected JMChunk getPrimaryChunk(JMDelta changeDelta) {
-            return changeDelta.getRevised();
+        @Override
+        protected Chunk<String> getChunk(AbstractDelta<String> d) {
+            return d.getTarget(); // For the revised side
         }
     }
+
 
     private JMHighlighter getHighlighter() {
         return (JMHighlighter) editor.getHighlighter();
@@ -320,27 +265,14 @@ public class FilePanel implements BufferDocumentChangeListenerIF {
         try {
             getHighlighter().addHighlight(layer, offset, size, highlight);
         } catch (BadLocationException ex) {
-            ex.printStackTrace();
+            // This usually indicates a logic error in calculating offsets/sizes
+            throw new RuntimeException("Error adding highlight at offset " + offset + " size " + size, ex);
         }
     }
 
     boolean isDocumentChanged() {
         return bufferDocument != null && bufferDocument.isChanged();
     }
-
-    public ActionListener getSaveButtonAction() {
-        return ae -> {
-            try {
-                bufferDocument.write();
-            } catch (Exception ex) {
-                JOptionPane.showMessageDialog(SwingUtilities.getRoot(editor),
-                                              "Could not save file: " + bufferDocument.getName() + "\n"
-                                                      + ex.getMessage(), "Error saving file",
-                                              JOptionPane.ERROR_MESSAGE);
-            }
-        };
-    }
-
 
     public void documentChanged(JMDocumentEvent de) {
         if (de.getStartLine() == -1 && de.getDocumentEvent() == null) {

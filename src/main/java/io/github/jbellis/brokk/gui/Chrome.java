@@ -35,6 +35,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
 
     // Dependencies:
     ContextManager contextManager;
+    private Context activeContext; // Track the currently displayed context
 
     // Swing components:
     final JFrame frame;
@@ -45,7 +46,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
     private JSplitPane topSplitPane;
     private JSplitPane verticalSplitPane;
     private JSplitPane contextGitSplitPane;
-    public HistoryOutputPanel historyOutputPanel;
+    private HistoryOutputPanel historyOutputPanel;
 
     // Panels:
     private ContextPanel contextPanel;
@@ -336,15 +337,20 @@ public class Chrome implements AutoCloseable, IConsoleIO {
      */
     public void loadContext(Context ctx) {
         assert ctx != null;
-        if (ctx.getAction() == Context.IN_PROGRESS_ACTION) {
-            // since context-loading and action execution run in different threads, it's not safe
-            // to reset the output of an in-progress action (and we don't need to update context table)
-            return;
-        }
+
+        // If the new context is logically distinct from the active one, update the text.
+        // This prevents stomping on an active llm output since it will only be the case
+        // if the user is selecting a different context, as opposed to a background task
+        // updating the summary or autocontext.
+        logger.debug("Loading context.  active={}, new={}", activeContext == null ? "null" : activeContext.getId(), ctx.getId());
+        boolean resetOutput = (activeContext == null || activeContext.getId() != ctx.getId());
+        activeContext = ctx;
 
         SwingUtilities.invokeLater(() -> {
             contextPanel.populateContextTable(ctx);
-            historyOutputPanel.resetLlmOutput(ctx.getParsedOutput() == null ? "" : ctx.getParsedOutput().output());
+            if (resetOutput) {
+                historyOutputPanel.resetLlmOutput(ctx.getParsedOutput() == null ? "" : ctx.getParsedOutput().output());
+            }
             updateCaptureButtons();
         });
     }
@@ -485,6 +491,10 @@ public class Chrome implements AutoCloseable, IConsoleIO {
             hideOutputSpinner();
         }
         SwingUtilities.invokeLater(() -> historyOutputPanel.appendLlmOutput(token));
+    }
+
+    public void setLlmOutput(String text) {
+        SwingUtilities.invokeLater(() -> historyOutputPanel.setLlmOutput(text));
     }
 
     @Override
@@ -769,7 +779,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
      */
     public void disableHistoryPanel() {
         if (historyOutputPanel != null) {
-            historyOutputPanel.disablePanel();
+            historyOutputPanel.disableHistory();
         }
     }
 
@@ -778,7 +788,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
      */
     public void enableHistoryPanel() {
         if (historyOutputPanel != null) {
-            historyOutputPanel.enablePanel();
+            historyOutputPanel.enableHistory();
         }
     }
 }

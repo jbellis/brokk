@@ -18,13 +18,8 @@ public class AbstractContentPanel
     }
 
     public void doUndo() {
-        try {
-            if (getUndoHandler().canUndo()) {
-                getUndoHandler().undo();
-            }
-        } catch (CannotUndoException ex) {
-            System.out.println("Unable to undo: " + ex);
-            ex.printStackTrace();
+        if (getUndoHandler().canUndo()) {
+            getUndoHandler().undo();
         }
     }
 
@@ -33,13 +28,8 @@ public class AbstractContentPanel
     }
 
     public void doRedo() {
-        try {
-            if (getUndoHandler().canRedo()) {
-                getUndoHandler().redo();
-            }
-        } catch (CannotUndoException ex) {
-            System.out.println("Unable to undo: " + ex);
-            ex.printStackTrace();
+        if (getUndoHandler().canRedo()) {
+            getUndoHandler().redo();
         }
     }
 

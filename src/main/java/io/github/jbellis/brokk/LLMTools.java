@@ -141,8 +141,9 @@ public class LLMTools {
     }
 
     @Tool(value = """
-    Replaces the entire file content.
-    Use this tool to create new files: just provide the full path and content.
+    Replaces the entire file content. This is expensive for large files, so prefer replaceLines if you are only making targeted changes.
+    Use replaceFile when you need to make sweeping changes across the entire code or when replaceLines might result in overlapping edits.
+    Also use this tool to create new files: just provide the full path and content.
     """)
     public void replaceFile(@P("The path of the file to overwrite") String filename, @P("The new file content") String text) {
         throw new ToolExecutionException("Direct invocation of replaceFile(String,String) is not supported. Use parseToolRequest + executeTool.");

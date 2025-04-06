@@ -6,6 +6,7 @@ import io.github.jbellis.brokk.difftool.utils.Colors;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.text.BadLocationException;
 import java.awt.*;
 
 /**
@@ -124,9 +125,9 @@ public class LineNumberBorder extends EmptyBorder {
                 s = Integer.toString(line + 1);
                 g.drawString(s, left - (fontWidth * s.length()) - 1 - MARGIN, y - heightCorrection);
             }
-        } catch (Exception ex) {
-            // Log exceptions to the console for debugging
-            ex.printStackTrace();
+        } catch (BadLocationException ex) {
+            // This indicates an issue with offset calculation or document state
+            throw new RuntimeException("Error calculating view for offset in LineNumberBorder", ex);
         }
     }
 }

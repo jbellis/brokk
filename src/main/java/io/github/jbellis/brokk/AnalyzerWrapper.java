@@ -269,13 +269,14 @@ public class AnalyzerWrapper implements AutoCloseable {
      * the rebuild, a new rebuild will be scheduled immediately afterwards.
      */
     private synchronized void rebuild() {
+        listener.onTrackedFileChange();
+
         // If a rebuild is already running, just mark that another rebuild is pending.
         if (rebuildInProgress) {
             rebuildPending = true;
             return;
         }
 
-        listener.onTrackedFileChange();
         rebuildInProgress = true;
         logger.debug("Rebuilding analyzer");
         future = runner.submit("Rebuilding code intelligence", () -> {

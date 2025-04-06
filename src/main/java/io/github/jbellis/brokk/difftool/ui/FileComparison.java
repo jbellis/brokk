@@ -123,42 +123,37 @@ public class FileComparison extends SwingWorker<String, Object> {
 
     @Override
     public String doInBackground() {
-        try {
-            if (diffNode == null) {
-                if (isTwoFilesComparison) {
-                    // Ensure both leftFile and rightFile are not null
-                    if (leftFile != null && rightFile != null) {
-                        diffNode = create(leftFileTitle, leftFile, rightFileTitle, rightFile);
-                    } else {
-                        return "Error: One or both files are null.";
-                    }
-                } else if (mainPanel.isStringAndFileComparison()) {
-                    // Handle string and file comparison, ensuring that contentLeft is not null and rightFile is not null
-                    if (contentLeft != null && !contentLeft.isEmpty() && rightFile != null) {
-                        diffNode = createStringAndFile(contentLeftTitle, contentLeft, rightFileTitle, rightFile);
-                    } else if (contentRight != null && !contentRight.isEmpty() && leftFile != null) {
-                        diffNode = createStringAndFile(leftFileTitle, leftFile, contentRightTitle, contentRight);
-                    } else {
-                        return "Error: Either the left content or right file is null or empty.";
-                    }
-                } else if (contentLeft != null && contentRight != null) {
-                    // Ensure both contentLeft and contentRight are not null
-                    if (!contentLeft.isEmpty() && !contentRight.isEmpty()) {
-                        diffNode = createString(contentLeftTitle, contentLeft, contentRightTitle, contentRight);
-                    } else {
-                        return "Error: One or both content values are empty.";
-                    }
+        if (diffNode == null) {
+            if (isTwoFilesComparison) {
+                // Ensure both leftFile and rightFile are not null
+                if (leftFile != null && rightFile != null) {
+                    diffNode = create(leftFileTitle, leftFile, rightFileTitle, rightFile);
                 } else {
-                    return "Error: One or both content values are null.";
+                    return "Error: One or both files are null.";
                 }
+            } else if (mainPanel.isStringAndFileComparison()) {
+                // Handle string and file comparison, ensuring that contentLeft is not null and rightFile is not null
+                if (contentLeft != null && !contentLeft.isEmpty() && rightFile != null) {
+                    diffNode = createStringAndFile(contentLeftTitle, contentLeft, rightFileTitle, rightFile);
+                } else if (contentRight != null && !contentRight.isEmpty() && leftFile != null) {
+                    diffNode = createStringAndFile(leftFileTitle, leftFile, contentRightTitle, contentRight);
+                } else {
+                    return "Error: Either the left content or right file is null or empty.";
+                }
+            } else if (contentLeft != null && contentRight != null) {
+                // Ensure both contentLeft and contentRight are not null
+                if (!contentLeft.isEmpty() && !contentRight.isEmpty()) {
+                    diffNode = createString(contentLeftTitle, contentLeft, contentRightTitle, contentRight);
+                } else {
+                    return "Error: One or both content values are empty.";
+                }
+            } else {
+                return "Error: One or both content values are null.";
             }
-
-            // If no errors, proceed to diffing
-            SwingUtilities.invokeLater(() -> diffNode.diff());
-        } catch (Exception ex) {
-            ex.printStackTrace();
-            return ex.getMessage();
         }
+
+        // If no errors, proceed to diffing
+        SwingUtilities.invokeLater(() -> diffNode.diff());
         return null;
     }
 
@@ -202,7 +197,9 @@ public class FileComparison extends SwingWorker<String, Object> {
             Image scaledImage = originalImage.getScaledInstance(24, 24, Image.SCALE_SMOOTH);
             return new ImageIcon(scaledImage);
         } catch (IOException | NullPointerException e) {
-            System.err.println("Image not found: " + "/images/compare.png");
+            System.err.println("Image not found: " + "/images/compare.png" + ": " + e.getMessage());
+            // Optionally rethrow if icon is critical
+            // throw new RuntimeException("Failed to load required image icon", e);
             return null;
         }
     }
@@ -221,7 +218,11 @@ public class FileComparison extends SwingWorker<String, Object> {
                 mainPanel.getTabbedPane().setSelectedComponent(panel);
             }
         } catch (Exception ex) {
-            ex.printStackTrace();
+            // Handle exceptions during the 'done' phase, e.g., from get()
+            System.err.println("Error completing file comparison task: " + ex.getMessage());
+            JOptionPane.showMessageDialog(mainPanel, "Error finalizing comparison: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            // Rethrow if necessary
+            // throw new RuntimeException("Failed to complete comparison UI update", ex);
         }
     }
 }

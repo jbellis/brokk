@@ -1,361 +1,221 @@
 package io.github.jbellis.brokk.difftool.scroll;
 
-import io.github.jbellis.brokk.difftool.diff.DiffUtil;
-import io.github.jbellis.brokk.difftool.diff.JMChunk;
-import io.github.jbellis.brokk.difftool.diff.JMDelta;
-import io.github.jbellis.brokk.difftool.diff.JMRevision;
-import io.github.jbellis.brokk.difftool.doc.BufferDocumentIF;
+import com.github.difflib.patch.AbstractDelta;
+import com.github.difflib.patch.Chunk;
 import io.github.jbellis.brokk.difftool.ui.BufferDiffPanel;
 import io.github.jbellis.brokk.difftool.ui.FilePanel;
 
-import javax.swing.*;
-import javax.swing.text.JTextComponent;
-import java.awt.*;
+import javax.swing.text.BadLocationException;
 import java.awt.event.AdjustmentEvent;
 import java.awt.event.AdjustmentListener;
-import java.util.List;
 
-public class ScrollSynchronizer {
-    private BufferDiffPanel diffPanel;
-    private FilePanel filePanelLeft;
-    private FilePanel filePanelRight;
+/**
+ * Synchronizes the vertical/horizontal scrolling between the left and right FilePanel.
+ * Also provides small utility methods for scrolling to line or to a specific delta.
+ */
+public class ScrollSynchronizer
+{
+    private final BufferDiffPanel diffPanel;
+    private final FilePanel filePanelLeft;
+    private final FilePanel filePanelRight;
+
     private AdjustmentListener horizontalAdjustmentListener;
     private AdjustmentListener verticalAdjustmentListener;
 
-    public ScrollSynchronizer(BufferDiffPanel diffPanel, FilePanel filePanelLeft,
-                              FilePanel filePanelRight) {
+    public ScrollSynchronizer(BufferDiffPanel diffPanel, FilePanel filePanelLeft, FilePanel filePanelRight)
+    {
         this.diffPanel = diffPanel;
         this.filePanelLeft = filePanelLeft;
         this.filePanelRight = filePanelRight;
-
         init();
     }
 
-    private void init() {
-        JScrollBar o;
-        JScrollBar r;
+    private void init()
+    {
+        // Sync horizontal:
+        var barLeftH = filePanelLeft.getScrollPane().getHorizontalScrollBar();
+        var barRightH = filePanelRight.getScrollPane().getHorizontalScrollBar();
+        barRightH.addAdjustmentListener(getHorizontalAdjustmentListener());
+        barLeftH.addAdjustmentListener(getHorizontalAdjustmentListener());
 
-        // Synchronize the horizontal scrollbars:
-        o = filePanelLeft.getScrollPane().getHorizontalScrollBar();
-        r = filePanelRight.getScrollPane().getHorizontalScrollBar();
-        r.addAdjustmentListener(getHorizontalAdjustmentListener());
-        o.addAdjustmentListener(getHorizontalAdjustmentListener());
-
-        // Synchronize the vertical scrollbars:
-        o = filePanelLeft.getScrollPane().getVerticalScrollBar();
-        r = filePanelRight.getScrollPane().getVerticalScrollBar();
-        r.addAdjustmentListener(getVerticalAdjustmentListener());
-        o.addAdjustmentListener(getVerticalAdjustmentListener());
+        // Sync vertical:
+        var barLeftV = filePanelLeft.getScrollPane().getVerticalScrollBar();
+        var barRightV = filePanelRight.getScrollPane().getVerticalScrollBar();
+        barRightV.addAdjustmentListener(getVerticalAdjustmentListener());
+        barLeftV.addAdjustmentListener(getVerticalAdjustmentListener());
     }
 
-    private void scroll(boolean leftScrolled) {
-        JMRevision revision;
-        FilePanel fp1;
-        FilePanel fp2;
-        int line;
-
-        revision = diffPanel.getCurrentRevision();
-        if (revision == null) {
-            return;
-        }
-
-        if (leftScrolled) {
-            fp1 = filePanelLeft;
-            fp2 = filePanelRight;
-        } else {
-            fp1 = filePanelRight;
-            fp2 = filePanelLeft;
-        }
-
-        line = getCurrentLineCenter(fp1);
-
-        if (leftScrolled) {
-            line = DiffUtil.getRevisedLine(revision, line);
-        } else {
-            line = DiffUtil.getOriginalLine(revision, line);
-        }
-
-        scrollToLine(fp2, line);
-    }
-
-    void toNextDelta(boolean next) {
-        int line;
-        JMRevision revision;
-        JMDelta previousDelta;
-        JMDelta currentDelta;
-        JMDelta nextDelta;
-        JMDelta toDelta;
-        JMChunk original;
-        int currentIndex;
-        int nextIndex;
-        List<JMDelta> deltas;
-        int i;
-
-        revision = diffPanel.getCurrentRevision();
-        if (revision == null) {
-            return;
-        }
-
-        deltas = revision.getDeltas();
-
-        line = getCurrentLineCenter(filePanelLeft);
-
-        currentDelta = null;
-        currentIndex = -1;
-
-        i = 0;
-        for (JMDelta delta : deltas) {
-            original = delta.getOriginal();
-
-            currentIndex = i;
-            i++;
-
-            if (line >= original.getAnchor()) {
-                if (line <= original.getAnchor() + original.getSize()) {
-                    currentDelta = delta;
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-
-        previousDelta = null;
-        nextDelta = null;
-        if (currentIndex != -1) {
-            if (currentIndex > 0) {
-                previousDelta = deltas.get(currentIndex - 1);
-            }
-
-            nextIndex = currentIndex;
-            if (currentDelta != null) {
-                nextIndex++;
-            }
-
-            if (nextIndex < deltas.size()) {
-                nextDelta = deltas.get(nextIndex);
-            }
-        }
-
-        if (next) {
-            toDelta = nextDelta;
-        } else {
-            toDelta = previousDelta;
-        }
-
-        if (toDelta != null) {
-            scrollToLine(filePanelLeft, toDelta.getOriginal().getAnchor());
-            scroll(true);
-        }
-    }
-
-    public void showDelta(JMDelta delta) {
-        scrollToLine(filePanelLeft, delta.getOriginal().getAnchor());
-        scroll(false);
-    }
-
-    private int getCurrentLineCenter(FilePanel fp) {
-        JScrollPane scrollPane;
-        BufferDocumentIF bd;
-        JTextComponent editor;
-        JViewport viewport;
-        int line;
-        Rectangle rect;
-        int offset;
-        Point p;
-
-        editor = fp.getEditor();
-        scrollPane = fp.getScrollPane();
-        viewport = scrollPane.getViewport();
-        p = viewport.getViewPosition();
-        offset = editor.viewToModel(p);
-
-        // Scroll around the center of the editpane
-        p.y += getHeightOffset(fp);
-
-        offset = editor.viewToModel(p);
-        bd = fp.getBufferDocument();
-        if (bd == null) {
-            return -1;
-        }
-        line = bd.getLineForOffset(offset);
-
-        return line;
-    }
-
-    public void scrollToLine(FilePanel fp, int line) {
-        JScrollPane scrollPane;
-        FilePanel fp2;
-        BufferDocumentIF bd;
-        JTextComponent editor;
-        JViewport viewport;
-        Rectangle rect;
-        int offset;
-        Point p;
-        Rectangle viewRect;
-        Dimension viewSize;
-        Dimension extentSize;
-        int x;
-
-        fp2 = fp == filePanelLeft ? filePanelRight : filePanelLeft;
-
-        bd = fp.getBufferDocument();
-        if (bd == null) {
-            return;
-        }
-
-        offset = bd.getOffsetForLine(line);
-        if (offset < 0) {
-            return;
-        }
-
-        viewport = fp.getScrollPane().getViewport();
-        editor = fp.getEditor();
-
-        try {
-            rect = editor.modelToView(offset);
-            if (rect == null) {
-                return;
-            }
-
-            p = rect.getLocation();
-            p.y -= getHeightOffset(fp);
-            p.y += getCorrectionOffset(fp2);
-
-            // Do not allow scrolling before the begin.
-            if (p.y < 0) {
-                p.y = 0;
-            }
-
-            // Do not allow scrolling after the end.
-            viewSize = viewport.getViewSize();
-            viewRect = viewport.getViewRect();
-            extentSize = viewport.getExtentSize();
-            if (p.y > viewSize.height - extentSize.height) {
-                p.y = viewSize.height - extentSize.height;
-            }
-
-            p.x = viewRect.x;
-
-            viewport.setViewPosition(p);
-
-
-        } catch (Exception ex) {
-            ex.printStackTrace();
-        }
-    }
-
-    private int getHeightOffset(FilePanel fp) {
-        JScrollPane scrollPane;
-        JViewport viewport;
-        int offset;
-        int unitIncrement;
-
-        scrollPane = fp.getScrollPane();
-        viewport = scrollPane.getViewport();
-
-        offset = viewport.getSize().height / 2;
-        unitIncrement = scrollPane.getHorizontalScrollBar().getUnitIncrement();
-        offset = offset - (offset % unitIncrement);
-
-        return offset;
-    }
-
-    private int getCorrectionOffset(FilePanel fp) {
-        JTextComponent editor;
-        int offset;
-        Rectangle rect;
-        Point p;
-        JViewport viewport;
-
-        editor = fp.getEditor();
-        viewport = fp.getScrollPane().getViewport();
-        p = viewport.getViewPosition();
-        offset = editor.viewToModel(p);
-
-        try {
-            // This happens when you scroll to the bottom. The upper line won't
-            //   start at the right position (You can see half of the line)
-            // Correct this offset with the pane next to it to keep in sync.
-            rect = editor.modelToView(offset);
-            if (rect != null) {
-                return p.y - rect.getLocation().y;
-            }
-        } catch (Exception ex) {
-            ex.printStackTrace();
-        }
-
-        return 0;
-    }
-
-    private AdjustmentListener getHorizontalAdjustmentListener() {
+    private AdjustmentListener getHorizontalAdjustmentListener()
+    {
         if (horizontalAdjustmentListener == null) {
             horizontalAdjustmentListener = new AdjustmentListener() {
-                private boolean insideScroll;
+                boolean insideScroll;
 
-                public void adjustmentValueChanged(AdjustmentEvent e) {
-                    JScrollBar scFrom;
-                    JScrollBar scTo;
+                @Override
+                public void adjustmentValueChanged(AdjustmentEvent e)
+                {
+                    if (insideScroll) return;
 
-                    if (insideScroll) {
-                        return;
-                    }
+                    var leftH = filePanelLeft.getScrollPane().getHorizontalScrollBar();
+                    var rightH = filePanelRight.getScrollPane().getHorizontalScrollBar();
+                    var scFrom = (e.getSource() == leftH ? leftH : rightH);
+                    var scTo = (scFrom == leftH ? rightH : leftH);
 
-                    if (filePanelLeft.getScrollPane().getHorizontalScrollBar() == e
-                            .getSource()) {
-                        scFrom = filePanelLeft.getScrollPane().getHorizontalScrollBar();
-                        scTo = filePanelRight.getScrollPane().getHorizontalScrollBar();
-                    } else {
-                        scFrom = filePanelRight.getScrollPane().getHorizontalScrollBar();
-                        scTo = filePanelLeft.getScrollPane().getHorizontalScrollBar();
-                    }
-
-                    // Stop possible recursion!
-                    // An left scroll will have a right scroll as
-                    //   a result. That revised scroll could have a orginal
-                    //   scroll as result. etc...
-                    insideScroll = true;
                     insideScroll = true;
                     scTo.setValue(scFrom.getValue());
                     insideScroll = false;
                 }
             };
         }
-
         return horizontalAdjustmentListener;
     }
 
-    private AdjustmentListener getVerticalAdjustmentListener() {
+    private AdjustmentListener getVerticalAdjustmentListener()
+    {
         if (verticalAdjustmentListener == null) {
             verticalAdjustmentListener = new AdjustmentListener() {
-                private boolean insideScroll;
-                private int counter;
+                boolean insideScroll;
 
-                public void adjustmentValueChanged(AdjustmentEvent e) {
-                    boolean leftScrolled;
+                @Override
+                public void adjustmentValueChanged(AdjustmentEvent e)
+                {
+                    if (insideScroll) return;
 
-                    if (insideScroll) {
-                        return;
-                    }
-
-                    if (filePanelLeft.getScrollPane().getVerticalScrollBar() == e
-                            .getSource()) {
-                        leftScrolled = true;
-                    } else {
-                        leftScrolled = false;
-                    }
-
-                    // Stop possible recursion!
-                    // An left scroll will have a right scroll as
-                    //   a result. That revised scroll could have a orginal
-                    //   scroll as result. etc...
+                    var leftV = filePanelLeft.getScrollPane().getVerticalScrollBar();
+                    boolean leftScrolled = (e.getSource() == leftV);
                     insideScroll = true;
                     scroll(leftScrolled);
                     insideScroll = false;
                 }
             };
         }
-
         return verticalAdjustmentListener;
+    }
+
+    /**
+     * If the left side scrolled, we compute which line is centered and map it to
+     * the equivalent line in the right side. If the right side scrolled, we do the reverse.
+     */
+    private void scroll(boolean leftScrolled)
+    {
+        var patch = diffPanel.getPatch();
+        if (patch == null) {
+            return;
+        }
+        var fp1 = leftScrolled ? filePanelLeft : filePanelRight;
+        var fp2 = leftScrolled ? filePanelRight : filePanelLeft;
+
+        // Which line is roughly in the center of fp1?
+        int line = getCurrentLineCenter(fp1);
+
+        // Attempt naive line mapping using deltas:
+        // We walk through the patch's deltas to figure out how many lines inserted/deleted up to `line`.
+        // For simplicity, we just do “line” for the other side unless you want more advanced logic.
+        // (In Phase 1, we had some old “DiffUtil.getRevisedLine()” logic. If you want that back, adapt it with patch.)
+        int mappedLine = approximateLineMapping(patch, line, leftScrolled);
+
+        scrollToLine(fp2, mappedLine);
+    }
+
+    /**
+     * Basic approximation of line mapping:
+     * If leftScrolled==true, `line` is from the original side, we apply deltas up to that line
+     * to see how many lines were inserted or removed, producing a revised line index.
+     * If false, we do the reverse.
+     */
+    private int approximateLineMapping(com.github.difflib.patch.Patch<String> patch, int line, boolean fromOriginal)
+    {
+        int offset = 0;
+        for (AbstractDelta<String> delta : patch.getDeltas()) {
+            Chunk<String> source = delta.getSource(); // original
+            Chunk<String> target = delta.getTarget(); // revised
+            int srcPos = source.getPosition();
+            int tgtPos = target.getPosition();
+            // The chunk ends at pos+size-1
+            int srcEnd = srcPos + source.size() - 1;
+            int tgtEnd = tgtPos + target.size() - 1;
+
+            if (fromOriginal) {
+                // If this delta is fully after 'line', stop
+                if (srcPos > line) break;
+                // If 'line' is inside this chunk
+                if (line <= srcEnd) {
+                    // If inside a "change" or "delete" chunk, map to start of target
+                    return tgtPos + offset;
+                }
+                // Otherwise, line is beyond srcEnd, so add difference in lines to offset
+                offset += (target.size() - source.size());
+            } else {
+                // from the revised side
+                if (tgtPos > line) break;
+                if (line <= tgtEnd) {
+                    return srcPos + offset;
+                }
+                offset += (source.size() - target.size());
+            }
+        }
+        return line + offset;
+    }
+
+    /**
+     * Determine which line is in the vertical center of the FilePanel's visible region.
+     */
+    private int getCurrentLineCenter(FilePanel fp)
+    {
+        var editor = fp.getEditor();
+        var viewport = fp.getScrollPane().getViewport();
+        var p = viewport.getViewPosition();
+        // We shift p.y by half the viewport height to approximate center
+        p.y += (viewport.getSize().height / 2);
+
+        int offset = editor.viewToModel(p);
+        var bd = fp.getBufferDocument();
+        if (bd == null) return 0;
+        return bd.getLineForOffset(offset);
+    }
+
+    public void scrollToLine(FilePanel fp, int line)
+    {
+        var bd = fp.getBufferDocument();
+        if (bd == null) {
+            return;
+        }
+        var offset = bd.getOffsetForLine(line);
+        if (offset < 0) {
+            return;
+        }
+        var viewport = fp.getScrollPane().getViewport();
+        var editor = fp.getEditor();
+        try {
+            var rect = editor.modelToView(offset);
+            if (rect == null) return;
+
+            // We want to place the line near the center
+            rect.y -= (viewport.getSize().height / 2);
+            if (rect.y < 0) rect.y = 0;
+
+            var p = rect.getLocation();
+            viewport.setViewPosition(p);
+        } catch (BadLocationException ex) {
+            // This usually means the offset is invalid for the document model
+            throw new RuntimeException(ex);
+        }
+    }
+
+    /**
+     * Called by BufferDiffPanel when the user picks a specific delta.
+     * We attempt to show the original chunk in the left side, then scroll the right side.
+     */
+    public void showDelta(AbstractDelta<String> delta)
+    {
+        // We assume we want to scroll the left side. The 'source' chunk is the original side.
+        var source = delta.getSource();
+        scrollToLine(filePanelLeft, source.getPosition());
+        // That triggers the verticalAdjustmentListener to sync the right side.
+    }
+
+    public void toNextDelta(boolean next)
+    {
+        // Moved to BufferDiffPanel. This is not used here any more.
     }
 }

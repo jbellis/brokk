@@ -15,6 +15,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 /**
@@ -196,28 +198,28 @@ public class GitCommitTab extends JPanel {
         suggestMessageButton.addActionListener(e -> {
             chrome.disableUserActionButtons();
             List<ProjectFile> selectedFiles = getSelectedFilesFromTable();
-            contextManager.submitBackgroundTask("Suggesting commit message", () -> {
+            // Execute the suggestion task and handle the result on the EDT
+            var suggestionFuture = suggestMessageAsync(selectedFiles);
+            contextManager.submitUserTask("Handling suggestion result", () -> {
                 try {
-                    var diff = selectedFiles.isEmpty()
-                            ? getRepo().diff()
-                            : getRepo().diffFiles(selectedFiles);
-                    if (diff.isEmpty()) {
-                        SwingUtilities.invokeLater(() -> {
-                            chrome.actionOutput("No changes to commit");
-                            chrome.enableUserActionButtons();
-                        });
-                        return null;
-                    }
-                    contextManager.inferCommitMessageAsync(diff);
-                    SwingUtilities.invokeLater(chrome::enableUserActionButtons);
-                } catch (Exception ex) {
-                    logger.error("Error suggesting commit message:", ex);
+                    String suggestedMessage = suggestionFuture.get(); // Wait for the result
                     SwingUtilities.invokeLater(() -> {
-                        chrome.actionOutput("Error suggesting commit message: " + ex.getMessage());
+                        if (suggestedMessage != null) {
+                            setCommitMessageText(suggestedMessage);
+                        } // Error/empty handled within suggestMessageAsync
                         chrome.enableUserActionButtons();
                     });
+                } catch (ExecutionException ex) {
+                    logger.error("Error getting suggested commit message:", ex.getCause());
+                    SwingUtilities.invokeLater(() -> {
+                        chrome.actionOutput("Error suggesting commit message: " + ex.getCause().getMessage());
+                        chrome.enableUserActionButtons();
+                    });
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    logger.warn("Interrupted while waiting for commit message suggestion");
+                    SwingUtilities.invokeLater(chrome::enableUserActionButtons);
                 }
-                return null;
             });
         });
         buttonPanel.add(suggestMessageButton);
@@ -227,49 +229,55 @@ public class GitCommitTab extends JPanel {
         stashButton.setEnabled(false);
         stashButton.addActionListener(e -> {
             chrome.disableUserActionButtons();
-            String message = commitMessageArea.getText().trim();
-            if (message.isEmpty()) {
-                chrome.enableUserActionButtons();
-                return;
-            }
-            String stashDescription = java.util.Arrays.stream(message.split("\n"))
-                    .filter(line -> !line.trim().startsWith("#"))
-                    .collect(Collectors.joining("\n"))
-                    .trim();
+            String userMessage = commitMessageArea.getText().trim();
             List<ProjectFile> selectedFiles = getSelectedFilesFromTable();
 
-            contextManager.submitUserTask("Stashing changes", () -> {
-                try {
-                    if (selectedFiles.isEmpty()) {
-                        getRepo().createStash(stashDescription.isEmpty() ? "Stash created by Brokk" : stashDescription);
-                    } else {
-                        getRepo().createPartialStash(
-                                stashDescription.isEmpty() ? "Partial stash created by Brokk" : stashDescription,
-                                selectedFiles
-                        );
-                    }
-                    SwingUtilities.invokeLater(() -> {
-                        if (selectedFiles.isEmpty()) {
-                            chrome.systemOutput("All changes stashed successfully");
-                        } else {
-                            String fileList = selectedFiles.size() <= 3
-                                    ? selectedFiles.stream().map(Object::toString).collect(Collectors.joining(", "))
-                                    : selectedFiles.size() + " files";
-                            chrome.systemOutput("Stashed " + fileList);
+            if (userMessage.isEmpty()) {
+                // No message provided, suggest one and stash
+                contextManager.submitUserTask("Suggesting message and stashing", () -> {
+                    try {
+                        String suggestedMessage = suggestMessageAsync(selectedFiles).get(); // Wait for suggestion
+                        if (suggestedMessage == null || suggestedMessage.isBlank()) {
+                            suggestedMessage = "Stash created by Brokk"; // Fallback
                         }
-                        commitMessageArea.setText("");
-                        updateCommitPanel();
-                        gitPanel.updateLogTab();
-                        chrome.enableUserActionButtons();
-                    });
-                } catch (Exception ex) {
-                    logger.error("Error stashing changes:", ex);
-                    SwingUtilities.invokeLater(() -> {
-                        chrome.actionOutput("Error stashing changes: " + ex.getMessage());
-                        chrome.enableUserActionButtons();
-                    });
-                }
-            });
+                        String finalStashDescription = suggestedMessage;
+                        // Perform stash with suggested message
+                        performStash(selectedFiles, finalStashDescription);
+                    } catch (ExecutionException | InterruptedException ex) {
+                        logger.error("Error getting suggested message or stashing:", ex);
+                        SwingUtilities.invokeLater(() -> {
+                            chrome.actionOutput("Error during auto-stash: " + ex.getMessage());
+                            chrome.enableUserActionButtons();
+                        });
+                        if (ex instanceof InterruptedException) {
+                            Thread.currentThread().interrupt();
+                        }
+                    } catch (Exception ex) {
+                        logger.error("Error stashing changes with suggested message:", ex);
+                        SwingUtilities.invokeLater(() -> {
+                            chrome.actionOutput("Error stashing changes: " + ex.getMessage());
+                            chrome.enableUserActionButtons();
+                        });
+                    }
+                });
+            } else {
+                // Message provided, use it
+                String stashDescription = java.util.Arrays.stream(userMessage.split("\n"))
+                        .filter(line -> !line.trim().startsWith("#"))
+                        .collect(Collectors.joining("\n"))
+                        .trim();
+                contextManager.submitUserTask("Stashing changes", () -> {
+                    try {
+                        performStash(selectedFiles, stashDescription.isEmpty() ? "Stash created by Brokk" : stashDescription);
+                    } catch (Exception ex) {
+                        logger.error("Error stashing changes with provided message:", ex);
+                        SwingUtilities.invokeLater(() -> {
+                            chrome.actionOutput("Error stashing changes: " + ex.getMessage());
+                            chrome.enableUserActionButtons();
+                        });
+                    }
+                });
+            }
         });
         buttonPanel.add(stashButton);
 
@@ -323,13 +331,16 @@ public class GitCommitTab extends JPanel {
             @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { updateCommitButtonState(); }
             @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { updateCommitButtonState(); }
             private void updateCommitButtonState() {
+                // Enablement depends on whether there are changes (indicated by suggest button)
+                boolean hasChanges = suggestMessageButton.isEnabled();
+                stashButton.setEnabled(hasChanges);
+
+                // Commit button still requires a message
                 String text = commitMessageArea.getText().trim();
                 boolean hasNonCommentText = java.util.Arrays.stream(text.split("\n"))
                         .anyMatch(line -> !line.trim().isEmpty()
                                 && !line.trim().startsWith("#"));
-                boolean enable = hasNonCommentText && suggestMessageButton.isEnabled();
-                commitButton.setEnabled(enable);
-                stashButton.setEnabled(enable);
+                commitButton.setEnabled(hasNonCommentText && hasChanges);
             }
         });
 
@@ -446,7 +457,7 @@ public class GitCommitTab extends JPanel {
                                 .anyMatch(line -> !line.trim().isEmpty()
                                         && !line.trim().startsWith("#"));
                         commitButton.setEnabled(hasNonCommentText);
-                        stashButton.setEnabled(hasNonCommentText);
+                        stashButton.setEnabled(true); // Enable stash if there are changes
                     }
                     updateCommitButtonText();
                 });
@@ -545,6 +556,62 @@ public class GitCommitTab extends JPanel {
             files.add(new ProjectFile(contextManager.getRoot(), combined));
         }
         return files;
+    }
+
+    /**
+     * Sets the text in the commit message area (used by LLM suggestions).
+     */
+    /**
+     * Performs the actual stash operation and updates the UI.
+     */
+    private void performStash(List<ProjectFile> selectedFiles, String stashDescription) throws Exception {
+        if (selectedFiles.isEmpty()) {
+            getRepo().createStash(stashDescription);
+        } else {
+            getRepo().createPartialStash(stashDescription, selectedFiles);
+        }
+        SwingUtilities.invokeLater(() -> {
+            if (selectedFiles.isEmpty()) {
+                chrome.systemOutput("All changes stashed successfully: " + stashDescription);
+            } else {
+                String fileList = selectedFiles.size() <= 3
+                        ? selectedFiles.stream().map(Object::toString).collect(Collectors.joining(", "))
+                        : selectedFiles.size() + " files";
+                chrome.systemOutput("Stashed " + fileList + ": " + stashDescription);
+            }
+            commitMessageArea.setText(""); // Clear message area after stash
+            updateCommitPanel();
+            gitPanel.updateLogTab();
+            chrome.enableUserActionButtons();
+        });
+    }
+
+    /**
+     * Asynchronously suggests a commit message based on selected files or all changes.
+     *
+     * @param selectedFiles List of files to diff, or empty to diff all changes.
+     * @return A Future containing the suggested message, or null if no changes or error.
+     */
+    private Future<String> suggestMessageAsync(List<ProjectFile> selectedFiles) {
+        // Explicitly define the return type for the background task as String
+        return contextManager.<String>submitBackgroundTask("Suggesting commit message", () -> {
+            try {
+                var diff = selectedFiles.isEmpty()
+                        ? getRepo().diff()
+                        : getRepo().diffFiles(selectedFiles);
+                if (diff.isEmpty()) {
+                    SwingUtilities.invokeLater(() -> chrome.actionOutput("No changes detected"));
+                    return null; // Indicate no changes
+                }
+                // Assuming inferCommitMessageAsync now returns the Future<String>
+                // Cast needed because inferCommitMessageAsync returns raw Future
+                return (String) contextManager.inferCommitMessageAsync(diff).get(); // Get the result synchronously within this background task
+            } catch (Exception ex) {
+                logger.error("Error suggesting commit message:", ex);
+                SwingUtilities.invokeLater(() -> chrome.actionOutput("Error suggesting commit message: " + ex.getMessage()));
+                throw ex; // Rethrow to fail the future
+            }
+        });
     }
 
     /**

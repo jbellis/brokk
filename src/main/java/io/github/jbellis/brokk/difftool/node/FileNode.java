@@ -9,24 +9,23 @@ import java.io.File;
 public class FileNode implements Comparable<FileNode>, BufferNode {
     private final String name;
     private final File file;
-    private long fileLastModified;
-    private FileDocument document;
+    private final FileDocument document;
 
     public FileNode(String name, File file) {
         this.name = name;
         this.file = file;
+
+        // Create the FileDocument up front, once. No repeated reads:
+        this.document = new FileDocument(file, name);
+    }
+
+    @Override
+    public FileDocument getDocument() {
+        return document;  // Just return the one we have
     }
 
     public String getName() {
         return name;
-    }
-
-    public FileDocument getDocument() {
-        if (document == null || file.lastModified() != fileLastModified) {
-            document = new FileDocument(file, name);
-            fileLastModified = file.lastModified();
-        }
-        return document;
     }
 
     public long getSize() {
