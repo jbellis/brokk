@@ -543,6 +543,16 @@ public class PreviewPanel extends JPanel
             public void llmOutput(String token) {
                 appendSystemMessage(token);
             }
+
+            @Override
+            public void showOutputSpinner(String message) {
+                // do nothing
+            }
+
+            @Override
+            public void hideOutputSpinner() {
+                // do nothing
+            }
         }
         var resultsIo = new QuickResultsIo();
 

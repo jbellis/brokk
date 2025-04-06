@@ -34,6 +34,49 @@ import java.util.stream.Collectors;
 public class LLMTools {
     private static final Logger logger = LogManager.getLogger(LLMTools.class);
 
+    public enum Action {
+        EDIT, NEW, REMOVE, NONE
+    }
+
+    public static class ExtToolExecutionResultMessage extends ToolExecutionResultMessage {
+        private final ProjectFile file;
+        private final Action action;
+        private final Integer lines;
+
+        public ExtToolExecutionResultMessage(ToolExecutionRequest request, String result, ProjectFile file, Action action, Integer lines) {
+            super(request.id(), request.name(), result);
+            this.file = file;
+            this.action = action;
+            this.lines = lines;
+        }
+
+        // Getters for the new fields
+        public ProjectFile getFile() {
+            return file;
+        }
+
+        public Action getAction() {
+            return action;
+        }
+
+        public Integer getLines() {
+            return lines;
+        }
+
+        // Static factory methods for convenience
+        public static ExtToolExecutionResultMessage success(ToolExecutionRequest request, ProjectFile file, Action action, Integer lines) {
+            return new ExtToolExecutionResultMessage(request, "SUCCESS", file, action, lines);
+        }
+
+        public static ExtToolExecutionResultMessage error(ToolExecutionRequest request, String error) {
+            return new ExtToolExecutionResultMessage(request, error, null, Action.NONE, null);
+        }
+
+        public static ExtToolExecutionResultMessage none(ToolExecutionRequest request, String result) {
+            return new ExtToolExecutionResultMessage(request, result, null, Action.NONE, null);
+        }
+    }
+
     private final IContextManager contextManager;
 
     public LLMTools(IContextManager contextManager) {
@@ -75,28 +118,26 @@ public class LLMTools {
 
     /**
      * Actually apply a ValidatedToolRequest to the filesystem, returning
-     * a ToolExecutionResultMessage with either "SUCCESS" or an error message.
+     * an ExtToolExecutionResultMessage with details about the action performed.
      */
-    public ToolExecutionResultMessage executeTool(ValidatedToolRequest validated) {
+    public ExtToolExecutionResultMessage executeTool(ValidatedToolRequest validated) {
         if (validated.error() != null) {
-            return ToolExecutionResultMessage.from(validated.originalRequest(), validated.error());
+            // Error during parsing, no file action taken yet
+            return ExtToolExecutionResultMessage.error(validated.originalRequest(), validated.error());
         }
         try {
-            switch (validated.originalRequest().name()) {
-                case "replaceFile" -> replaceFile(validated.file(), validated.newFileContent());
-                case "replaceLines" -> replaceLines(validated.file(), validated.oldLines(), validated.newLines());
-                case "replaceFunction" -> replaceFunction(validated.functionLocation(), validated.newFunctionBody());
-                case "removeFile" -> removeFile(validated.file());
-                case "explain" -> {
-                    return ToolExecutionResultMessage.from(validated.originalRequest(), validated.explanation());
-                }
+            return switch (validated.originalRequest().name()) {
+                case "replaceFile" -> replaceFile(validated.originalRequest(), validated.file(), validated.newFileContent());
+                case "replaceLines" -> replaceLines(validated.originalRequest(), validated.file(), validated.oldLines(), validated.newLines());
+                case "replaceFunction" -> replaceFunction(validated.originalRequest(), validated.functionLocation(), validated.newFunctionBody());
+                case "removeFile" -> removeFile(validated.originalRequest(), validated.file());
+                case "explain" -> ExtToolExecutionResultMessage.none(validated.originalRequest(), validated.explanation());
                 default -> throw new ToolExecutionException("Unsupported tool: " + validated.originalRequest().name());
-            }
+            };
         } catch (Exception ex) {
             logger.warn("Tool application error", ex);
-            return ToolExecutionResultMessage.from(validated.originalRequest(), "Failed: " + ex.getMessage());
+            return ExtToolExecutionResultMessage.error(validated.originalRequest(), "Failed: " + ex.getMessage());
         }
-        return ToolExecutionResultMessage.from(validated.originalRequest(), "SUCCESS");
     }
 
     @Tool(value = """
@@ -110,16 +151,19 @@ public class LLMTools {
     /**
      * Overload that actually does the disk write after we've validated the file.
      */
-    public void replaceFile(ProjectFile file, String newContent) {
+    public ExtToolExecutionResultMessage replaceFile(ToolExecutionRequest request, ProjectFile file, String newContent) {
         try {
             var existing = file.exists();
             file.write(newContent);
+            var action = existing ? Action.EDIT : Action.NEW;
             if (!existing) {
                 contextManager.addToGit(List.of(file));
             }
             logger.debug("replaceFile: overwrote content in {}", file);
+            int lines = newContent.split("\n", -1).length;
+            return ExtToolExecutionResultMessage.success(request, file, action, lines);
         } catch (IOException e) {
-            throw new ToolExecutionException("Failed writing file " + file + ": " + e.getMessage());
+            throw new ToolExecutionException("Failed writing file " + file + ": " + e.getMessage(), e);
         }
     }
 
@@ -139,11 +183,13 @@ public class LLMTools {
         throw new ToolExecutionException("Direct invocation of replaceLines(String,String,String) is not supported. Use parseToolRequest + executeTool.");
     }
 
-    public void replaceLines(ProjectFile file, String oldLines, String newLines)
+    public ExtToolExecutionResultMessage replaceLines(ToolExecutionRequest request, ProjectFile file, String oldLines, String newLines)
             throws EditBlock.NoMatchException, EditBlock.AmbiguousMatchException {
         try {
             EditBlock.replaceInFile(file, oldLines, newLines);
             logger.info("replaceLines: updated text in {}", file);
+            int lines = newLines.split("\n", -1).length;
+            return ExtToolExecutionResultMessage.success(request, file, Action.EDIT, lines);
         } catch (IOException e) {
             throw new ToolExecutionException("Could not read or write file: " + file + " -> " + e.getMessage(), e);
         }
@@ -160,19 +206,21 @@ public class LLMTools {
     /**
      * Overload that actually does the file removal after we've validated the file.
      */
-    public void removeFile(ProjectFile file) {
+    public ExtToolExecutionResultMessage removeFile(ToolExecutionRequest request, ProjectFile file) {
         try {
             if (!file.exists()) {
                 throw new ToolExecutionException("File does not exist: " + file);
             }
             java.nio.file.Files.delete(file.absPath());
             logger.debug("removeFile: deleted {}", file);
+            // TODO: Add to git remove?
+            return ExtToolExecutionResultMessage.success(request, file, Action.REMOVE, null);
         } catch (IOException e) {
-            throw new ToolExecutionException("Failed deleting file " + file + ": " + e.getMessage());
+            throw new ToolExecutionException("Failed deleting file " + file + ": " + e.getMessage(), e);
         }
     }
 
-    public void replaceFunction(FunctionLocation loc, String newFunctionBody) {
+    public ExtToolExecutionResultMessage replaceFunction(ToolExecutionRequest request, FunctionLocation loc, String newFunctionBody) {
         // read original file
         ProjectFile file = loc.file();
         String original;
@@ -206,8 +254,10 @@ public class LLMTools {
         try {
             file.write(sb.toString());
             logger.info("replaceFunction: replaced lines {}..{} in {}", loc.startLine(), loc.endLine(), file);
+            int changedLines = loc.endLine() - loc.startLine();
+            return ExtToolExecutionResultMessage.success(request, file, Action.EDIT, changedLines);
         } catch (IOException e) {
-            throw new ToolExecutionException("Failed to write updated function to file " + file + ": " + e.getMessage());
+            throw new ToolExecutionException("Failed to write updated function to file " + file + ": " + e.getMessage(), e);
         }
     }
 
