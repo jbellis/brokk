@@ -2,6 +2,7 @@ package io.github.jbellis.brokk.gui;
 
 import io.github.jbellis.brokk.Context;
 import io.github.jbellis.brokk.ContextManager;
+import io.github.jbellis.brokk.Project;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -422,7 +423,7 @@ public class HistoryOutputPanel extends JPanel {
         openWindowButton.addActionListener(e -> {
             String text = llmStreamArea.getText();
             if (!text.isBlank()) {
-                new OutputWindow(text, chrome.themeManager != null && chrome.themeManager.isDarkTheme());
+                new OutputWindow(this, text, chrome.themeManager != null && chrome.themeManager.isDarkTheme());
             }
         });
         // Set minimum size
@@ -528,15 +529,20 @@ public class HistoryOutputPanel extends JPanel {
     /**
      * Inner class representing a detached window for viewing output text
      */
-    private class OutputWindow extends JFrame {
+    private static class OutputWindow extends JFrame {
+        private final HistoryOutputPanel parentPanel;
+        private final Project project;
         /**
          * Creates a new output window with the given text content
          *
+         * @param parentPanel The parent HistoryOutputPanel
          * @param text The markdown text to display
          * @param isDark Whether to use dark theme
          */
-        public OutputWindow(String text, boolean isDark) {
-            super("Output");
+        public OutputWindow(HistoryOutputPanel parentPanel, String text, boolean isDark) {
+            super("Output"); // Call superclass constructor first
+            this.parentPanel = parentPanel;
+            this.project = parentPanel.contextManager.getProject(); // Get project reference
             setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
 
             // Create markdown panel with the text
@@ -551,9 +557,32 @@ public class HistoryOutputPanel extends JPanel {
             // Add the scroll pane to the frame
             add(scrollPane);
 
-            // Set size and position
-            setSize(800, 600);
-            setLocationRelativeTo(null);
+            // Load saved size and position, or use defaults
+            var bounds = project.getOutputWindowBounds();
+            if (bounds.width <= 0 || bounds.height <= 0) {
+                setSize(800, 600); // Default size
+                setLocationRelativeTo(parentPanel); // Center relative to parent
+            } else {
+                setSize(bounds.width, bounds.height);
+                if (bounds.x >= 0 && bounds.y >= 0 && parentPanel.chrome.isPositionOnScreen(bounds.x, bounds.y)) {
+                    setLocation(bounds.x, bounds.y);
+                } else {
+                    setLocationRelativeTo(parentPanel); // Center relative to parent if off-screen
+                }
+            }
+
+            // Add listeners to save position/size on change
+            addComponentListener(new java.awt.event.ComponentAdapter() {
+                @Override
+                public void componentResized(java.awt.event.ComponentEvent e) {
+                    project.saveOutputWindowBounds(OutputWindow.this);
+                }
+
+                @Override
+                public void componentMoved(java.awt.event.ComponentEvent e) {
+                    project.saveOutputWindowBounds(OutputWindow.this);
+                }
+            });
 
             // Add ESC key binding to close the window
             var rootPane = getRootPane();

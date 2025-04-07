@@ -43,6 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -351,7 +352,7 @@ public class Coder {
         writeRequestToHistory(messages, tools);
 
         if (!tools.isEmpty() && LLMTools.requiresEmulatedTools(model)) {
-            return emulateToolsUsingStructuredSchema(model, messages, tools, toolChoice, echo);
+            return emulateToolsUsingStructuredOutput(model, messages, tools, toolChoice, echo);
         }
 
         // If no tools, or model can do native function calling, do normal.
@@ -371,47 +372,36 @@ public class Coder {
     }
 
     /**
-     * Emulates function calling for models that support structured output but not native function calling
-     * {
-     *   "tool_calls": [
-     *     {
-     *       "name": "my_tool",
-     *       "arguments": { ...free or partial schema... }
-     *     },
-     *     ...
-     *   ]
-     * }
-     *
-     * Then we parse the resulting JSON, turning it into tool execution requests.
+     * Emulates function calling for models that don't natively support it.
+     * We have two approaches:
+     * 1. Schema-based: For models that support JSON schema in response_format
+     * 2. Text-based: For models without schema support, using text instructions
      */
-    private StreamingResult emulateToolsUsingStructuredSchema(StreamingChatLanguageModel model,
+    private StreamingResult emulateToolsUsingStructuredOutput(StreamingChatLanguageModel model,
                                                               List<ChatMessage> messages,
                                                               List<ToolSpecification> tools,
                                                               ToolChoice toolChoice,
                                                               boolean echo)
     {
+        if (Models.supportsJsonSchema(model)) {
+            return emulateToolsUsingStructuredSchema(model, messages, tools, toolChoice, echo);
+        } else {
+            return emulateToolsUsingJsonObject(model, messages, tools, toolChoice, echo);
+        }
+    }
+
+    /**
+     * Common helper for emulating function calling tools using JSON output
+     */
+    private StreamingResult emulateToolsCommon(StreamingChatLanguageModel model,
+                                              List<ChatMessage> messages,
+                                              List<ToolSpecification> tools,
+                                              ToolChoice toolChoice,
+                                              boolean echo,
+                                              Function<List<ChatMessage>, ChatRequest> requestBuilder,
+                                              Function<Throwable, String> retryInstructionsProvider)
+    {
         assert !tools.isEmpty();
-
-        // Build a top-level JSON schema with "tool_calls" as an array of objects
-        // each object has "name" as an enum of possible tool names, and "arguments"
-        // as a general object with no fixed properties (since "anyOf" etc. is not
-        // always supported by all LLM providers).
-        var toolNames = tools.stream().map(ToolSpecification::name).distinct().toList();
-        var schema = buildToolCallsSchema(toolNames);
-        var responseFormat = ResponseFormat.builder()
-                .type(ResponseFormatType.JSON)
-                .jsonSchema(schema)
-                .build();
-        var requestParams = ChatRequestParameters.builder()
-                .responseFormat(responseFormat)
-                .build();
-
-        // We'll add a user reminder to produce a JSON that matches the schema
-        var attemptMessages = new ArrayList<>(messages);
-        var instructions = getInstructions(tools);
-        var modified = new UserMessage(Models.getText(messages.getLast()) + "\n\n" + instructions);
-        attemptMessages.set(attemptMessages.size() - 1, modified);
-        logger.debug("Modified messages are {}", attemptMessages);
 
         // We'll do up to 3 tries
         int maxTries = 3;
@@ -419,17 +409,16 @@ public class Coder {
         ChatResponse lastResponse = null;
         Throwable lastError = null;
         int outputTokenCount = -1;
+        List<ChatMessage> attemptMessages = new ArrayList<>(messages);
 
         for (int attempt = 1; attempt <= maxTries; attempt++) {
-            var request = ChatRequest.builder()
-                    .messages(attemptMessages)
-                    .parameters(requestParams)
-                    .build();
-
+            var request = requestBuilder.apply(attemptMessages);
             var singleCallResult = doSingleStreamingCall(model, request, echo);
+
             if (singleCallResult.cancelled) {
                 return singleCallResult; // user interrupt
             }
+
             lastResponse = singleCallResult.chatResponse;
             lastError = singleCallResult.error;
             outputTokenCount = singleCallResult.outputTokenCount;
@@ -438,6 +427,7 @@ public class Coder {
             if (lastError != null) {
                 break;
             }
+
             // If there's no AI message, we can't parse
             if (lastResponse == null || lastResponse.aiMessage() == null) {
                 lastError = new IllegalArgumentException("No valid ChatResponse or AiMessage from model");
@@ -464,21 +454,16 @@ public class Coder {
                     lastError = new RuntimeException("Failed to produce valid tool_calls after " + maxTries + " attempts", e);
                     break;
                 }
+
                 // Otherwise, add a hint and re-try
                 io.systemOutput("Retry " + attempt + "/" + (maxTries-1) + ": Invalid JSON response, requesting proper format.");
                 attemptMessages.add(new AiMessage(lastResponse.aiMessage().text()));
-                attemptMessages.add(new UserMessage("""
-                Your previous response was invalid or did not contain tool_calls. 
-                Please ensure you only return a JSON object matching the schema:
-                  {
-                    "tool_calls": [
-                      {
-                        "name": "...",
-                        "arguments": { ... }
-                      }
-                    ]
-                  }
-                """.stripIndent()));
+                String instructions = retryInstructionsProvider.apply(e);
+                attemptMessages.add(new UserMessage(instructions));
+
+                // Record retry in history
+                writeToHistory("Retry Attempt " + attempt,
+                               "Invalid JSON: " + lastResponse.aiMessage().text() + "\n\nRetry with: " + instructions);
             }
         }
 
@@ -496,6 +481,115 @@ public class Coder {
                 .build();
         logger.error("Emulated function calling failed: {}", lastError.getMessage());
         return new StreamingResult(fail, outputTokenCount, false, lastError);
+    }
+
+    /**
+     * Emulates function calling for models that support structured output with JSON schema
+     */
+    private StreamingResult emulateToolsUsingStructuredSchema(StreamingChatLanguageModel model,
+                                                              List<ChatMessage> messages,
+                                                              List<ToolSpecification> tools,
+                                                              ToolChoice toolChoice,
+                                                              boolean echo)
+    {
+        // Build a top-level JSON schema with "tool_calls" as an array of objects
+        var toolNames = tools.stream().map(ToolSpecification::name).distinct().toList();
+        var schema = buildToolCallsSchema(toolNames);
+        var responseFormat = ResponseFormat.builder()
+                .type(ResponseFormatType.JSON)
+                .jsonSchema(schema)
+                .build();
+        var requestParams = ChatRequestParameters.builder()
+                .responseFormat(responseFormat)
+                .build();
+
+        // We'll add a user reminder to produce a JSON that matches the schema
+        var instructions = getInstructions(tools);
+        var modified = new UserMessage(Models.getText(messages.getLast()) + "\n\n" + instructions);
+        var initialMessages = new ArrayList<>(messages);
+        initialMessages.set(initialMessages.size() - 1, modified);
+        logger.debug("Modified messages are {}", initialMessages);
+
+        // Build request creator function
+        Function<List<ChatMessage>, ChatRequest> requestBuilder = attemptMessages ->
+            ChatRequest.builder()
+                .messages(attemptMessages)
+                .parameters(requestParams)
+                .build();
+
+        // Function to generate retry instructions
+        Function<Throwable, String> retryInstructionsProvider = e -> """
+            Your previous response was invalid or did not contain tool_calls: %s
+            Please ensure you only return a JSON object matching the schema:
+              {
+                "tool_calls": [
+                  {
+                    "name": "...",
+                    "arguments": { ... }
+                  }
+                ]
+              }
+            """.formatted(e.getMessage()).stripIndent();
+
+        return emulateToolsCommon(model, initialMessages, tools, toolChoice, echo, requestBuilder, retryInstructionsProvider);
+    }
+
+    /**
+     * Emulates function calling for models that don't support schema but can output JSON based on text instructions
+     */
+    private StreamingResult emulateToolsUsingJsonObject(StreamingChatLanguageModel model,
+                                                        List<ChatMessage> messages,
+                                                        List<ToolSpecification> tools,
+                                                        ToolChoice toolChoice,
+                                                        boolean echo)
+    {
+        var instructionsPresent = emulatedToolInstructionsPresent(messages);
+        logger.debug("Tool emulation sending {} messages with {}", messages.size(), instructionsPresent);
+
+        List<ChatMessage> initialMessages = new ArrayList<>(messages);
+        if (!instructionsPresent) {
+            // Inject instructions for the model re how to format function calls
+            var instructions = getInstructions(tools);
+            var modified = new UserMessage(Models.getText(messages.getLast()) + "\n\n" + instructions);
+            initialMessages.set(initialMessages.size() - 1, modified);
+            logger.debug("Modified messages are {}", initialMessages);
+        }
+
+        // Build request creator function
+        Function<List<ChatMessage>, ChatRequest> requestBuilder = attemptMessages ->
+            ChatRequest.builder()
+                .messages(attemptMessages)
+                .parameters(ChatRequestParameters.builder()
+                             .responseFormat(ResponseFormat.builder()
+                                     .type(ResponseFormatType.JSON)
+                                     .build())
+                             .build())
+                .build();
+
+        // Function to generate retry instructions
+        Function<Throwable, String> retryInstructionsProvider = e -> """
+            Your previous response was not valid: %s
+            You MUST respond ONLY with a valid JSON object containing a 'tool_calls' array. Do not include any other text or explanation.
+            
+            IMPORTANT: Try solving a smaller piece of the problem if you're hitting token limits.
+            
+            REMEMBER that you are to provide a JSON object containing a 'tool_calls' array, NOT top-level array.
+            Here is the format, where $foo indicates that you will make appropriate substitutions for the given tool call
+            {
+              "tool_calls": [
+                {
+                  "name": "$tool_name",
+                  "arguments": {
+                    "$arg1": "$value1",
+                    "$arg2": "$value2",
+                    ...
+                  }
+                }
+              ]
+            }
+            """.formatted(e.getMessage()).stripIndent();
+
+        return emulateToolsCommon(model, initialMessages, tools, toolChoice, echo, requestBuilder, retryInstructionsProvider);
     }
 
     private static boolean emulatedEditToolInstructionsPresent(List<ChatMessage> messages) {
@@ -574,40 +668,47 @@ public class Coder {
         }
 
         JsonNode toolCallsNode;
-        if (!root.has("tool_calls") || !root.get("tool_calls").isArray()) {
-            throw new IllegalArgumentException("Response missing 'tool_calls' array property");
+        if (root.has("tool_calls") && root.get("tool_calls").isArray()) {
+            // happy path, this is what we asked for
+            toolCallsNode = root.get("tool_calls");
+        } else if (root.isArray()) {
+            // some models like to give a top-level array instead
+            toolCallsNode = root;
+        } else {
+            throw new IllegalArgumentException("Response does not contain a 'tool_calls' array");
         }
-        toolCallsNode = root.get("tool_calls");
 
-        var callsList = new ArrayList<ToolExecutionRequest>();
+        // Transform json into list of tool execution requests
+        var toolExecutionRequests = new ArrayList<ToolExecutionRequest>();
         for (int i = 0; i < toolCallsNode.size(); i++) {
-            JsonNode callNode = toolCallsNode.get(i);
-            if (!callNode.has("name") || !callNode.has("arguments")) {
-                throw new IllegalArgumentException("tool_calls[" + i + "] missing 'name' or 'arguments'");
+            JsonNode toolCall = toolCallsNode.get(i);
+            if (!toolCall.has("name") || !toolCall.has("arguments")) {
+                throw new IllegalArgumentException("Tool call object is missing 'name' or 'arguments' field");
             }
-            String name = callNode.get("name").asText();
-            JsonNode argsNode = callNode.get("arguments");
 
-            if (!argsNode.isObject()) {
-                throw new IllegalArgumentException("tool_calls[" + i + "] provided non-object arguments " + argsNode);
+            String toolName = toolCall.get("name").asText();
+            JsonNode arguments = toolCall.get("arguments");
+
+            if (!arguments.isObject()) {
+                throw new IllegalArgumentException("tool_calls[" + i + "] provided non-object arguments " + arguments);
             }
-            String argsStr = argsNode.toString();
-            var req = ToolExecutionRequest.builder()
+            String argsStr = arguments.toString();
+            var toolExecutionRequest = ToolExecutionRequest.builder()
                     .id(String.valueOf(i))
-                    .name(name)
+                    .name(toolName)
                     .arguments(argsStr)
                     .build();
-            callsList.add(req);
+
+            toolExecutionRequests.add(toolExecutionRequest);
         }
 
-        var aiMsgWithTools = new AiMessage("[json]", callsList);
-        var newResponse = ChatResponse.builder().aiMessage(aiMsgWithTools).build();
+        assert !toolExecutionRequests.isEmpty();
+        logger.debug("Generated tool execution requests: {}", toolExecutionRequests);
 
-        return new StreamingResult(newResponse,
-                                   result.originalResponse,
-                                   result.outputTokenCount,
-                                   false,
-                                   null);
+        // Create a properly formatted AiMessage with tool execution requests
+        var aiMessage = new AiMessage("[json]", toolExecutionRequests);
+        var cr = ChatResponse.builder().aiMessage(aiMessage).build();
+        return new StreamingResult(cr, result.originalResponse, result.outputTokenCount, false, null);
     }
 
     private static String getInstructions(List<ToolSpecification> tools) {
@@ -671,9 +772,9 @@ public class Coder {
                     %s
                     %s
                     </tool>
-                            """.formatted(tool.name(),
-                                          tool.description(),
-                                          parametersInfo.isEmpty() ? "(No parameters)" : parametersInfo);
+                    """.formatted(tool.name(),
+                                  tool.description(),
+                                  parametersInfo.isEmpty() ? "(No parameters)" : parametersInfo);
                 }).collect(Collectors.joining("\n"));
 
         // if you change this you probably also need to change emulatedToolInstructionsPresent

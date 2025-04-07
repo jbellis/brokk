@@ -639,7 +639,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
         historyOutputPanel.updateHistoryTable(contextToSelect);
     }
 
-    private boolean isPositionOnScreen(int x, int y) {
+    public boolean isPositionOnScreen(int x, int y) {
         for (var screen : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
             for (var config : screen.getConfigurations()) {
                 if (config.getBounds().contains(x, y)) {

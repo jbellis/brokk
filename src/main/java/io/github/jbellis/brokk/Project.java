@@ -547,6 +547,13 @@ public class Project implements IProject, AutoCloseable {
     }
 
     /**
+     * Gets the saved output window bounds
+     */
+    public java.awt.Rectangle getOutputWindowBounds() {
+        return getWindowBounds("outputFrame", 800, 600);
+    }
+
+    /**
      * Save main window bounds
      */
     public void saveMainWindowBounds(JFrame window) {
@@ -565,6 +572,13 @@ public class Project implements IProject, AutoCloseable {
      */
     public void saveDiffWindowBounds(JFrame frame) {
         saveWindowBounds("diffFrame", frame);
+    }
+
+    /**
+     * Save output window bounds
+     */
+    public void saveOutputWindowBounds(JFrame frame) {
+        saveWindowBounds("outputFrame", frame);
     }
 
     /**
