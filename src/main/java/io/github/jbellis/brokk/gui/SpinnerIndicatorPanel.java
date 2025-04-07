@@ -2,6 +2,7 @@ package io.github.jbellis.brokk.gui;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.Objects;
 
 /**
  * A simple panel displaying a spinner icon and a message.
@@ -13,14 +14,15 @@ class SpinnerIndicatorPanel extends JPanel {
     /**
      * Creates a spinner panel.
      *
-     * @param message           The text message to display next to the spinner.
-     * @param isDarkTheme       Whether the dark theme is active.
-     * @param backgroundColor   The background color to apply (usually matching the parent's text area).
+     * @param message         The text message to display next to the spinner.
+     * @param isDarkTheme     Whether the dark theme is active.
+     * @param backgroundColor The background color to apply (usually matching the parent's text area).
      */
     public SpinnerIndicatorPanel(String message, boolean isDarkTheme, Color backgroundColor) {
         setLayout(new FlowLayout(FlowLayout.LEFT, 10, 5));
         setAlignmentX(LEFT_ALIGNMENT);
-        var spinnerIcon = new ImageIcon(getClass().getResource("/icons/spinner.gif"));
+        var spinnerIcon = new ImageIcon(Objects.requireNonNull(getClass().getResource(
+                "/icons/" + (isDarkTheme ? "spinner_dark.gif" : "spinner_white.gif"))));
         var spinnerLabel = new JLabel(spinnerIcon);
         spinnerLabel.setFont(spinnerLabel.getFont().deriveFont(Font.BOLD));
 

@@ -278,7 +278,10 @@ public class Coder {
             logger.debug("Sending request to {} attempt {} [only last message shown]: {}",
                          Models.nameOf(model), attempt, messages.getLast());
 
-            io.showOutputSpinner("Thinking...");
+            if (echo) {
+                io.showOutputSpinner("Thinking...");    
+            }
+            
             var response = doSingleSendMessage(model, messages, tools, toolChoice, echo);
             if (response.cancelled) {
                 writeToHistory("Cancelled", "LLM request cancelled by user");
