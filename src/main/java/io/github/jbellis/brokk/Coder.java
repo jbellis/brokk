@@ -592,6 +592,15 @@ public class Coder {
         return emulateToolsCommon(model, initialMessages, tools, toolChoice, echo, requestBuilder, retryInstructionsProvider);
     }
 
+    private static boolean emulatedToolInstructionsPresent(List<ChatMessage> messages) {
+        return messages.stream().anyMatch(m -> {
+            var t = Models.getText(m);
+            return t.contains("tool_calls")
+                    && t.matches("(?s).*\\d+ available tools:.*")
+                    && t.contains("top-level JSON");
+        });
+    }
+    
     private static boolean emulatedEditToolInstructionsPresent(List<ChatMessage> messages) {
         return messages.stream().anyMatch(m -> {
             var t = Models.getText(m);
