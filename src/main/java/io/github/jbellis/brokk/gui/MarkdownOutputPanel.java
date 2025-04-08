@@ -7,6 +7,7 @@ import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 import org.fife.ui.rsyntaxtextarea.Theme;
 
 import javax.swing.*;
+import javax.swing.text.DefaultCaret;
 import javax.swing.text.html.HTMLEditorKit;
 import java.awt.*;
 import java.io.IOException;
@@ -184,7 +185,7 @@ class MarkdownOutputPanel extends JPanel implements Scrollable
      */
     public void addTextChangeListener(Runnable listener)
     {
-        textChangeListeners.add(listener);
+         textChangeListeners.add(listener);
     }
 
     /**
@@ -336,6 +337,8 @@ class MarkdownOutputPanel extends JPanel implements Scrollable
         codeArea.setEditable(false);
         codeArea.setLineWrap(true);
         codeArea.setWrapStyleWord(true);
+        DefaultCaret caret = (DefaultCaret) codeArea.getCaret();
+        caret.setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
 
         codeArea.setSyntaxEditingStyle(switch (fenceInfo) {
             case "java" -> SyntaxConstants.SYNTAX_STYLE_JAVA;
@@ -391,6 +394,8 @@ class MarkdownOutputPanel extends JPanel implements Scrollable
     private JEditorPane createHtmlPane()
     {
         var htmlPane = new JEditorPane();
+        DefaultCaret caret = (DefaultCaret) htmlPane.getCaret();
+        caret.setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
         htmlPane.setContentType("text/html");
         htmlPane.setEditable(false);
         htmlPane.setAlignmentX(LEFT_ALIGNMENT);
