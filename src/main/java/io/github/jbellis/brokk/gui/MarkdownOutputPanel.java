@@ -25,6 +25,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import io.github.jbellis.brokk.gui.MOP.AIMessageRenderer;
+import io.github.jbellis.brokk.gui.MOP.UserMessageRenderer;
+import io.github.jbellis.brokk.gui.MOP.CustomMessageRenderer;
+
 /**
  * A Swing JPanel designed to display structured conversations as formatted text content which may include
  * standard Markdown, Markdown code fences (```), and Brokk-specific `SEARCH/REPLACE` edit blocks.
@@ -71,6 +75,11 @@ class MarkdownOutputPanel extends JPanel implements Scrollable {
         // Build the Flexmark parser for normal text blocks
         parser = Parser.builder().build();
         renderer = HtmlRenderer.builder().build();
+        
+        // Initialize message renderers
+        aiRenderer = new io.github.jbellis.brokk.gui.MOP.AIMessageRenderer();
+        userRenderer = new io.github.jbellis.brokk.gui.MOP.UserMessageRenderer();
+        customRenderer = new io.github.jbellis.brokk.gui.MOP.CustomMessageRenderer();
     }
 
     /**
@@ -309,90 +318,30 @@ class MarkdownOutputPanel extends JPanel implements Scrollable {
         textChangeListeners.add(listener);
     }
 
+    // Message renderers for different message types
+    private final AIMessageRenderer aiRenderer;
+    private final UserMessageRenderer userRenderer;
+    private final CustomMessageRenderer customRenderer;
+    
     /**
      * Renders a single message component based on its type
      */
     private Component renderMessageComponent(ChatMessage message) {
-        // Create a container panel for this message
-        JPanel messagePanel = new JPanel();
-        messagePanel.setLayout(new BoxLayout(messagePanel, BoxLayout.Y_AXIS));
-        messagePanel.setBackground(textBackgroundColor);
-        messagePanel.setAlignmentX(LEFT_ALIGNMENT);
-
-        // Based on message type, add appropriate styles and content
-        switch (message.type()) {
-            case AI -> {
-                String content = Models.getRepr(message);
-                // For AI messages, try to parse edit blocks first
-                var parseResult = EditBlock.parseAllBlocks(content);
-
-                // If we have edit blocks, render them
-                boolean hasEditBlocks = parseResult.blocks().stream()
-                        .anyMatch(block -> block.block() != null);
-
-                if (hasEditBlocks) {
-                    // Create a container for edit blocks
-                    JPanel blocksPanel = new JPanel();
-                    blocksPanel.setLayout(new BoxLayout(blocksPanel, BoxLayout.Y_AXIS));
-                    blocksPanel.setBackground(textBackgroundColor);
-                    blocksPanel.setAlignmentX(LEFT_ALIGNMENT);
-
-                    for (var block : parseResult.blocks()) {
-                        if (block.block() != null) {
-                            // Edit block
-                            blocksPanel.add(renderEditBlockComponent(block.block()));
-                        } else if (!block.text().isBlank()) {
-                            // Text between edit blocks - render as markdown
-                            var textPanel = renderMarkdownContent(block.text());
-                            blocksPanel.add(textPanel);
-                        }
-                    }
-                    blocksPanel.setBorder(BorderFactory.createLineBorder(Color.yellow, 2));
-                    messagePanel.add(blocksPanel);
-                } else {
-                    // No edit blocks, render as markdown
-                    var contentPanel = renderMarkdownContent(content);
-                    contentPanel.setBorder(BorderFactory.createLineBorder(Color.yellow, 2));
-                    messagePanel.add(contentPanel);
-                }
-            }
-            case USER -> {
-                // For user messages, render as plain text with styling
-                JPanel userPanel = new JPanel();
-                userPanel.setLayout(new BoxLayout(userPanel, BoxLayout.Y_AXIS));
-                userPanel.setBackground(isDarkTheme ? new Color(60, 60, 60) : new Color(245, 245, 245));
-                // userPanel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
-                userPanel.setBorder(BorderFactory.createLineBorder(Color.red, 2));
-                userPanel.setAlignmentX(LEFT_ALIGNMENT);
-                var textPane = renderMarkdownContent(Models.getRepr(message));
-                textPane.setForeground(isDarkTheme ? new Color(220, 220, 220) : new Color(30, 30, 30));
-
-                userPanel.add(textPane);
-                messagePanel.add(userPanel);
-            }
-            case CUSTOM -> {
-                // For custom/common messages, render as plain text with styling
-                JPanel customPanel = new JPanel();
-                customPanel.setLayout(new BoxLayout(customPanel, BoxLayout.Y_AXIS));
-                customPanel.setBackground(isDarkTheme ? new Color(60, 60, 60) : new Color(245, 245, 245));
-                // customPanel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
-                customPanel.setBorder(BorderFactory.createLineBorder(Color.blue, 2));
-                customPanel.setAlignmentX(LEFT_ALIGNMENT);
-                var textPane = renderMarkdownContent(Models.getRepr(message));
-                textPane.setForeground(isDarkTheme ? new Color(220, 220, 220) : new Color(30, 30, 30));
-
-                customPanel.add(textPane);
-                messagePanel.add(customPanel);
-            }
+        return switch (message.type()) {
+            case AI -> aiRenderer.renderComponent(message, textBackgroundColor, isDarkTheme);
+            case USER -> userRenderer.renderComponent(message, textBackgroundColor, isDarkTheme);
+            case CUSTOM -> customRenderer.renderComponent(message, textBackgroundColor, isDarkTheme);
             default -> {
                 // Default case for other message types
+                JPanel messagePanel = new JPanel();
+                messagePanel.setLayout(new BoxLayout(messagePanel, BoxLayout.Y_AXIS));
+                messagePanel.setBackground(textBackgroundColor);
+                messagePanel.setAlignmentX(LEFT_ALIGNMENT);
                 messagePanel.add(createPlainTextPane(Models.getRepr(message)));
+                messagePanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, messagePanel.getPreferredSize().height));
+                yield messagePanel;
             }
-        }
-
-        // Set maximum width and return
-        messagePanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, messagePanel.getPreferredSize().height));
-        return messagePanel;
+        };
     }
 
     /**
