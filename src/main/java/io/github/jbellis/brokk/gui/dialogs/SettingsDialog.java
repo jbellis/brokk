@@ -27,12 +27,13 @@ public class SettingsDialog extends JDialog {
     private JTextArea buildInstructionsArea;
     private DataRetentionPanel dataRetentionPanel; // Reference to the new panel
     // Model selection combo boxes (initialized in createModelsPanel)
-    private JComboBox<String> architectModelComboBox;
-    private JComboBox<String> codeModelComboBox;
-    private JComboBox<String> editModelComboBox;
-    private JComboBox<String> searchModelComboBox;
+        private JComboBox<String> architectModelComboBox;
+        private JComboBox<String> codeModelComboBox;
+        private JComboBox<String> askModelComboBox; // Added Ask model combo box
+        private JComboBox<String> editModelComboBox;
+        private JComboBox<String> searchModelComboBox;
 
-    public SettingsDialog(Frame owner, Chrome chrome) {
+        public SettingsDialog(Frame owner, Chrome chrome) {
         super(owner, "Settings", true); // Modal dialog
         this.chrome = chrome;
             setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
@@ -434,29 +435,49 @@ public class SettingsDialog extends JDialog {
                 gbc.fill = GridBagConstraints.HORIZONTAL; // Restore fill for tooltip
                 modelsPanel.add(architectTooltip, gbc);
 
-                // --- Code Model ---
-            gbc.gridx = 0;
-            gbc.gridy = row;
-            gbc.weightx = 0.0;
-            modelsPanel.add(new JLabel("Code/Ask Model:"), gbc);
-            codeModelComboBox = new JComboBox<>(availableModels.toArray(new String[0]));
-            codeModelComboBox.setSelectedItem(project.getCodeModelName());
-            JLabel codeTooltip = new JLabel("Used when invoking Code Agent manually");
-            codeTooltip.setFont(codeTooltip.getFont().deriveFont(Font.ITALIC, codeTooltip.getFont().getSize() * 0.9f));
-            gbc.gridx = 1;
-            gbc.gridy = row++;
-                gbc.weightx = 0.0; // Don't stretch combo box horizontally
-                gbc.fill = GridBagConstraints.NONE; // Use preferred size
-                modelsPanel.add(codeModelComboBox, gbc);
+                    // --- Code Model ---
+                gbc.gridx = 0;
+                gbc.gridy = row;
+                gbc.weightx = 0.0;
+                modelsPanel.add(new JLabel("Code Model:"), gbc); // Label changed
+                codeModelComboBox = new JComboBox<>(availableModels.toArray(new String[0]));
+                codeModelComboBox.setSelectedItem(project.getCodeModelName());
+                JLabel codeTooltip = new JLabel("Used when invoking Code Agent manually");
+                codeTooltip.setFont(codeTooltip.getFont().deriveFont(Font.ITALIC, codeTooltip.getFont().getSize() * 0.9f));
                 gbc.gridx = 1;
                 gbc.gridy = row++;
-                gbc.weightx = 1.0;
-                gbc.fill = GridBagConstraints.HORIZONTAL;
-                modelsPanel.add(codeTooltip, gbc);
+                    gbc.weightx = 0.0; // Don't stretch combo box horizontally
+                    gbc.fill = GridBagConstraints.NONE; // Use preferred size
+                    modelsPanel.add(codeModelComboBox, gbc);
+                    gbc.gridx = 1;
+                    gbc.gridy = row++;
+                    gbc.weightx = 1.0;
+                    gbc.fill = GridBagConstraints.HORIZONTAL;
+                    modelsPanel.add(codeTooltip, gbc);
 
-                // --- Edit Model ---
-            gbc.gridx = 0;
-            gbc.gridy = row;
+                    // --- Ask Model --- Added
+                gbc.gridx = 0;
+                gbc.gridy = row;
+                gbc.weightx = 0.0;
+                modelsPanel.add(new JLabel("Ask Model:"), gbc);
+                askModelComboBox = new JComboBox<>(availableModels.toArray(new String[0]));
+                askModelComboBox.setSelectedItem(project.getAskModelName()); // Use getAskModelName
+                JLabel askTooltip = new JLabel("Used when invoking the Ask command");
+                askTooltip.setFont(askTooltip.getFont().deriveFont(Font.ITALIC, askTooltip.getFont().getSize() * 0.9f));
+                gbc.gridx = 1;
+                gbc.gridy = row++;
+                    gbc.weightx = 0.0; // Don't stretch combo box horizontally
+                    gbc.fill = GridBagConstraints.NONE; // Use preferred size
+                    modelsPanel.add(askModelComboBox, gbc);
+                    gbc.gridx = 1;
+                    gbc.gridy = row++;
+                    gbc.weightx = 1.0;
+                    gbc.fill = GridBagConstraints.HORIZONTAL;
+                    modelsPanel.add(askTooltip, gbc);
+
+                    // --- Edit Model ---
+                gbc.gridx = 0;
+                gbc.gridy = row;
             gbc.weightx = 0.0;
             modelsPanel.add(new JLabel("Edit Model:"), gbc);
             editModelComboBox = new JComboBox<>(availableModels.toArray(new String[0]));
@@ -598,13 +619,20 @@ public class SettingsDialog extends JDialog {
             }
             if (codeModelComboBox != null) {
                     String selectedCodeModel = (String) codeModelComboBox.getSelectedItem();
-                    if (selectedCodeModel != null && !selectedCodeModel.equals(project.getCodeModelName())) {
-                        project.setCodeModelName(selectedCodeModel);
+                        if (selectedCodeModel != null && !selectedCodeModel.equals(project.getCodeModelName())) {
+                            project.setCodeModelName(selectedCodeModel);
+                        }
                     }
-                }
-                if (editModelComboBox != null) {
-                    String selectedEditModel = (String) editModelComboBox.getSelectedItem();
-                    if (selectedEditModel != null && !selectedEditModel.equals(project.getEditModelName())) {
+                    // Added Ask model apply
+                    if (askModelComboBox != null) {
+                        String selectedAskModel = (String) askModelComboBox.getSelectedItem();
+                        if (selectedAskModel != null && !selectedAskModel.equals(project.getAskModelName())) {
+                            project.setAskModelName(selectedAskModel);
+                        }
+                    }
+                    if (editModelComboBox != null) {
+                        String selectedEditModel = (String) editModelComboBox.getSelectedItem();
+                        if (selectedEditModel != null && !selectedEditModel.equals(project.getEditModelName())) {
                         project.setEditModelName(selectedEditModel);
                     }
                 }

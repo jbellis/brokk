@@ -46,10 +46,11 @@ public class Project implements IProject, AutoCloseable {
     private static final String BUILD_DETAILS_KEY = "buildDetailsJson";
     private static final String ARCHITECT_MODEL_KEY = "architectModel";
     private static final String CODE_MODEL_KEY = "codeModel";
-    private static final String EDIT_MODEL_KEY = "editModel";
-    private static final String SEARCH_MODEL_KEY = "searchModel";
+        private static final String ASK_MODEL_KEY = "askModel"; // Added for Ask
+        private static final String EDIT_MODEL_KEY = "editModel";
+        private static final String SEARCH_MODEL_KEY = "searchModel";
 
-    // --- Static paths ---
+        // --- Static paths ---
     private static final Path BROKK_CONFIG_DIR = Path.of(System.getProperty("user.home"), ".config", "brokk");
     private static final Path PROJECTS_PROPERTIES_PATH = BROKK_CONFIG_DIR.resolve("projects.properties");
     private static final Path GLOBAL_PROPERTIES_PATH = BROKK_CONFIG_DIR.resolve("brokk.properties");
@@ -242,25 +243,42 @@ public class Project implements IProject, AutoCloseable {
         saveWorkspaceProperties();
     }
 
-    /**
-     * Gets the configured model name for code generation tasks.
-     * Falls back to a default if not set.
-     */
-    public String getCodeModelName() {
-        return workspaceProps.getProperty(CODE_MODEL_KEY);
-    }
+        /**
+         * Gets the configured model name for code generation tasks.
+         * Falls back to a default if not set.
+         */
+        public String getCodeModelName() {
+            return workspaceProps.getProperty(CODE_MODEL_KEY);
+        }
 
-    /**
-     * Sets the model name for code generation tasks.
-     */
-    public void setCodeModelName(String modelName) {
-        workspaceProps.setProperty(CODE_MODEL_KEY, modelName);
-        saveWorkspaceProperties();
-    }
+        /**
+         * Sets the model name for code generation tasks.
+         */
+        public void setCodeModelName(String modelName) {
+            workspaceProps.setProperty(CODE_MODEL_KEY, modelName);
+            saveWorkspaceProperties();
+        }
 
-    /**
-     * Gets the configured model name for edit tasks.
-     * Falls back to a default if not set.
+        /**
+         * Gets the configured model name for ask tasks.
+         * Falls back to a default if not set.
+         */
+        public String getAskModelName() {
+            return workspaceProps.getProperty(ASK_MODEL_KEY);
+        }
+
+        /**
+         * Sets the model name for ask tasks.
+         */
+        public void setAskModelName(String modelName) {
+            workspaceProps.setProperty(ASK_MODEL_KEY, modelName);
+            saveWorkspaceProperties();
+        }
+
+
+        /**
+         * Gets the configured model name for edit tasks.
+         * Falls back to a default if not set.
      */
     public String getEditModelName() {
         return workspaceProps.getProperty(EDIT_MODEL_KEY);

@@ -25,6 +25,7 @@ import io.github.jbellis.brokk.util.LoggingExecutorService;
 import io.github.jbellis.brokk.util.StackTrace;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.eclipse.jgit.api.errors.GitAPIException;
 import org.jetbrains.annotations.NotNull;
 import scala.Option;
 
@@ -300,18 +301,27 @@ public class ContextManager implements IContextManager, AutoCloseable {
         return modelName == null ? models.systemModel() : models.get(modelName);
     }
 
-    /**
-     * Returns the configured Code model, falling back to the system model if unavailable.
-     */
-    public StreamingChatLanguageModel getCodeModel() {
-        var modelName = project.getCodeModelName();
-        return modelName == null ? models.systemModel() : models.get(modelName);
-    }
+        /**
+         * Returns the configured Code model, falling back to the system model if unavailable.
+         */
+        public StreamingChatLanguageModel getCodeModel() {
+            var modelName = project.getCodeModelName();
+            return modelName == null ? models.systemModel() : models.get(modelName);
+        }
 
-    /**
-     * Returns the configured Edit model, falling back to the system model if unavailable.
-     */
-    public StreamingChatLanguageModel getEditModel() {
+        /**
+         * Returns the configured Ask model, falling back to the system model if unavailable.
+         */
+        public StreamingChatLanguageModel getAskModel() {
+            var modelName = project.getAskModelName();
+            return modelName == null ? models.systemModel() : models.get(modelName);
+        }
+
+
+        /**
+         * Returns the configured Edit model, falling back to the system model if unavailable.
+         */
+        public StreamingChatLanguageModel getEditModel() {
         var modelName = project.getEditModelName();
         return modelName == null ? models.systemModel() : models.get(modelName);
     }
@@ -886,10 +896,11 @@ public class ContextManager implements IContextManager, AutoCloseable {
 
         // Get configured models for display
         String architectModelName = project.getArchitectModelName();
-        String codeModelName = project.getCodeModelName();
-        String editModelName = project.getEditModelName();
-        String searchModelName = project.getSearchModelName();
-        String quickModelName = models.nameOf(models.quickModel());
+            String codeModelName = project.getCodeModelName();
+            String askModelName = project.getAskModelName(); // Added Ask model
+            String editModelName = project.getEditModelName();
+            String searchModelName = project.getSearchModelName();
+            String quickModelName = models.nameOf(models.quickModel());
 
         return """
                 %s
@@ -899,23 +910,25 @@ public class ContextManager implements IContextManager, AutoCloseable {
                 - Project: %s (%d native files, %d total including dependencies)
                 - Analyzer language: %s
                 - Configured Models:
-                  - Architect: %s
-                  - Code: %s
-                  - Edit: %s
-                  - Search: %s
-                  - Quick: %s
-                """.stripIndent().formatted(welcomeMarkdown,
-                                            version,
+                      - Architect: %s
+                      - Code: %s
+                      - Ask: %s
+                      - Edit: %s
+                      - Search: %s
+                      - Quick: %s
+                    """.stripIndent().formatted(welcomeMarkdown,
+                                                version,
                                             project.getRoot().getFileName(), // Show just the folder name
                                             project.getRepo().getTrackedFiles().size(),
                                             project.getFiles().size(),
                                             project.getAnalyzerLanguage(),
-                                            architectModelName != null ? architectModelName : "(Not Set)",
-                                            codeModelName != null ? codeModelName : "(Not Set)",
-                                            editModelName != null ? editModelName : "(Not Set)",
-                                            searchModelName != null ? searchModelName : "(Not Set)",
-                                            quickModelName.equals("unknown") ? "(Unavailable)" : quickModelName);
-    }
+                                                architectModelName != null ? architectModelName : "(Not Set)",
+                                                codeModelName != null ? codeModelName : "(Not Set)",
+                                                askModelName != null ? askModelName : "(Not Set)", // Added Ask model
+                                                editModelName != null ? editModelName : "(Not Set)",
+                                                searchModelName != null ? searchModelName : "(Not Set)",
+                                                quickModelName.equals("unknown") ? "(Unavailable)" : quickModelName);
+        }
 
     /**
      * Shutdown all executors
@@ -1508,7 +1521,12 @@ public class ContextManager implements IContextManager, AutoCloseable {
 
     @Override
     public void addToGit(List<ProjectFile> files) throws IOException {
-        project.getRepo().add(files);
+        try {
+            project.getRepo().add(files);
+        } catch (GitAPIException e) {
+            logger.warn(e);
+            io.toolErrorRaw(e.getMessage());
+        }
     }
 
     // Convert a throwable to a string with full stack trace

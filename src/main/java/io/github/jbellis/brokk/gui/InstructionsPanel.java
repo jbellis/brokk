@@ -563,12 +563,12 @@ public class InstructionsPanel extends JPanel {
                     .toList();
             if (!nonVisionModels.isEmpty()) {
                 showVisionSupportErrorDialog(String.join(", ", nonVisionModels));
-                return; // Abort if any required model lacks vision and context has images
+                    return; // Abort if any required model lacks vision and context has images
+                }
             }
-        }
 
-        disableButtons();
-        chrome.getProject().addToInstructionsHistory(goal, 20);
+            disableButtons();
+            chrome.getProject().addToInstructionsHistory(goal, 20);
         clearCommandInput();
 
         // Submit the action, calling the private execute method inside the lambda, passing the goal
@@ -587,15 +587,15 @@ public class InstructionsPanel extends JPanel {
         }
 
         var contextManager = chrome.getContextManager();
-        var models = contextManager.getModels();
-        var codeModel = contextManager.getCodeModel();
+            var models = contextManager.getModels();
+            var codeModel = contextManager.getCodeModel();
 
-        if (contextHasImages() && !models.supportsVision(codeModel)) {
-            showVisionSupportErrorDialog(models.nameOf(codeModel) + " (Code/Ask)");
-            return; // Abort if model doesn't support vision and context has images
-        }
+            if (contextHasImages() && !models.supportsVision(codeModel)) {
+                showVisionSupportErrorDialog(models.nameOf(codeModel) + " (Code)");
+                return; // Abort if model doesn't support vision and context has images
+            }
 
-        chrome.getProject().addToInstructionsHistory(input, 20);
+            chrome.getProject().addToInstructionsHistory(input, 20);
         clearCommandInput();
         disableButtons();
 
@@ -836,15 +836,15 @@ public class InstructionsPanel extends JPanel {
         }
 
         var contextManager = chrome.getContextManager();
-        var models = contextManager.getModels();
-        var askModel = contextManager.getCodeModel(); // Ask uses the Code model
+            var models = contextManager.getModels();
+            var askModel = contextManager.getAskModel(); // Use dedicated Ask model
 
-        // --- Vision Check ---
-        if (contextHasImages() && !models.supportsVision(askModel)) {
-            showVisionSupportErrorDialog(models.nameOf(askModel) + " (Code/Ask)");
-            return; // Abort if model doesn't support vision and context has images
-        }
-        // --- End Vision Check ---
+            // --- Vision Check ---
+            if (contextHasImages() && !models.supportsVision(askModel)) {
+                showVisionSupportErrorDialog(models.nameOf(askModel) + " (Ask)"); // Updated text
+                return; // Abort if model doesn't support vision and context has images
+            }
+            // --- End Vision Check ---
 
         chrome.getProject().addToInstructionsHistory(input, 20);
         clearCommandInput();

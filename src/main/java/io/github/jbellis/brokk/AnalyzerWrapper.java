@@ -382,7 +382,13 @@ public class AnalyzerWrapper implements AutoCloseable {
             WatchEvent<Path> pathEvent = (WatchEvent<Path>) event;
             Path relativePath = pathEvent.context();
             Path parentDir = (Path) key.watchable();
-            Path absolutePath = parentDir.resolve(relativePath);
+            Path absolutePath;
+            try {
+                absolutePath = parentDir.resolve(relativePath);
+            } catch (NullPointerException e) {
+                logger.warn(e);
+                continue;
+            }
 
             if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
                 logger.debug("Overflow event: {}", absolutePath);

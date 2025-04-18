@@ -4,10 +4,12 @@ import io.github.jbellis.brokk.ContextFragment;
 import io.github.jbellis.brokk.ContextManager;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
 import io.github.jbellis.brokk.difftool.ui.BrokkDiffPanel;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.eclipse.jgit.api.errors.GitAPIException;
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 
 import javax.swing.*;
-import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -17,6 +19,8 @@ import java.util.stream.Collectors;
  */
 public final class GitUiUtil
 {
+    private static final Logger logger = LogManager.getLogger(GitUiUtil.class);
+
     private GitUiUtil() {}
 
     /**
@@ -171,10 +175,10 @@ public final class GitUiUtil
             String content = null;
             try {
                 content = repo.getFileContent(commitId, file);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+            } catch (GitAPIException e) {
+                logger.warn(e);
             }
-            if (content.isEmpty()) {
+            if (content == null) {
                 chrome.systemOutput("File not found in this revision or is empty.");
                 return;
             }
@@ -261,12 +265,19 @@ public final class GitUiUtil
                     chrome.toolError("Git repository not available.");
                     return;
                 }
-
-                var diffs = files.stream()
-                        .map(file -> repo.showFileDiff(firstCommitId, lastCommitId + "^", file))
-                        .filter(s -> !s.isEmpty())
-                        .collect(Collectors.joining("\n\n"));
-                if (diffs.isEmpty()) {
+    
+                    var diffs = files.stream()
+                            .map(file -> {
+                                try {
+                                    return repo.showFileDiff(firstCommitId, lastCommitId + "^", file);
+                                } catch (GitAPIException e) {
+                                    logger.warn(e);
+                                    return "";
+                                }
+                            })
+                            .filter(s -> !s.isEmpty())
+                            .collect(Collectors.joining("\n\n"));
+                    if (diffs.isEmpty()) {
                     chrome.systemOutput("No changes found for the selected files in the commit range");
                     return;
                 }

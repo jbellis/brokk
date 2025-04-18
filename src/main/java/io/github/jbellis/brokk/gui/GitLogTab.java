@@ -6,6 +6,7 @@ import io.github.jbellis.brokk.git.GitRepo;
 import io.github.jbellis.brokk.git.GitRepo.CommitInfo;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.eclipse.jgit.api.errors.GitAPIException;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
@@ -15,14 +16,8 @@ import javax.swing.tree.TreePath;
 import javax.swing.tree.TreeSelectionModel;
 import java.awt.*;
 import java.awt.event.MouseEvent;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
+import java.util.*;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * Panel that contains the "Log" tab UI and related functionality:
@@ -807,11 +802,11 @@ public class GitLogTab extends JPanel {
                             if ("stashes".equals(currentBranch)) {
                                 currentBranchRow = branchTableModel.getRowCount() - 1;
                             }
+                            }
+                        } catch (GitAPIException e) {
+                            logger.warn("Could not fetch stashes", e);
                         }
-                    } catch (IOException e) {
-                        logger.warn("Could not fetch stashes", e);
-                    }
-                    for (String branch : remoteBranches) {
+                        for (String branch : remoteBranches) {
                         remoteBranchTableModel.addRow(new Object[]{branch});
                     }
 
@@ -850,13 +845,13 @@ public class GitLogTab extends JPanel {
                 boolean canPush = false;
 
                 // Special handling for stashes virtual branch
-                if ("stashes".equals(branchName)) {
-                    try {
-                        commits = getStashesAsCommits();
-                    } catch (IOException e) {
-                        logger.error("Error fetching stashes", e);
-                        commits = List.of();
-                    }
+                     if ("stashes".equals(branchName)) {
+                         try {
+                             commits = getStashesAsCommits();
+                         } catch (GitAPIException e) {
+                             logger.error("Error fetching stashes", e);
+                             commits = List.of();
+                         }
                 } else {
                     // Normal branch handling
                     commits = getRepo().listCommitsDetailed(branchName);
@@ -865,7 +860,7 @@ public class GitLogTab extends JPanel {
                         try {
                             unpushedCommitIds.addAll(getRepo().getUnpushedCommitIds(branchName));
                             canPush = !unpushedCommitIds.isEmpty() && getRepo().hasUpstreamBranch(branchName);
-                        } catch (IOException e) {
+                        } catch (GitAPIException e) {
                             logger.warn("Could not check for unpushed commits: {}", e.getMessage());
                         }
                     }
@@ -1005,12 +1000,12 @@ public class GitLogTab extends JPanel {
                     if (branchRow != -1) {
                         String branchDisplay = (String) branchTableModel.getValueAt(branchRow, 1);
                         updateCommitsForBranch(branchDisplay);
-                    }
-                });
-            } catch (IOException e) {
-                logger.error("Error performing soft reset to commit: {}", commitId, e);
-                SwingUtilities.invokeLater(() ->
-                                                   chrome.toolErrorRaw("Error performing soft reset: " + e.getMessage()));
+                        }
+                    });
+                } catch (GitAPIException e) {
+                    logger.error("Error performing soft reset to commit: {}", commitId, e);
+                    SwingUtilities.invokeLater(() ->
+                                                       chrome.toolErrorRaw("Error performing soft reset: " + e.getMessage()));
             }
         });
     }
@@ -1027,12 +1022,12 @@ public class GitLogTab extends JPanel {
                 int branchRow = branchTable.getSelectedRow();
                 if (branchRow != -1) {
                     String branchDisplay = (String) branchTableModel.getValueAt(branchRow, 1);
-                    updateCommitsForBranch(branchDisplay);
-                }
-            } catch (IOException e) {
-                logger.error("Error reverting commit: {}", commitId, e);
-                chrome.toolErrorRaw("Error reverting commit: " + e.getMessage());
-            }
+                         updateCommitsForBranch(branchDisplay);
+                     }
+                 } catch (GitAPIException e) {
+                     logger.error("Error reverting commit: {}", commitId, e);
+                     chrome.toolErrorRaw("Error reverting commit: " + e.getMessage());
+                 }
         });
     }
 
@@ -1049,12 +1044,12 @@ public class GitLogTab extends JPanel {
                 getRepo().push();
                 SwingUtilities.invokeLater(() -> {
                     chrome.systemOutput("Successfully pushed " + branchDisplay + " to remote");
-                    updateCommitsForBranch(branchDisplay);
-                });
-            } catch (IOException e) {
-                logger.error("Error pushing branch: {}", branchDisplay, e);
-                SwingUtilities.invokeLater(() -> chrome.toolErrorRaw(e.getMessage()));
-            }
+                         updateCommitsForBranch(branchDisplay);
+                     });
+                 } catch (GitAPIException e) {
+                     logger.error("Error pushing branch: {}", branchDisplay, e);
+                     SwingUtilities.invokeLater(() -> chrome.toolErrorRaw(e.getMessage()));
+                 }
             return null;
         });
     }
@@ -1070,12 +1065,12 @@ public class GitLogTab extends JPanel {
                     chrome.systemOutput("Created local tracking branch for " + branchName);
                 } else {
                     getRepo().checkout(branchName);
-                }
-                update();
-            } catch (IOException e) {
-                logger.error("Error checking out branch: {}", branchName, e);
-                chrome.toolErrorRaw(e.getMessage());
-            }
+                     }
+                     update();
+                 } catch (GitAPIException e) {
+                     logger.error("Error checking out branch: {}", branchName, e);
+                     chrome.toolErrorRaw(e.getMessage());
+                 }
         });
     }
 
@@ -1086,12 +1081,12 @@ public class GitLogTab extends JPanel {
         contextManager.submitUserTask("Merging branch: " + branchName, () -> {
             try {
                 getRepo().mergeIntoHead(branchName);
-                chrome.systemOutput("Branch '" + branchName + "' was successfully merged into HEAD.");
-                update();
-            } catch (IOException e) {
-                logger.error("Error merging branch: {}", branchName, e);
-                chrome.toolErrorRaw(e.getMessage());
-            }
+                     chrome.systemOutput("Branch '" + branchName + "' was successfully merged into HEAD.");
+                     update();
+                 } catch (GitAPIException e) {
+                     logger.error("Error merging branch: {}", branchName, e);
+                     chrome.toolErrorRaw(e.getMessage());
+                 }
         });
     }
 
@@ -1110,11 +1105,11 @@ public class GitLogTab extends JPanel {
                 try {
                     getRepo().createAndCheckoutBranch(newName, sourceBranch);
                     update();
-                    chrome.systemOutput("Created and checked out new branch '" + newName + "' from '" + sourceBranch + "'");
-                } catch (IOException e) {
-                    logger.error("Error creating new branch from {}: {}", sourceBranch, e);
-                    chrome.toolErrorRaw("Error creating new branch: " + e.getMessage());
-                }
+                         chrome.systemOutput("Created and checked out new branch '" + newName + "' from '" + sourceBranch + "'");
+                     } catch (GitAPIException e) {
+                         logger.error("Error creating new branch from {}: {}", sourceBranch, e);
+                         chrome.toolErrorRaw("Error creating new branch: " + e.getMessage());
+                     }
             });
         }
     }
@@ -1134,11 +1129,11 @@ public class GitLogTab extends JPanel {
                 try {
                     getRepo().renameBranch(branchName, newName);
                     SwingUtilities.invokeLater(this::update);
-                    chrome.systemOutput("Branch '" + branchName + "' renamed to '" + newName + "' successfully.");
-                } catch (IOException e) {
-                    logger.error("Error renaming branch: {}", branchName, e);
-                    chrome.toolErrorRaw("Error renaming branch: " + e.getMessage());
-                }
+                         chrome.systemOutput("Branch '" + branchName + "' renamed to '" + newName + "' successfully.");
+                     } catch (GitAPIException e) {
+                         logger.error("Error renaming branch: {}", branchName, e);
+                         chrome.toolErrorRaw("Error renaming branch: " + e.getMessage());
+                     }
             });
         }
     }
@@ -1179,12 +1174,12 @@ public class GitLogTab extends JPanel {
                         if (result == 0) { // Force Delete
                             performBranchDeletion(branchName, true);
                         }
-                    }
-                });
-            } catch (IOException e) {
-                logger.error("Error checking branch merge status: {}", branchName, e);
-                chrome.toolErrorRaw("Error checking branch status: " + e.getMessage());
-            }
+                         }
+                     });
+                 } catch (GitAPIException e) {
+                     logger.error("Error checking branch merge status: {}", branchName, e);
+                     chrome.toolErrorRaw("Error checking branch status: " + e.getMessage());
+                 }
         });
     }
 
@@ -1220,12 +1215,12 @@ public class GitLogTab extends JPanel {
                 }
 
                 logger.debug("Branch '{}' deletion completed successfully", branchName);
-                SwingUtilities.invokeLater(this::update);
-                chrome.systemOutput("Branch '" + branchName + "' " + (force ? "force " : "") + "deleted successfully.");
-            } catch (IOException e) {
-                logger.error("Error deleting branch '{}': {}", branchName, e.getMessage(), e);
-                chrome.toolErrorRaw("Error deleting branch '" + branchName + "': " + e.getMessage());
-            }
+                     SwingUtilities.invokeLater(this::update);
+                     chrome.systemOutput("Branch '" + branchName + "' " + (force ? "force " : "") + "deleted successfully.");
+                 } catch (GitAPIException e) {
+                     logger.error("Error deleting branch '{}': {}", branchName, e.getMessage(), e);
+                     chrome.toolErrorRaw("Error deleting branch '" + branchName + "': " + e.getMessage());
+                 }
         });
     }
 
@@ -1277,7 +1272,7 @@ public class GitLogTab extends JPanel {
     private String getOldHeadId() {
         try {
             return getRepo().getCurrentCommitId();
-        } catch (IOException e) {
+        } catch (GitAPIException e) {
             return "unknown";
         }
     }
@@ -1327,71 +1322,24 @@ public class GitLogTab extends JPanel {
     }
 
     /**
-     * Retrieves stashes as commit info objects for display in the commits table
-     */
-    private List<CommitInfo> getStashesAsCommits() throws IOException {
-        List<GitRepo.StashInfo> stashes = getRepo().listStashes();
-        List<CommitInfo> stashCommits = new ArrayList<>();
+     * Represent each stash as a single logical commit, mirroring
+     * `git stash list`.  We intentionally ignore the internal
+         * index/untracked helper commits so the log stays concise.
+         */
+        private List<CommitInfo> getStashesAsCommits() throws GitAPIException
+        {
+            List<GitRepo.StashInfo> stashes = getRepo().listStashes();
+            List<CommitInfo> result = new ArrayList<>();
 
-        for (GitRepo.StashInfo stash : stashes) {
-            String baseName = stash.message();
-            String stashRef = "stash@{" + stash.index() + "}";
-
-            try {
-                // Get additional commits for this stash
-                var additionalCommits = getRepo().listAdditionalStashCommits(stashRef);
-
-                // If we have index or untracked commits, add them with appropriate labels
-                if (!additionalCommits.isEmpty()) {
-                    // Add the main stash first with working tree label
-                    stashCommits.add(new CommitInfo(
-                            stash.id(),
-                            baseName + " (working tree)" + " (stash@{" + stash.index() + "})",
-                            stash.author(),
-                            stash.date()
-                    ));
-
-                    // Add each additional commit with appropriate suffix
-                    for (var entry : additionalCommits.entrySet()) {
-                        var type = entry.getKey();
-                        var commit = entry.getValue();
-                        String suffix = switch (type) {
-                            case "index" -> " (staged changes)";
-                            case "untracked" -> " (untracked files)";
-                            default -> " (unknown)"; // Should not happen
-                        };
-
-                        stashCommits.add(new CommitInfo(
-                                commit.id(),
-                                baseName + suffix + " (stash@{" + stash.index() + "})",
-                                commit.author(),
-                                commit.date()
-                        ));
-                    }
-                } else {
-                    // No additional commits, just add the main stash
-                    stashCommits.add(new CommitInfo(
-                            stash.id(),
-                            baseName + " (stash@{" + stash.index() + "})",
-                            stash.author(),
-                            stash.date()
-                    ));
-                }
-            } catch (Exception e) {
-                logger.warn("Could not fetch additional stash commits for {}: {}",
-                            stashRef, e.getMessage());
-
-                // Fallback: Just add the main stash commit
-                stashCommits.add(new CommitInfo(
-                        stash.id(),
-                        baseName + " (stash@{" + stash.index() + "})",
-                        stash.author(),
-                        stash.date()
-                ));
-            }
+        for (GitRepo.StashInfo s : stashes) {
+            result.add(new CommitInfo(
+                    s.id(),
+                    s.message() + " (stash@{" + s.index() + "})",
+                    s.author(),
+                    s.date()
+            ));
         }
-
-        return stashCommits;
+        return result;
     }
 
     /**
