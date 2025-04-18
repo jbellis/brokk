@@ -3,31 +3,22 @@ package io.github.jbellis.brokk.gui;
 import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
 import dev.langchain4j.data.message.*;
-import io.github.jbellis.brokk.EditBlock;
 import io.github.jbellis.brokk.Models;
 import io.github.jbellis.brokk.TaskEntry;
+import io.github.jbellis.brokk.gui.MOP.AIMessageRenderer;
+import io.github.jbellis.brokk.gui.MOP.CustomMessageRenderer;
+import io.github.jbellis.brokk.gui.MOP.UserMessageRenderer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
-import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
-import org.fife.ui.rsyntaxtextarea.Theme;
 
 import javax.swing.*;
 import javax.swing.text.DefaultCaret;
-import javax.swing.text.html.HTMLEditorKit;
 import java.awt.*;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Map;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Map;
 import java.util.stream.Collectors;
-
-import io.github.jbellis.brokk.gui.MOP.AIMessageRenderer;
-import io.github.jbellis.brokk.gui.MOP.UserMessageRenderer;
-import io.github.jbellis.brokk.gui.MOP.CustomMessageRenderer;
 
 /**
  * A Swing JPanel designed to display structured conversations as formatted text content which may include
@@ -345,117 +336,6 @@ class MarkdownOutputPanel extends JPanel implements Scrollable {
     }
 
     /**
-     * Renders a string containing Markdown, handling ``` code fences.
-     * Returns a panel containing the rendered components.
-     *
-     * @param markdownContent The Markdown content to render.
-     * @return A JPanel containing the rendered content
-     */
-    private JPanel renderMarkdownContent(String markdownContent) {
-        JPanel contentPanel = new JPanel();
-        contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
-        contentPanel.setBackground(textBackgroundColor);
-        contentPanel.setAlignmentX(LEFT_ALIGNMENT);
-
-        // Regex to find code blocks ```optional_info \n content ```
-        // DOTALL allows . to match newline characters
-        // reluctant quantifier *? ensures it finds the *next* ```
-        Pattern codeBlockPattern = Pattern.compile("(?s)```(\\w*)[\\r\\n]?(.*?)```");
-        Matcher matcher = codeBlockPattern.matcher(markdownContent);
-
-        int lastMatchEnd = 0;
-
-        while (matcher.find()) {
-            // 1. Render the text segment before the code block
-            String textSegment = markdownContent.substring(lastMatchEnd, matcher.start());
-            if (!textSegment.isEmpty()) {
-                JEditorPane textPane = createHtmlPane();
-                var html = renderer.render(parser.parse(textSegment));
-                textPane.setText("<html><body>" + html + "</body></html>");
-                contentPanel.add(textPane);
-            }
-
-            // 2. Render the code block
-            String fenceInfo = matcher.group(1).toLowerCase();
-            String codeContent = matcher.group(2);
-            RSyntaxTextArea codeArea = createConfiguredCodeArea(fenceInfo, codeContent);
-            contentPanel.add(codeAreaInPanel(codeArea));
-
-            lastMatchEnd = matcher.end();
-        }
-
-        // Render any remaining text segment after the last code block
-        String remainingText = markdownContent.substring(lastMatchEnd).trim(); // Trim whitespace
-        if (!remainingText.isEmpty()) {
-            JEditorPane textPane = createHtmlPane();
-            // Render potentially trimmed segment as HTML
-            var html = renderer.render(parser.parse(remainingText));
-            textPane.setText("<html><body>" + html + "</body></html>");
-            contentPanel.add(textPane);
-        }
-
-        return contentPanel;
-    }
-
-    /**
-     * Creates a JPanel visually representing a single SEARCH/REPLACE block.
-     *
-     * @param block The SearchReplaceBlock to render.
-     * @return A JPanel containing components for the block.
-     */
-    private JPanel renderEditBlockComponent(EditBlock.SearchReplaceBlock block) {
-        var blockPanel = new JPanel();
-        blockPanel.setLayout(new BoxLayout(blockPanel, BoxLayout.Y_AXIS));
-        blockPanel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createEmptyBorder(5, 0, 5, 0), // Outer margin
-                BorderFactory.createLineBorder(isDarkTheme ? Color.DARK_GRAY : Color.LIGHT_GRAY, 1) // Border
-        ));
-        blockPanel.setBackground(textBackgroundColor); // Match overall background
-        blockPanel.setAlignmentX(LEFT_ALIGNMENT); // Align components to the left
-
-        // Header label (Filename)
-        var headerLabel = new JLabel(String.format("File: %s", block.filename()));
-        headerLabel.setFont(headerLabel.getFont().deriveFont(Font.BOLD));
-        headerLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5)); // Padding
-        headerLabel.setAlignmentX(LEFT_ALIGNMENT);
-        blockPanel.add(headerLabel);
-
-        // Separator
-        blockPanel.add(new JSeparator());
-
-        // "SEARCH" section
-        blockPanel.add(createEditBlockSectionLabel("SEARCH"));
-        var searchArea = createConfiguredCodeArea("", block.beforeText()); // Use "none" syntax
-        searchArea.setBackground(isDarkTheme ? new Color(55, 55, 55) : new Color(245, 245, 245)); // Slightly different background
-        blockPanel.add(codeAreaInPanel(searchArea, 1)); // Use thinner border for inner parts
-
-        // Separator
-        blockPanel.add(new JSeparator());
-
-        // "REPLACE" section
-        blockPanel.add(createEditBlockSectionLabel("REPLACE"));
-        var replaceArea = createConfiguredCodeArea("", block.afterText()); // Use "none" syntax
-        replaceArea.setBackground(isDarkTheme ? new Color(55, 55, 55) : new Color(245, 245, 245)); // Slightly different background
-        blockPanel.add(codeAreaInPanel(replaceArea, 1)); // Use thinner border for inner parts
-
-        // Adjust panel size
-        blockPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, blockPanel.getPreferredSize().height));
-
-        return blockPanel;
-    }
-
-    /**
-     * Helper to create consistent labels for SEARCH/REPLACE sections
-     */
-    private JLabel createEditBlockSectionLabel(String title) {
-        var label = new JLabel(title);
-        label.setFont(label.getFont().deriveFont(Font.ITALIC));
-        label.setBorder(BorderFactory.createEmptyBorder(3, 5, 3, 5)); // Padding
-        label.setAlignmentX(LEFT_ALIGNMENT);
-        return label;
-    }
-
-    /**
      * Creates a JEditorPane configured for plain text display.
      * Ensures background color matches the theme.
      */
@@ -473,113 +353,6 @@ class MarkdownOutputPanel extends JPanel implements Scrollable {
             plainPane.setForeground(isDarkTheme ? new Color(230, 230, 230) : Color.BLACK);
         }
         return plainPane;
-    }
-
-    /**
-     * Creates an RSyntaxTextArea for a code block, setting the syntax style and theme.
-     */
-    private RSyntaxTextArea createConfiguredCodeArea(String fenceInfo, String content) {
-        var codeArea = new RSyntaxTextArea(content);
-        codeArea.setEditable(false);
-        codeArea.setLineWrap(true);
-        codeArea.setWrapStyleWord(true);
-        DefaultCaret caret = (DefaultCaret) codeArea.getCaret();
-        caret.setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
-
-        codeArea.setSyntaxEditingStyle(switch (fenceInfo) {
-            case "java" -> SyntaxConstants.SYNTAX_STYLE_JAVA;
-            case "python" -> SyntaxConstants.SYNTAX_STYLE_PYTHON;
-            case "javascript" -> SyntaxConstants.SYNTAX_STYLE_JAVASCRIPT;
-            default -> SyntaxConstants.SYNTAX_STYLE_NONE;
-        });
-        codeArea.setHighlightCurrentLine(false);
-
-        try {
-            if (isDarkTheme) {
-                var darkTheme = Theme.load(getClass().getResourceAsStream(
-                        "/org/fife/ui/rsyntaxtextarea/themes/dark.xml"));
-                darkTheme.apply(codeArea);
-            } else {
-                var lightTheme = Theme.load(getClass().getResourceAsStream(
-                        "/org/fife/ui/rsyntaxtextarea/themes/default.xml"));
-                lightTheme.apply(codeArea);
-            }
-        } catch (IOException e) {
-            if (isDarkTheme) {
-                codeArea.setBackground(new Color(50, 50, 50));
-                codeArea.setForeground(new Color(230, 230, 230));
-            }
-        }
-
-        return codeArea;
-    }
-
-    /**
-     * Wraps an RSyntaxTextArea in a panel with padding and border.
-     * Allows specifying border thickness.
-     */
-    private JPanel codeAreaInPanel(RSyntaxTextArea textArea, int borderThickness) {
-        var panel = new JPanel(new BorderLayout());
-        // Use code background for the outer padding panel
-        panel.setBackground(codeBackgroundColor);
-        panel.setAlignmentX(LEFT_ALIGNMENT);
-        // Padding outside the border
-        panel.setBorder(BorderFactory.createEmptyBorder(5, 0, 0, 0));
-
-        var textAreaPanel = new JPanel(new BorderLayout());
-        // Use text area's actual background for the inner panel
-        textAreaPanel.setBackground(textArea.getBackground());
-        // Border around the text area
-        textAreaPanel.setBorder(BorderFactory.createLineBorder(codeBorderColor, borderThickness, true));
-        textAreaPanel.add(textArea);
-
-        panel.add(textAreaPanel);
-        // Adjust panel size
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, panel.getPreferredSize().height));
-        return panel;
-    }
-
-    /**
-     * Wraps an RSyntaxTextArea in a panel with default border thickness (3).
-     */
-    private JPanel codeAreaInPanel(RSyntaxTextArea textArea) {
-        return codeAreaInPanel(textArea, 3);
-    }
-
-    /**
-     * Creates a JEditorPane for HTML content. We set base CSS to match the theme.
-     */
-    private JEditorPane createHtmlPane() {
-        var htmlPane = new JEditorPane();
-        DefaultCaret caret = (DefaultCaret) htmlPane.getCaret();
-        caret.setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
-        htmlPane.setContentType("text/html");
-        htmlPane.setEditable(false);
-        htmlPane.setAlignmentX(LEFT_ALIGNMENT);
-        htmlPane.setText("<html><body></body></html>");
-
-        if (textBackgroundColor != null) {
-            htmlPane.setBackground(textBackgroundColor);
-
-            var kit = (HTMLEditorKit) htmlPane.getEditorKit();
-            var ss = kit.getStyleSheet();
-
-            // Base background and text color
-            var bgColorHex = String.format("#%02x%02x%02x",
-                                           textBackgroundColor.getRed(),
-                                           textBackgroundColor.getGreen(),
-                                           textBackgroundColor.getBlue());
-            var textColor = isDarkTheme ? "#e6e6e6" : "#000000";
-            var linkColor = isDarkTheme ? "#88b3ff" : "#0366d6";
-
-            ss.addRule("body { font-family: sans-serif; background-color: "
-                               + bgColorHex + "; color: " + textColor + "; }");
-            ss.addRule("a { color: " + linkColor + "; }");
-            ss.addRule("code { padding: 2px; background-color: "
-                               + (isDarkTheme ? "#3c3f41" : "#f6f8fa") + "; }");
-        }
-
-        return htmlPane;
     }
 
     // --- Spinner Logic ---

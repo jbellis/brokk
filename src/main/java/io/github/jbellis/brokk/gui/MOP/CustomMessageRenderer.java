@@ -1,9 +1,6 @@
 package io.github.jbellis.brokk.gui.MOP;
 
-import com.vladsch.flexmark.html.HtmlRenderer;
-import com.vladsch.flexmark.parser.Parser;
 import dev.langchain4j.data.message.ChatMessage;
-import io.github.jbellis.brokk.Models;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -15,14 +12,6 @@ import java.awt.*;
  */
 public class CustomMessageRenderer implements MessageComponentRenderer {
     private static final Logger logger = LogManager.getLogger(CustomMessageRenderer.class);
-
-    private final Parser parser;
-    private final HtmlRenderer renderer;
-    
-    public CustomMessageRenderer() {
-        parser = Parser.builder().build();
-        renderer = HtmlRenderer.builder().build();
-    }
 
     @Override
     public Component renderComponent(ChatMessage message, Color textBackgroundColor, boolean isDarkTheme) {
@@ -38,11 +27,11 @@ public class CustomMessageRenderer implements MessageComponentRenderer {
         customPanel.setBorder(BorderFactory.createLineBorder(Color.blue, 2));
         customPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
         
-        var markdownHelper = new AIMessageRenderer(); // Reuse the markdown rendering
-        var textPane = markdownHelper.renderComponent(message, textBackgroundColor, isDarkTheme);
-        textPane.setForeground(isDarkTheme ? new Color(220, 220, 220) : new Color(30, 30, 30));
+        String content = MarkdownRenderUtil.getMessageContent(message);
+            var contentPanel = MarkdownRenderUtil.renderMarkdownContent(content, textBackgroundColor, isDarkTheme);
+        contentPanel.setForeground(isDarkTheme ? new Color(220, 220, 220) : new Color(30, 30, 30));
 
-        customPanel.add(textPane);
+        customPanel.add(contentPanel);
         messagePanel.add(customPanel);
         
         // Set maximum width and return
