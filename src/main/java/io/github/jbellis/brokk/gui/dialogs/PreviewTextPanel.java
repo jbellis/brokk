@@ -954,6 +954,7 @@ public class PreviewTextPanel extends JPanel {
             var saveResult = new SessionResult(
                     diffOutput,                      // Action description -- will be summarized by LLM
                     quickEditMessages,               // Use collected messages
+                    null,
                     Map.of(file, contentBeforeSave), // Content before this save
                     "```\n" + diffOutput + "\n```",  // llmoutput
                     new SessionResult.StopDetails(SessionResult.StopReason.SUCCESS)

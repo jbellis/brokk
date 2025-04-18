@@ -164,52 +164,6 @@ class MarkdownOutputPanel extends JPanel implements Scrollable {
     }
 
     /**
-     * Appends a ChatMessage directly.
-     *
-     * @param message The ChatMessage to append
-     */
-//    public void append(ChatMessage message) {
-//        assert message != null;
-//
-//        // Check if we're appending to an existing message of the same type
-//        if (!messages.isEmpty() && messages.getLast().type() == message.type()) {
-//            // Create a combined message
-//            String combinedText = Models.getRepr(messages.getLast()) + Models.getRepr(message);
-//            // Create new message with combined text
-//            ChatMessage combinedMessage = createChatMessage(combinedText, message.type());
-//
-//            // Replace the last message
-//            messages.set(messages.size() - 1, combinedMessage);
-//
-//            // Re-render the last component
-//            Component lastComponent = messageComponents.getLast();
-//            remove(lastComponent);
-//
-//            // If spinner is showing, remove it temporarily
-//            boolean spinnerWasVisible = false;
-//            if (spinnerPanel != null) {
-//                remove(spinnerPanel);
-//                spinnerWasVisible = true;
-//            }
-//
-//            // Create new component and update the lists
-//            Component newComponent = renderMessageComponent(combinedMessage);
-//            messageComponents.set(messageComponents.size() - 1, newComponent);
-//            add(newComponent);
-//
-//            // Re-add spinner if it was visible
-//            if (spinnerWasVisible) {
-//                add(spinnerPanel);
-//            }
-//        } else {
-//            // Add as a new message
-//            addNewMessage(message);
-//        }
-//
-//        textChangeListeners.forEach(Runnable::run);
-//    }
-
-    /**
      * Updates the last message by appending text to it
      */
     private void updateLastMessage(String additionalText) {
@@ -327,26 +281,6 @@ class MarkdownOutputPanel extends JPanel implements Scrollable {
 
         setText(taskEntry.log());
     }
-
-    /**
-     * Legacy method to set plain text content.
-     * Creates a single message of type AI by default.
-     */
-//    public void setText(String text) {
-//        assert text != null;
-//
-//        // Check if this is a TaskEntry XML format
-//        if (text.trim().startsWith("<task") && text.trim().endsWith("</task>")) {
-//            // This appears to be a TaskEntry XML format, but we can't parse it directly
-//            // Just wrap it as an AI message for now
-//            setText(List.of(new AiMessage(text)));
-//        } else {
-//            clear();
-//            if (!text.isEmpty()) {
-//                append(text, ChatMessageType.AI);
-//            }
-//        }
-//    }
 
     /**
      * Returns text representation of all messages.

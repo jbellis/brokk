@@ -34,6 +34,7 @@ public record SessionResult(String actionDescription,
 
     public SessionResult(String actionDescription,
                          List<ChatMessage> messages,
+                         List<ChatMessage> uiMessages,
                          Map<ProjectFile, String> originalContents,
                          String outputString,
                          StopDetails stopDetails)
@@ -43,7 +44,7 @@ public record SessionResult(String actionDescription,
              originalContents,
              new Context.ParsedOutput(outputString,
                                       new ContextFragment.SessionFragment(
-                                              List.of(new TaskEntry(0, actionDescription, messages, null)),
+                                              List.of(new TaskEntry(0, actionDescription, uiMessages == null ? messages : uiMessages, null)),
                                               actionDescription)),
              stopDetails);
     }

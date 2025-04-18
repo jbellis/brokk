@@ -445,6 +445,10 @@ public class HistoryOutputPanel extends JPanel {
         return llmStreamArea.getText();
     }
 
+    public List<ChatMessage> getLlmRawMessages() {
+        return llmStreamArea.getRawMessages();
+    }
+
     public void setLlmOutput(TaskEntry taskEntry) {
         llmStreamArea.setText(taskEntry);
     }

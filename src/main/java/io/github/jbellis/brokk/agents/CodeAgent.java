@@ -229,6 +229,7 @@ public class CodeAgent {
                 : userInput + " [" + stopDetails.reason().name() + "]";
         var sessionResult = new SessionResult(finalActionDescription,
                                               List.copyOf(sessionMessages),
+                                              List.copyOf(io.getLlmRawMessages()),
                                               Map.copyOf(originalContents),
                                               io.getLlmOutputText(),
                                               stopDetails);
@@ -487,6 +488,7 @@ public class CodeAgent {
         // Return SessionResult containing conversation, original content, and LLM response string
         return new SessionResult("Quick Edit: " + file.getFileName(),
                                  pendingHistory,
+                                 null,
                                  originalContents,
                                  responseText,
                                  stopDetails);

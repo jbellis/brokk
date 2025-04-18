@@ -1,6 +1,9 @@
 package io.github.jbellis.brokk;
 
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ChatMessageType;
+
+import java.util.List;
 
 public interface IConsoleIO {
     void actionOutput(String msg);
@@ -34,6 +37,10 @@ public interface IConsoleIO {
     default void hideOutputSpinner() {}
 
     default String getLlmOutputText() {
+        throw new UnsupportedOperationException();
+    }
+    
+    default public List<ChatMessage> getLlmRawMessages() {
         throw new UnsupportedOperationException();
     }
 }

@@ -360,6 +360,11 @@ public class Chrome implements AutoCloseable, IConsoleIO {
         return SwingUtil.runOnEDT(() -> historyOutputPanel.getLlmOutputText(), null);
     }
 
+    @Override
+    public List<ChatMessage> getLlmRawMessages() {
+        return SwingUtil.runOnEDT(() -> historyOutputPanel.getLlmRawMessages(), null);
+    }
+    
     private JComponent buildBackgroundStatusLabel() {
         backgroundStatusLabel = new JLabel(BGTASK_EMPTY);
         backgroundStatusLabel.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
