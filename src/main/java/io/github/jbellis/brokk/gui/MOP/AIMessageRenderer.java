@@ -7,6 +7,7 @@ import org.apache.logging.log4j.Logger;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 
 import javax.swing.*;
+import javax.swing.border.Border;
 import java.awt.*;
 
 /**
@@ -17,48 +18,45 @@ public class AIMessageRenderer implements MessageComponentRenderer {
 
     @Override
     public Component renderComponent(ChatMessage message, Color textBackgroundColor, boolean isDarkTheme) {
-        JPanel messagePanel = new JPanel();
-        messagePanel.setLayout(new BoxLayout(messagePanel, BoxLayout.Y_AXIS));
-        messagePanel.setBackground(textBackgroundColor);
-        messagePanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        
         String content = MarkdownRenderUtil.getMessageContent(message);
-            // For AI messages, try to parse edit blocks first
+        // For AI messages, try to parse edit blocks first
         var parseResult = EditBlock.parseAllBlocks(content);
+
+        // Create content panel for AI message
+        JPanel contentPanel = new JPanel();
+        contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
+        contentPanel.setBackground(textBackgroundColor);
+        contentPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         // If we have edit blocks, render them
         boolean hasEditBlocks = parseResult.blocks().stream()
                 .anyMatch(block -> block.block() != null);
 
         if (hasEditBlocks) {
-            // Create a container for edit blocks
-            JPanel blocksPanel = new JPanel();
-            blocksPanel.setLayout(new BoxLayout(blocksPanel, BoxLayout.Y_AXIS));
-            blocksPanel.setBackground(textBackgroundColor);
-            blocksPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-
+            // Process each block part
             for (var block : parseResult.blocks()) {
                 if (block.block() != null) {
                     // Edit block
-                    blocksPanel.add(renderEditBlockComponent(block.block(), textBackgroundColor, isDarkTheme));
+                    contentPanel.add(renderEditBlockComponent(block.block(), textBackgroundColor, isDarkTheme));
                 } else if (!block.text().isBlank()) {
                     // Text between edit blocks - render as markdown
                     var textPanel = MarkdownRenderUtil.renderMarkdownContent(block.text(), isDarkTheme);
-                    blocksPanel.add(textPanel);
+                    contentPanel.add(textPanel);
                 }
             }
-            blocksPanel.setBorder(BorderFactory.createLineBorder(Color.yellow, 2));
-            messagePanel.add(blocksPanel);
         } else {
             // No edit blocks, render as markdown
-            var contentPanel = MarkdownRenderUtil.renderMarkdownContent(content, isDarkTheme);
-            contentPanel.setBorder(BorderFactory.createLineBorder(Color.yellow, 2));
-            messagePanel.add(contentPanel);
+            var markdownPanel = MarkdownRenderUtil.renderMarkdownContent(content, isDarkTheme);
+            contentPanel.add(markdownPanel);
         }
         
-        // Set maximum width and return
-        messagePanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, messagePanel.getPreferredSize().height));
-        return messagePanel;
+        // Create base panel with AI message styling
+            return new BaseChatMessagePanel(
+                "Brokk",
+                "\uD83D\uDCBB", // Unicode for computer emoji
+                contentPanel,
+                isDarkTheme
+            );
     }
 
     /**

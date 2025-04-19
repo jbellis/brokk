@@ -5,6 +5,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import javax.swing.*;
+import javax.swing.border.Border;
 import java.awt.*;
 
 /**
@@ -15,27 +16,24 @@ public class CustomMessageRenderer implements MessageComponentRenderer {
 
     @Override
     public Component renderComponent(ChatMessage message, Color textBackgroundColor, boolean isDarkTheme) {
-        JPanel messagePanel = new JPanel();
-        messagePanel.setLayout(new BoxLayout(messagePanel, BoxLayout.Y_AXIS));
-        messagePanel.setBackground(textBackgroundColor);
-        messagePanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        // Create content panel
+        String content = MarkdownRenderUtil.getMessageContent(message);
+        var contentPanel = MarkdownRenderUtil.renderMarkdownContent(content, isDarkTheme);
         
-        // For custom/common messages, render as markdown with styling
+        // Apply special styling for system messages
         JPanel customPanel = new JPanel();
         customPanel.setLayout(new BoxLayout(customPanel, BoxLayout.Y_AXIS));
         customPanel.setBackground(isDarkTheme ? new Color(60, 60, 60) : new Color(245, 245, 245));
-        customPanel.setBorder(BorderFactory.createLineBorder(Color.blue, 2));
         customPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        
-        String content = MarkdownRenderUtil.getMessageContent(message);
-            var contentPanel = MarkdownRenderUtil.renderMarkdownContent(content, isDarkTheme);
         contentPanel.setForeground(isDarkTheme ? new Color(220, 220, 220) : new Color(30, 30, 30));
-
         customPanel.add(contentPanel);
-        messagePanel.add(customPanel);
         
-        // Set maximum width and return
-        messagePanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, messagePanel.getPreferredSize().height));
-        return messagePanel;
+        // Create base panel with system message styling
+            return new BaseChatMessagePanel(
+                "System", 
+                "\u2139\uFE0F", // Information symbol
+                customPanel,
+                isDarkTheme
+            );
     }
 }

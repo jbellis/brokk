@@ -20,6 +20,9 @@ public class ThemeColors {
         DARK_COLORS.put("chat_text", new Color(212, 212, 212));
         DARK_COLORS.put("chat_header_text", new Color(114, 159, 207));
         DARK_COLORS.put("message_border", new Color(80, 80, 80));
+        DARK_COLORS.put("ai_message_border", new Color(255, 215, 0)); // Gold for AI messages
+        DARK_COLORS.put("system_message_border", new Color(30, 144, 255)); // Dodger blue for system messages
+        DARK_COLORS.put("user_message_border", new Color(80, 80, 80)); // Gray for user messages
 
         // Initialize light theme colors
         LIGHT_COLORS.put("chat_background", new Color(240, 240, 240));
@@ -27,6 +30,9 @@ public class ThemeColors {
         LIGHT_COLORS.put("chat_text", new Color(30, 30, 30));
         LIGHT_COLORS.put("chat_header_text", new Color(51, 103, 214));
         LIGHT_COLORS.put("message_border", Color.GRAY);
+        LIGHT_COLORS.put("ai_message_border", new Color(218, 165, 32)); // Darker gold for AI messages
+        LIGHT_COLORS.put("system_message_border", new Color(0, 0, 255)); // Blue for system messages
+        LIGHT_COLORS.put("user_message_border", Color.GRAY); // Gray for user messages
     }
     
     /**
