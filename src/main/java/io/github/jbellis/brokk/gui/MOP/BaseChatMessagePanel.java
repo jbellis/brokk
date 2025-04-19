@@ -81,34 +81,61 @@ public class BaseChatMessagePanel extends JPanel {
     /**
          * Common initialization method for all constructors.
          */
-        private void initialize(String title, String iconText, Component contentComponent,
-                               boolean isDarkTheme, Color highlightColor) {
+    private void initialize(String title, String iconText, Component contentComponent,
+                            boolean isDarkTheme, Color highlightColor)
+    {
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBackground(ThemeColors.getColor(isDarkTheme, "chat_background"));
         // Overall padding for the entire message panel (header + content area)
         setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-        setAlignmentX(Component.LEFT_ALIGNMENT);
+        setAlignmentX(Component.LEFT_ALIGNMENT);  // Also ensure *this* panel is left-aligned in its parent
+        setAlignmentY(Component.TOP_ALIGNMENT);
 
         // Get theme colors
         Color messageBgColor = ThemeColors.getColor(isDarkTheme, "message_background");
 
         // Add a header row with icon and label
-        JPanel headerPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0)); // Remove default gaps
-        headerPanel.setBackground(getBackground()); // Header matches overall panel background
-        headerPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        headerPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, headerPanel.getPreferredSize().height));
-
-        // Create icon
-        JLabel iconLabel = new JLabel(iconText);
-        iconLabel.setForeground(ThemeColors.getColor(isDarkTheme, "chat_header_text"));
-        iconLabel.setFont(iconLabel.getFont().deriveFont(Font.BOLD, 16f));
-        headerPanel.add(iconLabel);
-        
-        // Create title label
-        JLabel titleLabel = new JLabel(title);
-        titleLabel.setForeground(ThemeColors.getColor(isDarkTheme, "chat_header_text"));
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
-        headerPanel.add(titleLabel);
+                JPanel headerPanel = new JPanel();
+                headerPanel.setLayout(new GridBagLayout());  // Use GridBagLayout for precise control
+                headerPanel.setBackground(getBackground());
+                headerPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+                
+                // Create constraints that anchor content to the left
+                GridBagConstraints gbc = new GridBagConstraints();
+                gbc.gridx = 0;
+                gbc.gridy = 0;
+                gbc.weightx = 0.0;  // Don't give extra space to the component
+                gbc.fill = GridBagConstraints.NONE;
+                gbc.anchor = GridBagConstraints.WEST;  // Force anchor to the left (WEST)
+                
+                // Put icon and title directly in the header panel with proper constraints
+                JPanel iconTitlePanel = new JPanel();
+                iconTitlePanel.setLayout(new BoxLayout(iconTitlePanel, BoxLayout.X_AXIS));
+                iconTitlePanel.setOpaque(false);
+                
+                // Icon
+                JLabel iconLabel = new JLabel(iconText);
+                iconLabel.setForeground(ThemeColors.getColor(isDarkTheme, "chat_header_text"));
+                iconLabel.setFont(iconLabel.getFont().deriveFont(Font.BOLD, 16f));
+                iconTitlePanel.add(iconLabel);
+                
+                // Title
+                JLabel titleLabel = new JLabel(" " + title);  // Add a space after the icon
+                titleLabel.setForeground(ThemeColors.getColor(isDarkTheme, "chat_header_text"));
+                titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
+                iconTitlePanel.add(titleLabel);
+                
+                // Add the panel with icon+title to the header with left alignment
+                headerPanel.add(iconTitlePanel, gbc);
+                
+                // Add a "filler" component that takes up the rest of the space
+                gbc.gridx = 1;
+                gbc.weightx = 1.0;  // This component gets all extra horizontal space
+                gbc.fill = GridBagConstraints.HORIZONTAL;
+                headerPanel.add(Box.createHorizontalGlue(), gbc);
+                
+                // For debugging only - remove in production
+                // headerPanel.setBorder(BorderFactory.createLineBorder(Color.RED));
 
         add(headerPanel);
 
@@ -118,13 +145,19 @@ public class BaseChatMessagePanel extends JPanel {
         // Wrap the content component in our custom panel for rounded background + highlight
         int arcSize = 15;
         int highlightThickness = 4;
-        int padding = 8; // Padding around the text/code inside the rounded area
-        RoundedHighlightPanel contentWrapper = new RoundedHighlightPanel(contentComponent, messageBgColor, highlightColor,
-                                                                     arcSize, highlightThickness, padding);
-
+        int padding = 8;
+        var contentWrapper = new RoundedHighlightPanel(
+                contentComponent,
+                messageBgColor,
+                highlightColor,
+                arcSize,
+                highlightThickness,
+                padding
+        );
         add(contentWrapper);
 
-        // Set maximum width
+        // Let this entire panel grow in width if space is available
         setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
     }
+
 }
