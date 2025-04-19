@@ -30,13 +30,8 @@ public class CustomMessageRenderer implements MessageComponentRenderer {
             // Allow content to dynamically resize both width and height
                 contentPanel.setPreferredSize(null);
                 contentPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
-                
-            // Add debugging border to content panel
-            contentPanel.setBorder(BorderFactory.createLineBorder(Color.GREEN, 1));
-            customPanel.add(contentPanel);
-            
-            // Set debugging border on the custom panel too
-            customPanel.setBorder(BorderFactory.createLineBorder(Color.MAGENTA, 1));
+                contentPanel.setMinimumSize(new Dimension(10, 10));
+                customPanel.add(contentPanel);
         
         // Create base panel with system message styling
             return new BaseChatMessagePanel(

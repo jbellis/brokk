@@ -348,9 +348,10 @@ class MarkdownOutputPanel extends JPanel implements Scrollable {
             }
             
             // Configure text wrapping correctly
-                plainPane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
-                // Don't constrain height, let component determine its own preferred size based on content
-                plainPane.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+                        plainPane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
+                        plainPane.putClientProperty("caretWidth", 0); // Hide caret
+                        // Don't constrain height, let component determine its own preferred size based on content
+                        plainPane.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
             
             return plainPane;
         }
