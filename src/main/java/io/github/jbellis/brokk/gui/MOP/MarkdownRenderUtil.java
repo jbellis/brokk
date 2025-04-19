@@ -219,30 +219,4 @@ public class MarkdownRenderUtil {
         return Models.getRepr(message);
     }
 
-    /**
-     * Creates a rounded border with customizable properties.
-     *
-     * @param color The border color
-     * @param thickness The border thickness in pixels
-     * @param arcSize The corner radius in pixels
-     * @return A Border object with rounded corners
-     */
-    public static Border createRoundedBorder(Color color, int thickness, int arcSize) {
-        return new AbstractBorder() {
-            @Override
-            public void paintBorder(Component c, Graphics g, int x, int y, int width, int height) {
-                Graphics2D g2d = (Graphics2D) g.create();
-                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g2d.setColor(color);
-                g2d.setStroke(new BasicStroke(thickness));
-                g2d.draw(new RoundRectangle2D.Float(x, y, width - 1, height - 1, arcSize, arcSize));
-                g2d.dispose();
-            }
-
-            @Override
-            public Insets getBorderInsets(Component c) {
-                return new Insets(thickness + 2, thickness + 2, thickness + 2, thickness + 2);
-            }
-        };
-    }
 }

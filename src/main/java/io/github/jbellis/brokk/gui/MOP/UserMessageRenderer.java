@@ -22,10 +22,11 @@ public class UserMessageRenderer implements MessageComponentRenderer {
         
         // Create base panel with user message styling
             return new BaseChatMessagePanel(
-                "User Asks",
+                "You asked",
                 "\uD83D\uDCBB", // Unicode for computer emoji
                 contentPanel,
-                isDarkTheme
+                isDarkTheme,
+                ThemeColors.getColor(isDarkTheme, "message_border_user")
             );
     }
 }

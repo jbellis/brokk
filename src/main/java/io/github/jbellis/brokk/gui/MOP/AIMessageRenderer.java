@@ -55,7 +55,8 @@ public class AIMessageRenderer implements MessageComponentRenderer {
                 "Brokk",
                 "\uD83D\uDCBB", // Unicode for computer emoji
                 contentPanel,
-                isDarkTheme
+                isDarkTheme,
+                ThemeColors.getColor(isDarkTheme, "message_border_ai")
             );
     }
 

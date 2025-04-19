@@ -33,7 +33,8 @@ public class CustomMessageRenderer implements MessageComponentRenderer {
                 "System", 
                 "\u2139\uFE0F", // Information symbol
                 customPanel,
-                isDarkTheme
+                isDarkTheme,
+                ThemeColors.getColor(isDarkTheme, "message_border_custom")
             );
     }
 }

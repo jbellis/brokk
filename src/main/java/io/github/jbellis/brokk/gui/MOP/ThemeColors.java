@@ -16,10 +16,12 @@ public class ThemeColors {
     static {
         // Initialize dark theme colors
         DARK_COLORS.put("chat_background", new Color(37, 37, 37));
-        DARK_COLORS.put("message_background", new Color(45, 45, 45));
+        DARK_COLORS.put("message_background", new Color(64, 64, 64));
         DARK_COLORS.put("chat_text", new Color(212, 212, 212));
         DARK_COLORS.put("chat_header_text", new Color(114, 159, 207));
-        DARK_COLORS.put("message_border", new Color(80, 80, 80));
+        DARK_COLORS.put("message_border_custom", new Color(46, 100, 55));
+        DARK_COLORS.put("message_border_ai", new Color(139, 92, 246));
+        DARK_COLORS.put("message_border_user", new Color(59, 130, 246));
         DARK_COLORS.put("ai_message_border", new Color(255, 215, 0)); // Gold for AI messages
         DARK_COLORS.put("system_message_border", new Color(30, 144, 255)); // Dodger blue for system messages
         DARK_COLORS.put("user_message_border", new Color(80, 80, 80)); // Gray for user messages
