@@ -35,8 +35,8 @@ public class CustomMessageRenderer implements MessageComponentRenderer {
         
         // Create base panel with system message styling
             return new BaseChatMessagePanel(
-                "System", 
-                "\u2139\uFE0F", // Information symbol
+                "System",
+                "\uD83D\uDCBB", // Unicode for computer emoji
                 customPanel,
                 isDarkTheme,
                 ThemeColors.getColor(isDarkTheme, "message_border_custom")

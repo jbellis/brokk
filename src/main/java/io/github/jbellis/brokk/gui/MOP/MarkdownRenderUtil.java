@@ -11,12 +11,9 @@ import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 import org.fife.ui.rsyntaxtextarea.Theme;
 
 import javax.swing.*;
-import javax.swing.border.AbstractBorder;
-import javax.swing.border.Border;
 import javax.swing.text.DefaultCaret;
 import javax.swing.text.html.HTMLEditorKit;
 import java.awt.*;
-import java.awt.geom.RoundRectangle2D;
 import java.io.IOException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -183,13 +180,55 @@ public class MarkdownRenderUtil {
                                        bgColor.getGreen(),
                                        bgColor.getBlue());
         var textColor = ThemeColors.getColor(isDarkTheme, "chat_text");
+        var textColorHex = String.format("#%02x%02x%02x",
+                                         textColor.getRed(),
+                                         textColor.getGreen(),
+                                         textColor.getBlue());
         var linkColor = isDarkTheme ? "#88b3ff" : "#0366d6";
 
-        ss.addRule("body { font-family: sans-serif; background-color: "
-                + bgColorHex + "; color: " + textColor + "; }");
-        ss.addRule("a { color: " + linkColor + "; }");
-        ss.addRule("code { padding: 2px; background-color: "
-                + (isDarkTheme ? "#3c3f41" : "#f6f8fa") + "; }");
+        // Define theme-specific colors
+            var borderColor = isDarkTheme ? "#555" : "#ddd";
+            //var headerColor = isDarkTheme ? "#e1e1e1" : "#333";
+
+            // Base typography
+            ss.addRule("body { font-family: 'Segoe UI', system-ui, sans-serif; line-height: 1.5; " +
+                       "background-color: " + bgColorHex + "; color: " + textColorHex + "; margin: 0; padding: 8px; }");
+
+            // Headings
+            ss.addRule("h1, h2, h3, h4, h5, h6 { margin-top: 24px; margin-bottom: 16px; " +
+                       "font-weight: 600; line-height: 1.25; color: " + textColorHex + "; }");
+            ss.addRule("h1 { font-size: 2em; border-bottom: 1px solid " + borderColor + "; padding-bottom: 0.3em; }");
+            ss.addRule("h2 { font-size: 1.5em; border-bottom: 1px solid " + borderColor + "; padding-bottom: 0.3em; }");
+            ss.addRule("h3 { font-size: 1.25em; }");
+            ss.addRule("h4 { font-size: 1em; }");
+
+            // Links
+            ss.addRule("a { color: " + linkColor + "; text-decoration: none; }");
+            ss.addRule("a:hover { text-decoration: underline; }");
+
+            // Paragraphs and lists
+                ss.addRule("p, ul, ol { margin-top: 0; margin-bottom: 16px; }");
+                ss.addRule("ul, ol { padding-left: 2em; }");
+                ss.addRule("li { margin: 0.25em 0; }");
+                ss.addRule("li > p { margin-top: 16px; }");
+
+            // Code styling
+                ss.addRule("code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; " +
+                           "padding: 0.2em 0.4em; margin: 0; font-size: 85%; border-radius: 3px; " +
+                           "background-color: " + (isDarkTheme ? "#4d5462" : "#f6f8fa") + "; }");
+
+                // Tables
+            ss.addRule("table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }");
+            ss.addRule("table th, table td { padding: 6px 13px; border: 1px solid " + borderColor + "; }");
+            ss.addRule("table tr { background-color: " + bgColorHex + "; }");
+            ss.addRule("table tr:nth-child(2n) { background-color: " +
+                       (isDarkTheme ? "#2a2a2a" : "#f6f8fa") + "; }");
+            ss.addRule("table th { font-weight: 600; background-color: " +
+                       (isDarkTheme ? "#333" : "#f0f0f0") + "; }");
+
+            // Horizontal rule
+            ss.addRule("hr { height: 0.25em; padding: 0; margin: 24px 0; " +
+                       "background-color: " + (isDarkTheme ? "#555" : "#e1e4e8") + "; border: 0; }");
 
         return htmlPane;
     }

@@ -115,13 +115,15 @@ public class BaseChatMessagePanel extends JPanel {
                     
                     // Icon
                     JLabel iconLabel = new JLabel(iconText);
-                    iconLabel.setForeground(ThemeColors.getColor(isDarkTheme, "chat_header_text"));
+                    // iconLabel.setForeground(ThemeColors.getColor(isDarkTheme, "chat_header_text"));
+                    iconLabel.setForeground(highlightColor);
                     iconLabel.setFont(iconLabel.getFont().deriveFont(Font.BOLD, 16f));
                     iconTitlePanel.add(iconLabel);
                     
                     // Title
                     JLabel titleLabel = new JLabel(" " + title);  // Add a space after the icon
-                    titleLabel.setForeground(ThemeColors.getColor(isDarkTheme, "chat_header_text"));
+                    // titleLabel.setForeground(ThemeColors.getColor(isDarkTheme, "chat_header_text"));
+                    titleLabel.setForeground(highlightColor);
                     titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
                     iconTitlePanel.add(titleLabel);
                     
