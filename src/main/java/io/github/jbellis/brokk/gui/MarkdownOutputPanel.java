@@ -330,24 +330,30 @@ class MarkdownOutputPanel extends JPanel implements Scrollable {
     }
 
     /**
-     * Creates a JEditorPane configured for plain text display.
-     * Ensures background color matches the theme.
-     */
-    private JEditorPane createPlainTextPane(String text) {
-        var plainPane = new JEditorPane();
-        DefaultCaret caret = (DefaultCaret) plainPane.getCaret();
-        caret.setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
-        plainPane.setContentType("text/plain"); // Set content type to plain text
-        plainPane.setText(text); // Set text directly
-        plainPane.setEditable(false);
-        plainPane.setAlignmentX(LEFT_ALIGNMENT);
-        if (textBackgroundColor != null) {
-            plainPane.setBackground(textBackgroundColor);
-            // Set foreground based on theme for plain text
-            plainPane.setForeground(isDarkTheme ? new Color(230, 230, 230) : Color.BLACK);
+         * Creates a JEditorPane configured for plain text display.
+         * Ensures background color matches the theme.
+         */
+        private JEditorPane createPlainTextPane(String text) {
+            var plainPane = new JEditorPane();
+            DefaultCaret caret = (DefaultCaret) plainPane.getCaret();
+            caret.setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
+            plainPane.setContentType("text/plain"); // Set content type to plain text
+            plainPane.setText(text); // Set text directly
+            plainPane.setEditable(false);
+            plainPane.setAlignmentX(LEFT_ALIGNMENT);
+            if (textBackgroundColor != null) {
+                plainPane.setBackground(textBackgroundColor);
+                // Set foreground based on theme for plain text
+                plainPane.setForeground(isDarkTheme ? new Color(230, 230, 230) : Color.BLACK);
+            }
+            
+            // Configure text wrapping correctly
+                plainPane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
+                // Don't constrain height, let component determine its own preferred size based on content
+                plainPane.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+            
+            return plainPane;
         }
-        return plainPane;
-    }
 
     // --- Spinner Logic ---
 

@@ -34,12 +34,11 @@ public class BaseChatMessagePanel extends JPanel {
                 // Set border to create padding *inside* the highlight bar and around content
                     setBorder(BorderFactory.createEmptyBorder(padding, padding + highlightThickness, padding, padding));
                     
-                    // Ensure content can expand horizontally if it's a JComponent
-                    if (content instanceof JComponent) {
-                        ((JComponent) content).setBorder(BorderFactory.createLineBorder(Color.YELLOW, 1));
-                        ((JComponent) content).setMaximumSize(new Dimension(Integer.MAX_VALUE, 
-                                content.getPreferredSize().height));
-                    }
+                    // Ensure content can expand in both directions if it's a JComponent
+                        if (content instanceof JComponent) {
+                            ((JComponent) content).setBorder(BorderFactory.createLineBorder(Color.YELLOW, 1));
+                            ((JComponent) content).setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+                        }
                     
                     add(content, BorderLayout.CENTER); // Add original content
             }
@@ -166,8 +165,8 @@ public class BaseChatMessagePanel extends JPanel {
             contentWrapper.setBorder(BorderFactory.createLineBorder(Color.BLUE, 1));
             add(contentWrapper);
 
-        // Let this entire panel grow in width if space is available
-        setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
+        // Let this entire panel grow in both width and height if needed
+            setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
     }
 
 }
