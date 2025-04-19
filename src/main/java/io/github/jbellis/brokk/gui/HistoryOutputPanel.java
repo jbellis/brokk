@@ -196,7 +196,7 @@ public class HistoryOutputPanel extends JPanel {
         // Add table to scroll pane with SmartScroll
         var scrollPane = new JScrollPane(historyTable);
         scrollPane.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-        new SmartScroll(scrollPane);
+        //new SmartScroll(scrollPane);
 
         // Add undo/redo buttons at the bottom, side by side
         var buttonPanel = new JPanel();
@@ -358,7 +358,7 @@ public class HistoryOutputPanel extends JPanel {
         var jsp = new JScrollPane(llmStreamArea);
         jsp.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
         jsp.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
-        new SmartScroll(jsp);
+        // new SmartScroll(jsp);
 
         // Add a text change listener to update capture buttons
         llmStreamArea.addTextChangeListener(() -> chrome.updateCaptureButtons());

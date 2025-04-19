@@ -255,7 +255,7 @@ public class InstructionsPanel extends JPanel {
                 TitledBorder.DEFAULT_POSITION,
                 new Font(Font.DIALOG, Font.BOLD, 12)
         ));
-        new SmartScroll(scrollPane);
+        // new SmartScroll(scrollPane);
 
         return scrollPane;
     }

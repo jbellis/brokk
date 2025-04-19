@@ -26,7 +26,12 @@ public class CustomMessageRenderer implements MessageComponentRenderer {
         customPanel.setBackground(isDarkTheme ? new Color(60, 60, 60) : new Color(245, 245, 245));
         customPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
         contentPanel.setForeground(isDarkTheme ? new Color(220, 220, 220) : new Color(30, 30, 30));
-        customPanel.add(contentPanel);
+            // Add debugging border to content panel
+            contentPanel.setBorder(BorderFactory.createLineBorder(Color.GREEN, 1));
+            customPanel.add(contentPanel);
+            
+            // Set debugging border on the custom panel too
+            customPanel.setBorder(BorderFactory.createLineBorder(Color.MAGENTA, 1));
         
         // Create base panel with system message styling
             return new BaseChatMessagePanel(

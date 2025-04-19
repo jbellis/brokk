@@ -32,8 +32,16 @@ public class BaseChatMessagePanel extends JPanel {
                 setOpaque(false); // We paint our own background + highlight
 
                 // Set border to create padding *inside* the highlight bar and around content
-                setBorder(BorderFactory.createEmptyBorder(padding, padding + highlightThickness, padding, padding));
-                add(content, BorderLayout.CENTER); // Add original content
+                    setBorder(BorderFactory.createEmptyBorder(padding, padding + highlightThickness, padding, padding));
+                    
+                    // Ensure content can expand horizontally if it's a JComponent
+                    if (content instanceof JComponent) {
+                        ((JComponent) content).setBorder(BorderFactory.createLineBorder(Color.YELLOW, 1));
+                        ((JComponent) content).setMaximumSize(new Dimension(Integer.MAX_VALUE, 
+                                content.getPreferredSize().height));
+                    }
+                    
+                    add(content, BorderLayout.CENTER); // Add original content
             }
 
             @Override
@@ -134,8 +142,8 @@ public class BaseChatMessagePanel extends JPanel {
                 gbc.fill = GridBagConstraints.HORIZONTAL;
                 headerPanel.add(Box.createHorizontalGlue(), gbc);
                 
-                // For debugging only - remove in production
-                // headerPanel.setBorder(BorderFactory.createLineBorder(Color.RED));
+                // Debugging borders to visualize layout issues
+            headerPanel.setBorder(BorderFactory.createLineBorder(Color.RED, 1));
 
         add(headerPanel);
 
@@ -147,14 +155,16 @@ public class BaseChatMessagePanel extends JPanel {
         int highlightThickness = 4;
         int padding = 8;
         var contentWrapper = new RoundedHighlightPanel(
-                contentComponent,
-                messageBgColor,
-                highlightColor,
-                arcSize,
-                highlightThickness,
-                padding
-        );
-        add(contentWrapper);
+                    contentComponent,
+                    messageBgColor,
+                    highlightColor,
+                    arcSize,
+                    highlightThickness,
+                    padding
+            );
+            // Add debugging border to see content wrapper boundaries
+            contentWrapper.setBorder(BorderFactory.createLineBorder(Color.BLUE, 1));
+            add(contentWrapper);
 
         // Let this entire panel grow in width if space is available
         setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
