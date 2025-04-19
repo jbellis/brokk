@@ -56,8 +56,6 @@ class MarkdownOutputPanel extends JPanel implements Scrollable {
     // Theme-related fields
     private boolean isDarkTheme = false;
     private Color textBackgroundColor = null;
-    private Color codeBackgroundColor = null;
-    private Color codeBorderColor = null;
 
     public MarkdownOutputPanel() {
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
@@ -82,12 +80,8 @@ class MarkdownOutputPanel extends JPanel implements Scrollable {
 
         if (isDark) {
             textBackgroundColor = new Color(40, 40, 40);
-            codeBackgroundColor = new Color(50, 50, 50);
-            codeBorderColor = new Color(80, 80, 80);
         } else {
             textBackgroundColor = Color.WHITE;
-            codeBackgroundColor = new Color(240, 240, 240);
-            codeBorderColor = Color.GRAY;
         }
 
         setOpaque(true);

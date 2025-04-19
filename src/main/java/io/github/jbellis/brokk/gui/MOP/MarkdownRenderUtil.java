@@ -11,9 +11,12 @@ import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 import org.fife.ui.rsyntaxtextarea.Theme;
 
 import javax.swing.*;
+import javax.swing.border.AbstractBorder;
+import javax.swing.border.Border;
 import javax.swing.text.DefaultCaret;
 import javax.swing.text.html.HTMLEditorKit;
 import java.awt.*;
+import java.awt.geom.RoundRectangle2D;
 import java.io.IOException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -35,10 +38,11 @@ public class MarkdownRenderUtil {
      * @param isDarkTheme Whether dark theme is active
      * @return A JPanel containing the rendered content
      */
-    public static JPanel renderMarkdownContent(String markdownContent, Color textBackgroundColor, boolean isDarkTheme) {
+    public static JPanel renderMarkdownContent(String markdownContent, boolean isDarkTheme) {
+        var bgColor = ThemeColors.getColor(isDarkTheme, "message_background");
         JPanel contentPanel = new JPanel();
         contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
-        contentPanel.setBackground(textBackgroundColor);
+        contentPanel.setBackground(bgColor);
         contentPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         // Regex to find code blocks ```optional_info \n content ```
@@ -53,7 +57,7 @@ public class MarkdownRenderUtil {
             // 1. Render the text segment before the code block
             String textSegment = markdownContent.substring(lastMatchEnd, matcher.start());
             if (!textSegment.isEmpty()) {
-                JEditorPane textPane = createHtmlPane(textBackgroundColor, isDarkTheme);
+                JEditorPane textPane = createHtmlPane(isDarkTheme);
                 var html = renderer.render(parser.parse(textSegment));
                 textPane.setText("<html><body>" + html + "</body></html>");
                 contentPanel.add(textPane);
@@ -71,7 +75,7 @@ public class MarkdownRenderUtil {
         // Render any remaining text segment after the last code block
         String remainingText = markdownContent.substring(lastMatchEnd).trim(); // Trim whitespace
         if (!remainingText.isEmpty()) {
-            JEditorPane textPane = createHtmlPane(textBackgroundColor, isDarkTheme);
+            JEditorPane textPane = createHtmlPane(isDarkTheme);
             // Render potentially trimmed segment as HTML
             var html = renderer.render(parser.parse(remainingText));
             textPane.setText("<html><body>" + html + "</body></html>");
@@ -157,7 +161,7 @@ public class MarkdownRenderUtil {
     /**
      * Creates a JEditorPane for HTML content with base CSS to match the theme.
      */
-    public static JEditorPane createHtmlPane(Color textBackgroundColor, boolean isDarkTheme) {
+    public static JEditorPane createHtmlPane(boolean isDarkTheme) {
         var htmlPane = new JEditorPane();
         DefaultCaret caret = (DefaultCaret) htmlPane.getCaret();
         caret.setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
@@ -166,26 +170,26 @@ public class MarkdownRenderUtil {
         htmlPane.setAlignmentX(Component.LEFT_ALIGNMENT);
         htmlPane.setText("<html><body></body></html>");
 
-        if (textBackgroundColor != null) {
-            htmlPane.setBackground(textBackgroundColor);
+        var bgColor = ThemeColors.getColor(isDarkTheme, "message_background");
 
-            var kit = (HTMLEditorKit) htmlPane.getEditorKit();
-            var ss = kit.getStyleSheet();
+        htmlPane.setBackground(bgColor);
 
-            // Base background and text color
-            var bgColorHex = String.format("#%02x%02x%02x",
-                    textBackgroundColor.getRed(),
-                    textBackgroundColor.getGreen(),
-                    textBackgroundColor.getBlue());
-            var textColor = isDarkTheme ? "#e6e6e6" : "#000000";
-            var linkColor = isDarkTheme ? "#88b3ff" : "#0366d6";
+        var kit = (HTMLEditorKit) htmlPane.getEditorKit();
+        var ss = kit.getStyleSheet();
 
-            ss.addRule("body { font-family: sans-serif; background-color: "
-                    + bgColorHex + "; color: " + textColor + "; }");
-            ss.addRule("a { color: " + linkColor + "; }");
-            ss.addRule("code { padding: 2px; background-color: "
-                    + (isDarkTheme ? "#3c3f41" : "#f6f8fa") + "; }");
-        }
+        // Base background and text color
+        var bgColorHex = String.format("#%02x%02x%02x",
+                                       bgColor.getRed(),
+                                       bgColor.getGreen(),
+                                       bgColor.getBlue());
+        var textColor = ThemeColors.getColor(isDarkTheme, "chat_text");
+        var linkColor = isDarkTheme ? "#88b3ff" : "#0366d6";
+
+        ss.addRule("body { font-family: sans-serif; background-color: "
+                + bgColorHex + "; color: " + textColor + "; }");
+        ss.addRule("a { color: " + linkColor + "; }");
+        ss.addRule("code { padding: 2px; background-color: "
+                + (isDarkTheme ? "#3c3f41" : "#f6f8fa") + "; }");
 
         return htmlPane;
     }
@@ -213,5 +217,32 @@ public class MarkdownRenderUtil {
             return "";
         }
         return Models.getRepr(message);
+    }
+
+    /**
+     * Creates a rounded border with customizable properties.
+     *
+     * @param color The border color
+     * @param thickness The border thickness in pixels
+     * @param arcSize The corner radius in pixels
+     * @return A Border object with rounded corners
+     */
+    public static Border createRoundedBorder(Color color, int thickness, int arcSize) {
+        return new AbstractBorder() {
+            @Override
+            public void paintBorder(Component c, Graphics g, int x, int y, int width, int height) {
+                Graphics2D g2d = (Graphics2D) g.create();
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2d.setColor(color);
+                g2d.setStroke(new BasicStroke(thickness));
+                g2d.draw(new RoundRectangle2D.Float(x, y, width - 1, height - 1, arcSize, arcSize));
+                g2d.dispose();
+            }
+
+            @Override
+            public Insets getBorderInsets(Component c) {
+                return new Insets(thickness + 2, thickness + 2, thickness + 2, thickness + 2);
+            }
+        };
     }
 }

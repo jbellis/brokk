@@ -43,7 +43,7 @@ public class AIMessageRenderer implements MessageComponentRenderer {
                     blocksPanel.add(renderEditBlockComponent(block.block(), textBackgroundColor, isDarkTheme));
                 } else if (!block.text().isBlank()) {
                     // Text between edit blocks - render as markdown
-                    var textPanel = MarkdownRenderUtil.renderMarkdownContent(block.text(), textBackgroundColor, isDarkTheme);
+                    var textPanel = MarkdownRenderUtil.renderMarkdownContent(block.text(), isDarkTheme);
                     blocksPanel.add(textPanel);
                 }
             }
@@ -51,7 +51,7 @@ public class AIMessageRenderer implements MessageComponentRenderer {
             messagePanel.add(blocksPanel);
         } else {
             // No edit blocks, render as markdown
-            var contentPanel = MarkdownRenderUtil.renderMarkdownContent(content, textBackgroundColor, isDarkTheme);
+            var contentPanel = MarkdownRenderUtil.renderMarkdownContent(content, isDarkTheme);
             contentPanel.setBorder(BorderFactory.createLineBorder(Color.yellow, 2));
             messagePanel.add(contentPanel);
         }

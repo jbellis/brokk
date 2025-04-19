@@ -28,7 +28,7 @@ public class CustomMessageRenderer implements MessageComponentRenderer {
         customPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
         
         String content = MarkdownRenderUtil.getMessageContent(message);
-            var contentPanel = MarkdownRenderUtil.renderMarkdownContent(content, textBackgroundColor, isDarkTheme);
+            var contentPanel = MarkdownRenderUtil.renderMarkdownContent(content, isDarkTheme);
         contentPanel.setForeground(isDarkTheme ? new Color(220, 220, 220) : new Color(30, 30, 30));
 
         customPanel.add(contentPanel);
