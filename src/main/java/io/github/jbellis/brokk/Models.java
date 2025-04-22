@@ -39,7 +39,6 @@ public final class Models {
             .writeTimeout(10, TimeUnit.SECONDS)
             .build();
 
-    public static final String LITELLM_BASE_URL = "http://localhost:4000";
     public static final String UNAVAILABLE = "AI is unavailable";
 
     // Core model storage - now instance fields
@@ -70,12 +69,13 @@ public final class Models {
      * @param policy The data retention policy to apply when selecting models.
      */
     public void reinit(Project.DataRetentionPolicy policy) {
-        logger.info("Initializing models using policy: {}", policy);
+        String proxyUrl = Project.getLlmProxy(); // Get full URL (including scheme) from project setting
+        logger.info("Initializing models using policy: {} and proxy: {}", policy, proxyUrl);
         try {
             fetchAvailableModels(policy);
         } catch (IOException e) {
             logger.error("Failed to connect to LiteLLM at {} or parse response: {}",
-                         LITELLM_BASE_URL, e.getMessage());
+                         proxyUrl, e.getMessage(), e); // Log the exception details
             modelLocations.clear();
             modelInfoMap.clear();
         }
@@ -102,8 +102,9 @@ public final class Models {
     }
 
     private void fetchAvailableModels(Project.DataRetentionPolicy policy) throws IOException {
+        String baseUrl = Project.getLlmProxy(); // Get full URL (including scheme) from project settings
         Request request = new Request.Builder()
-                .url(LITELLM_BASE_URL + "/model/info")
+                .url(baseUrl + "/model/info") // Use dynamic base URL
                 .get()
                 .build();
 
@@ -279,12 +280,13 @@ public final class Models {
 
             // We connect to LiteLLM using an OpenAiStreamingChatModel, specifying baseUrl
             // placeholder, LiteLLM manages actual keys
+            String baseUrl = Project.getLlmProxy(); // Get full URL (including scheme) from project settings
             var builder = OpenAiStreamingChatModel.builder()
                     .logRequests(true) // Not visible unless you turn down the threshold for dev.langchain4j in log4j2.xml
                     .logResponses(true) // ditto
                     .strictJsonSchema(true)
                     .maxTokens(getMaxOutputTokens(modelName))
-                    .baseUrl(LITELLM_BASE_URL)
+                    .baseUrl(baseUrl) // Use dynamic base URL
                     .timeout(Duration.ofMinutes(3)) // default 60s is not enough in practice
                     .apiKey("litellm") // placeholder, LiteLLM manages actual keys
                     .modelName(location); // Use the resolved location
@@ -526,9 +528,10 @@ public final class Models {
                     }
                     """.stripIndent().formatted(modelLocation, buildPromptText(symbols), encodedString, audioFormat);
 
+            String baseUrl = Project.getLlmProxy(); // Get full URL (including scheme) from project settings
             RequestBody body = RequestBody.create(jsonBody, JSON);
             Request request = new Request.Builder()
-                    .url(LITELLM_BASE_URL + "/chat/completions")
+                    .url(baseUrl + "/chat/completions") // Use dynamic base URL
                     // LiteLLM requires a dummy API key here for the OpenAI compatible endpoint
                     .header("Authorization", "Bearer dummy-key")
                     .post(body)

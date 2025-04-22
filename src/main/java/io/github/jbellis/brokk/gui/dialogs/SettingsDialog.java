@@ -20,6 +20,10 @@ public class SettingsDialog extends JDialog {
     private final JPanel projectPanel; // Keep a reference to enable/disable
     // Brokk Key field (Global)
     private JTextField brokkKeyField;
+    // Global fields (continued)
+    private JRadioButton defaultProxyRadio;
+    private JRadioButton customProxyRadio;
+    private JTextField customProxyField;
     // Project fields
     private JComboBox<Project.CpgRefresh> cpgRefreshComboBox; // ComboBox for CPG refresh
     private JTextField buildCleanCommandField;
@@ -118,10 +122,67 @@ public class SettingsDialog extends JDialog {
         gbc.fill = GridBagConstraints.HORIZONTAL; // Make field expand horizontally
         panel.add(brokkKeyField, gbc);
 
-        // Reset fill for the label
+        // Reset fill after Brokk Key
         gbc.fill = GridBagConstraints.NONE;
 
-        // Theme Selection (now on one line)
+        // --- LLM Proxy Setting ---
+        row++; // Move to the next row for the proxy label
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.weightx = 0.0;
+        panel.add(new JLabel("LLM Proxy:"), gbc);
+
+        defaultProxyRadio = new JRadioButton("Default (" + Project.DEFAULT_LLM_PROXY + ")");
+        customProxyRadio = new JRadioButton("Custom:");
+        var proxyGroup = new ButtonGroup();
+        proxyGroup.add(defaultProxyRadio);
+        proxyGroup.add(customProxyRadio);
+
+        customProxyField = new JTextField(20); // Width hint
+
+        // Panel for radio buttons
+        var proxyRadioPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        proxyRadioPanel.add(defaultProxyRadio);
+        proxyRadioPanel.add(customProxyRadio);
+
+        gbc.gridx = 1;
+        gbc.gridy = row++; // Add radio panel, then move to next row for text field
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL; // Let radio panel fill horizontally
+        panel.add(proxyRadioPanel, gbc);
+
+        // Add custom proxy text field below the "Custom" radio button
+        gbc.gridx = 1;
+        gbc.gridy = row; // Use the incremented row
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        // Indent the custom field slightly
+        gbc.insets = new Insets(0, 25, 2, 2); // Top, Left (indent), Bottom, Right
+        panel.add(customProxyField, gbc);
+        gbc.insets = new Insets(2, 2, 2, 2); // Reset insets
+
+        // Add listeners to enable/disable text field
+        defaultProxyRadio.addActionListener(e -> customProxyField.setEnabled(false));
+        customProxyRadio.addActionListener(e -> customProxyField.setEnabled(true));
+
+        // Load initial proxy setting
+        String currentProxy = Project.getLlmProxy();
+        if (currentProxy.equals(Project.DEFAULT_LLM_PROXY)) {
+            defaultProxyRadio.setSelected(true);
+            customProxyField.setEnabled(false);
+            customProxyField.setText(""); // Clear field when default is selected
+        } else {
+            customProxyRadio.setSelected(true);
+            customProxyField.setEnabled(true);
+            customProxyField.setText(currentProxy);
+        }
+
+        // Reset fill for the next label
+        gbc.fill = GridBagConstraints.NONE;
+
+
+        // --- Theme Selection ---
+        row++; // Move to next row for theme
         gbc.gridx = 0;
         gbc.gridy = row;
         gbc.weightx = 0.0;
@@ -661,16 +722,46 @@ public class SettingsDialog extends JDialog {
         String newBrokkKey = brokkKeyField.getText().trim(); // Read from the new field
         if (!newBrokkKey.equals(currentBrokkKey)) {
             Project.setBrokkKey(newBrokkKey);
+            logger.debug("Applied Brokk Key: {}", newBrokkKey.isEmpty() ? "<empty>" : "****");
         }
 
+        // -- Apply LLM Proxy --
+        String newProxy;
+        if (defaultProxyRadio.isSelected()) {
+            newProxy = Project.DEFAULT_LLM_PROXY; // Use constant to ensure consistency
+        } else {
+            newProxy = customProxyField.getText().trim();
+            // If custom is selected but field is empty or matches default, treat as default
+            if (newProxy.isEmpty() || newProxy.equals(Project.DEFAULT_LLM_PROXY)) {
+                newProxy = Project.DEFAULT_LLM_PROXY;
+            }
+        }
+        // Only save if the effective new proxy differs from the current one
+        if (!newProxy.equals(Project.getLlmProxy())) {
+            Project.setLlmProxy(newProxy); // setLlmProxy handles logic for default vs custom
+            logger.debug("Applied LLM Proxy: {}", newProxy);
+        }
+
+
         // -- Apply Theme --
-        // Find the themeRadioPanel (it's the component at gridx=1, gridy=1 based on GridBagLayout)
+        // Find the themeRadioPanel (it's the component holding theme radio buttons)
         Component themeComponent = null;
+        // Locate the panel holding the theme radio buttons based on content, not fixed grid coordinates
         for (Component comp : globalPanel.getComponents()) {
-            var constraints = ((GridBagLayout) globalPanel.getLayout()).getConstraints(comp);
-            if (constraints.gridx == 1 && constraints.gridy == 1 && comp instanceof JPanel) { // Find the panel holding radio buttons
-                themeComponent = comp;
-                break;
+            if (comp instanceof JPanel panel) {
+                // Check if the panel contains the light/dark radio buttons we created
+                boolean hasLight = false;
+                boolean hasDark = false;
+                for(Component child : panel.getComponents()) {
+                    if (child instanceof JRadioButton radio) {
+                        if ("Light".equals(radio.getText())) hasLight = true;
+                        if ("Dark".equals(radio.getText())) hasDark = true;
+                    }
+                }
+                if (hasLight && hasDark) {
+                    themeComponent = comp;
+                    break;
+                }
             }
         }
 
@@ -679,17 +770,20 @@ public class SettingsDialog extends JDialog {
                 if (radioComp instanceof JRadioButton radio && radio.isSelected()) {
                     boolean useDark = (Boolean) radio.getClientProperty("theme");
                     // Only switch theme if it actually changed
-                    if (useDark != Project.getTheme().equals("dark")) {
-                        chrome.switchTheme(useDark); // switchTheme calls Project.setTheme internally
+                    boolean newIsDark = (Boolean) radio.getClientProperty("theme");
+                    String newTheme = newIsDark ? "dark" : "light";
+                    // Only switch theme if it actually changed
+                    if (!newTheme.equals(Project.getTheme())) {
+                        chrome.switchTheme(newIsDark); // switchTheme calls Project.setTheme internally
+                        logger.debug("Applied Theme: {}", newTheme);
                     }
                     break;
                 }
             }
         } else {
             // Log error or handle case where theme panel wasn't found as expected
-            System.err.println("Could not find theme radio button panel in SettingsDialog.");
+            logger.error("Could not find theme radio button panel in SettingsDialog.");
         }
-
 
         // Apply Project Settings (if project is open and tab is enabled)
         var project = chrome.getProject();

@@ -60,6 +60,8 @@ public class Project implements IProject, AutoCloseable {
     private static final Path BROKK_CONFIG_DIR = Path.of(System.getProperty("user.home"), ".config", "brokk");
     private static final Path PROJECTS_PROPERTIES_PATH = BROKK_CONFIG_DIR.resolve("projects.properties");
     private static final Path GLOBAL_PROPERTIES_PATH = BROKK_CONFIG_DIR.resolve("brokk.properties");
+    private static final String LLM_PROXY_KEY = "llmProxyUrl";
+    public static final String DEFAULT_LLM_PROXY = "https://proxy.brokk.ai"; // Public for use in SettingsDialog
 
     public Project(Path root, ContextManager.TaskRunner runner, AnalyzerListener analyzerListener) {
         this.repo = GitRepo.hasGitRepo(root) ? new GitRepo(root) : new LocalFileRepo(root);
@@ -927,6 +929,37 @@ public class Project implements IProject, AutoCloseable {
         }
         saveGlobalProperties(props);
     }
+
+    /**
+     * Gets the configured LLM proxy URL (including scheme, e.g., "https://...") from global settings.
+     *
+     * @return The configured proxy URL, defaulting to DEFAULT_LLM_PROXY if not set or blank.
+     */
+    public static String getLlmProxy() {
+        var props = loadGlobalProperties();
+        String proxy = props.getProperty(LLM_PROXY_KEY, DEFAULT_LLM_PROXY).trim();
+        return proxy.isEmpty() ? DEFAULT_LLM_PROXY : proxy;
+    }
+
+    /**
+     * Sets the global LLM proxy URL (including scheme, e.g., "https://...").
+     * If the provided URL is null, blank, or matches the default, the setting is
+     * removed from the properties file, effectively reverting to the default.
+     *
+     * @param proxyUrl The proxy URL (including scheme) to save, or null/blank/default to revert to default.
+     */
+    public static void setLlmProxy(String proxyUrl) {
+        var props = loadGlobalProperties();
+        if (proxyUrl == null || proxyUrl.isBlank() || proxyUrl.trim().equals(DEFAULT_LLM_PROXY)) {
+            props.remove(LLM_PROXY_KEY);
+            logger.debug("Removing LLM proxy setting, reverting to default: {}", DEFAULT_LLM_PROXY);
+        } else {
+            props.setProperty(LLM_PROXY_KEY, proxyUrl.trim());
+            logger.debug("Setting LLM proxy to: {}", proxyUrl.trim());
+        }
+        saveGlobalProperties(props);
+    }
+
 
     /**
      * Sets the global UI theme
