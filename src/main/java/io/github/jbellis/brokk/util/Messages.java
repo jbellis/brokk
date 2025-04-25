@@ -30,7 +30,16 @@ public class Messages {
 
     public static List<ChatMessage> forLlm(Collection<ChatMessage> messages) {
         return messages.stream()
-                .map(m -> m instanceof CustomMessage ? new UserMessage(getText(m)) : m)
+                .map(m -> {
+                    if (m instanceof CustomMessage) {
+                        return new UserMessage(getText(m));
+                    }
+                    if (m instanceof UserMessage um && um.name() != null) {
+                        // strip out the metadata we use for stashing UI action type
+                        return new UserMessage(um.contents());
+                    }
+                    return m;
+                })
                 .toList();
     }
 

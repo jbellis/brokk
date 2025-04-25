@@ -497,7 +497,6 @@ public class Llm {
                 if (msg instanceof UserMessage userMessage) {
                     // Combine pending results with this user message
                     String combinedContent = formattedResults + "\n" + Messages.getText(userMessage);
-                    // Preserve name if any
                     UserMessage updatedUserMessage = new UserMessage(userMessage.name(), combinedContent);
                     processedMessages.add(updatedUserMessage);
                     logger.debug("Prepended {} tool result(s) to subsequent user message.", pendingTerms.size());
