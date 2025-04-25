@@ -11,6 +11,9 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.net.URI;
 
 public class SettingsDialog extends JDialog {
     private static final Logger logger = LogManager.getLogger(SettingsDialog.class);
@@ -20,10 +23,9 @@ public class SettingsDialog extends JDialog {
     private final JPanel projectPanel; // Keep a reference to enable/disable
     // Brokk Key field (Global)
     private JTextField brokkKeyField;
-    // Global fields (continued)
-    private JRadioButton defaultProxyRadio;
-    private JRadioButton customProxyRadio;
-    private JTextField customProxyField;
+    // Global proxy selection
+    private JRadioButton brokkProxyRadio;
+    private JRadioButton localhostProxyRadio;
     // Project fields
     private JComboBox<Project.CpgRefresh> cpgRefreshComboBox; // ComboBox for CPG refresh
     private JTextField buildCleanCommandField;
@@ -122,59 +124,78 @@ public class SettingsDialog extends JDialog {
         gbc.fill = GridBagConstraints.HORIZONTAL; // Make field expand horizontally
         panel.add(brokkKeyField, gbc);
 
+        // Sign-up/login info
+        gbc.gridx = 1;
+        gbc.gridy = row++;
+        var url = "https://brokk.ai";
+        var loginLabel = new JLabel(
+            "<html>Sign up or login at <a href=\"" + url + "\">" + url + "</a></html>"
+        );
+        loginLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        loginLabel.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                try {
+                        Desktop.getDesktop().browse(new URI(url));
+                    } catch (UnsupportedOperationException ex) {
+                        logger.error("Browser not supported: {}", url, ex);
+                        JOptionPane.showMessageDialog(
+                            SettingsDialog.this,
+                            "Sorry, unable to open browser automatically. This is a known problem on WSL.",
+                            "Browser Unsupported",
+                            JOptionPane.WARNING_MESSAGE
+                        );
+                    } catch (Exception ex) {
+                        logger.error("Failed to open URL: {}", url, ex);
+                    }
+            }
+        });
+        panel.add(loginLabel, gbc);
+
         // Reset fill after Brokk Key
         gbc.fill = GridBagConstraints.NONE;
 
         // --- LLM Proxy Setting ---
-        row++; // Move to the next row for the proxy label
+        row++;
         gbc.gridx = 0;
         gbc.gridy = row;
         gbc.weightx = 0.0;
         panel.add(new JLabel("LLM Proxy:"), gbc);
 
-        defaultProxyRadio = new JRadioButton("Default (" + Project.DEFAULT_LLM_PROXY + ")");
-        customProxyRadio = new JRadioButton("Custom:");
+        // Brokk vs localhost selection
+        brokkProxyRadio = new JRadioButton("Brokk");
+        // Removed italic on proxy radio label to keep standard font
+        localhostProxyRadio = new JRadioButton("Localhost");
+        // Removed italic on proxy radio label to keep standard font
         var proxyGroup = new ButtonGroup();
-        proxyGroup.add(defaultProxyRadio);
-        proxyGroup.add(customProxyRadio);
+        proxyGroup.add(brokkProxyRadio);
+        proxyGroup.add(localhostProxyRadio);
 
-        customProxyField = new JTextField(20); // Width hint
-
-        // Panel for radio buttons
-        var proxyRadioPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        proxyRadioPanel.add(defaultProxyRadio);
-        proxyRadioPanel.add(customProxyRadio);
-
+        // Brokk radio on this row
         gbc.gridx = 1;
-        gbc.gridy = row++; // Add radio panel, then move to next row for text field
-        gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.HORIZONTAL; // Let radio panel fill horizontally
-        panel.add(proxyRadioPanel, gbc);
-
-        // Add custom proxy text field below the "Custom" radio button
-        gbc.gridx = 1;
-        gbc.gridy = row; // Use the incremented row
+        gbc.gridy = row++;
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
-        // Indent the custom field slightly
-        gbc.insets = new Insets(0, 25, 2, 2); // Top, Left (indent), Bottom, Right
-        panel.add(customProxyField, gbc);
-        gbc.insets = new Insets(2, 2, 2, 2); // Reset insets
+        panel.add(brokkProxyRadio, gbc);
 
-        // Add listeners to enable/disable text field
-        defaultProxyRadio.addActionListener(e -> customProxyField.setEnabled(false));
-        customProxyRadio.addActionListener(e -> customProxyField.setEnabled(true));
+        // Localhost radio on next line
+        gbc.gridy = row++;
+        panel.add(localhostProxyRadio, gbc);
+
+        // Informational label under localhost
+        gbc.insets = new Insets(0, 25, 2, 2);
+        gbc.gridy = row++;
+        var proxyInfoLabel = new JLabel("Brokk will look for a litellm proxy on localhost:4000");
+        proxyInfoLabel.setFont(proxyInfoLabel.getFont().deriveFont(Font.ITALIC));
+        panel.add(proxyInfoLabel, gbc);
+        gbc.insets = new Insets(2, 2, 2, 2);
 
         // Load initial proxy setting
         String currentProxy = Project.getLlmProxy();
         if (currentProxy.equals(Project.DEFAULT_LLM_PROXY)) {
-            defaultProxyRadio.setSelected(true);
-            customProxyField.setEnabled(false);
-            customProxyField.setText(""); // Clear field when default is selected
+            brokkProxyRadio.setSelected(true);
         } else {
-            customProxyRadio.setSelected(true);
-            customProxyField.setEnabled(true);
-            customProxyField.setText(currentProxy);
+            localhostProxyRadio.setSelected(true);
         }
 
         // Reset fill for the next label
@@ -727,18 +748,13 @@ public class SettingsDialog extends JDialog {
 
         // -- Apply LLM Proxy --
         String newProxy;
-        if (defaultProxyRadio.isSelected()) {
-            newProxy = Project.DEFAULT_LLM_PROXY; // Use constant to ensure consistency
+        if (brokkProxyRadio.isSelected()) {
+            newProxy = Project.DEFAULT_LLM_PROXY;
         } else {
-            newProxy = customProxyField.getText().trim();
-            // If custom is selected but field is empty or matches default, treat as default
-            if (newProxy.isEmpty() || newProxy.equals(Project.DEFAULT_LLM_PROXY)) {
-                newProxy = Project.DEFAULT_LLM_PROXY;
-            }
+            newProxy = "http://localhost:4000";
         }
-        // Only save if the effective new proxy differs from the current one
         if (!newProxy.equals(Project.getLlmProxy())) {
-            Project.setLlmProxy(newProxy); // setLlmProxy handles logic for default vs custom
+            Project.setLlmProxy(newProxy);
             logger.debug("Applied LLM Proxy: {}", newProxy);
         }
 
