@@ -861,23 +861,29 @@ public class ContextManager implements IContextManager, AutoCloseable {
     public List<ChatMessage> getHistoryMessages()
     {
         var taskHistory = topContext().getTaskHistory();
-
         var messages = new ArrayList<ChatMessage>();
+
+        // Merge compressed messages into a single taskhistory message
         // TODO check that no compressed tasks are mixed in with the uncompressed?
         var compressed = taskHistory.stream()
                 .filter(TaskEntry::isCompressed)
                 .map(TaskEntry::toString)
                 .collect(Collectors.joining("\n\n"));
-
-
         if (!compressed.isEmpty()) {
             messages.add(new UserMessage("<taskhistory>%s</taskhistory>".formatted(compressed)));
             messages.add(new AiMessage("Ok, I see the history."));
         }
 
+        // Uncompressed messages we just add directly
         taskHistory.stream()
                 .filter(e -> !e.isCompressed())
-                .forEach(e -> messages.addAll(e.log().messages()));
+                .forEach(e -> {
+                    var rawMessages = e.log().messages();
+                    var taskMessages = rawMessages.getLast() instanceof AiMessage
+                                       ? rawMessages
+                                       : rawMessages.subList(0, rawMessages.size() - 1);
+                    messages.addAll(taskMessages);
+                });
 
         return messages;
     }
