@@ -190,12 +190,17 @@ public class SettingsDialog extends JDialog {
         panel.add(proxyInfoLabel, gbc);
         gbc.insets = new Insets(2, 2, 2, 2);
 
-        // Load initial proxy setting
-        String currentProxy = Project.getLlmProxy();
-        if (currentProxy.equals(Project.DEFAULT_LLM_PROXY)) {
+        // Load initial proxy setting via enum
+        if (Project.getLlmProxySetting() == Project.LlmProxySetting.BROKK) {
             brokkProxyRadio.setSelected(true);
         } else {
             localhostProxyRadio.setSelected(true);
+        }
+        // -- Apply LLM Proxy Setting --
+        if (brokkProxyRadio.isSelected()) {
+            Project.setLlmProxySetting(Project.LlmProxySetting.BROKK);
+        } else {
+            Project.setLlmProxySetting(Project.LlmProxySetting.LOCALHOST);
         }
 
         // Reset fill for the next label
@@ -746,17 +751,12 @@ public class SettingsDialog extends JDialog {
             logger.debug("Applied Brokk Key: {}", newBrokkKey.isEmpty() ? "<empty>" : "****");
         }
 
-        // -- Apply LLM Proxy --
-        String newProxy;
-        if (brokkProxyRadio.isSelected()) {
-            newProxy = Project.DEFAULT_LLM_PROXY;
-        } else {
-            newProxy = "http://localhost:4000";
-        }
-        if (!newProxy.equals(Project.getLlmProxy())) {
-            Project.setLlmProxy(newProxy);
-            logger.debug("Applied LLM Proxy: {}", newProxy);
-        }
+        // -- Apply LLM Proxy Setting --
+        Project.LlmProxySetting proxySetting = brokkProxyRadio.isSelected()
+                                                ? Project.LlmProxySetting.BROKK
+                                                : Project.LlmProxySetting.LOCALHOST;
+        Project.setLlmProxySetting(proxySetting);
+        logger.debug("Applied LLM Proxy Setting: {}", proxySetting);
 
 
         // -- Apply Theme --

@@ -282,14 +282,30 @@ public final class Models {
             // placeholder, LiteLLM manages actual keys
             String baseUrl = Project.getLlmProxy(); // Get full URL (including scheme) from project settings
             var builder = OpenAiStreamingChatModel.builder()
-                    .logRequests(true) // Not visible unless you turn down the threshold for dev.langchain4j in log4j2.xml
-                    .logResponses(true) // ditto
+                    .logRequests(true)
+                    .logResponses(true)
                     .strictJsonSchema(true)
                     .maxTokens(getMaxOutputTokens(modelName))
-                    .baseUrl(baseUrl) // Use dynamic base URL
-                    .timeout(Duration.ofMinutes(3)) // default 60s is not enough in practice
-                    .apiKey("dummy-key") // placeholder, LiteLLM manages actual keys
-                    .modelName(location); // Use the resolved location
+                    .baseUrl(baseUrl)
+                    .timeout(Duration.ofMinutes(3)); // default 60s is not enough
+
+            // If we’re on Brokk proxy, parse brk+<token>+<userId> and wire it through:
+            if (Project.getLlmProxySetting() == Project.LlmProxySetting.BROKK) {
+                var brokkKey = Project.getBrokkKey();
+                var parts = brokkKey.split("\\+");
+                if (parts.length == 3 && "brk".equals(parts[0])) {
+                    var token = parts[1];
+                    var userId = parts[2];
+                    builder = builder
+                            .apiKey(token)
+                            .customHeaders(Map.of("Authorization", "Bearer " + token))
+                            .user(userId);
+                }
+            } else {
+                builder = builder.apiKey("dummy-key");
+            }
+
+            builder = builder.modelName(location); // Use the resolved location
 
             // Apply reasoning effort if not default and supported
             logger.debug("Applying reasoning effort {} to model {}", reasoningLevel, modelName);
@@ -530,10 +546,18 @@ public final class Models {
 
             String baseUrl = Project.getLlmProxy(); // Get full URL (including scheme) from project settings
             RequestBody body = RequestBody.create(jsonBody, JSON);
+            // Pick correct Authorization header
+            var authHeader = "Bearer dummy-key";
+            if (Project.getLlmProxySetting() == Project.LlmProxySetting.BROKK) {
+                var brokkKey = Project.getBrokkKey();
+                var parts = brokkKey.split("\\+");
+                if (parts.length == 3 && "brk".equals(parts[0])) {
+                    authHeader = "Bearer " + parts[1];
+                }
+            }
             Request request = new Request.Builder()
-                    .url(baseUrl + "/chat/completions") // Use dynamic base URL
-                    // LiteLLM requires a dummy API key here for the OpenAI compatible endpoint
-                    .header("Authorization", "Bearer dummy-key")
+                    .url(baseUrl + "/chat/completions")
+                    .header("Authorization", authHeader)
                     .post(body)
                     .build();
 
