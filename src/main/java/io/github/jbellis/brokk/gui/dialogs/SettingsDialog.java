@@ -747,6 +747,17 @@ public class SettingsDialog extends JDialog {
         String currentBrokkKey = Project.getBrokkKey();
         String newBrokkKey = brokkKeyField.getText().trim(); // Read from the new field
         if (!newBrokkKey.equals(currentBrokkKey)) {
+            if (!newBrokkKey.isEmpty()) {
+                try {
+                    io.github.jbellis.brokk.Models.KeyParts kp = io.github.jbellis.brokk.Models.parseKey(newBrokkKey);
+                } catch (IllegalArgumentException ex) {
+                    JOptionPane.showMessageDialog(this,
+                                                  "Invalid Brokk Key: " + ex.getMessage(),
+                                                  "Invalid Key",
+                                                  JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+            }
             Project.setBrokkKey(newBrokkKey);
             logger.debug("Applied Brokk Key: {}", newBrokkKey.isEmpty() ? "<empty>" : "****");
         }

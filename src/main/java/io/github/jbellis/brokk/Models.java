@@ -26,6 +26,40 @@ import java.util.stream.Collectors;
  * Manages dynamically loaded models via LiteLLM.
  */
 public final class Models {
+    /**
+     * Represents the parsed Brokk API key components.
+     */
+    public record KeyParts(String token, java.util.UUID userId) {}
+
+    /**
+     * Parses a Brokk API key of the form 'brk+<token>+<userId>'.
+     * The token must start with 'sk-' and userId must be a valid UUID.
+     *
+     * @param key the raw key string
+     * @return KeyParts containing token and userId
+     * @throws IllegalArgumentException if the key is invalid
+     */
+    public static KeyParts parseKey(String key) {
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("Key cannot be empty");
+        }
+        var parts = key.split("\\+");
+        if (parts.length != 3 || !"brk".equals(parts[0])) {
+            throw new IllegalArgumentException("Key must have format 'brk+<token>+<userId>'");
+        }
+        var token = parts[1];
+        if (!token.startsWith("sk-")) {
+            throw new IllegalArgumentException("Token must start with 'sk-'");
+        }
+        java.util.UUID userId;
+        try {
+            userId = java.util.UUID.fromString(parts[2]);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("User ID must be a valid UUID", e);
+        }
+        return new KeyParts(token, userId);
+    }
+
     private final Logger logger = LogManager.getLogger(Models.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
     // Share OkHttpClient across instances for efficiency
@@ -289,18 +323,12 @@ public final class Models {
                     .baseUrl(baseUrl)
                     .timeout(Duration.ofMinutes(3)); // default 60s is not enough
 
-            // If we’re on Brokk proxy, parse brk+<token>+<userId> and wire it through:
             if (Project.getLlmProxySetting() == Project.LlmProxySetting.BROKK) {
-                var brokkKey = Project.getBrokkKey();
-                var parts = brokkKey.split("\\+");
-                if (parts.length == 3 && "brk".equals(parts[0])) {
-                    var token = parts[1];
-                    var userId = parts[2];
-                    builder = builder
-                            .apiKey(token)
-                            .customHeaders(Map.of("Authorization", "Bearer " + token))
-                            .user(userId);
-                }
+                var kp = parseKey(Project.getBrokkKey());
+                builder = builder
+                        .apiKey(kp.token())
+                        .customHeaders(Map.of("Authorization", "Bearer " + kp.token()))
+                        .user(kp.userId().toString());
             } else {
                 builder = builder.apiKey("dummy-key");
             }
@@ -549,11 +577,8 @@ public final class Models {
             // Pick correct Authorization header
             var authHeader = "Bearer dummy-key";
             if (Project.getLlmProxySetting() == Project.LlmProxySetting.BROKK) {
-                var brokkKey = Project.getBrokkKey();
-                var parts = brokkKey.split("\\+");
-                if (parts.length == 3 && "brk".equals(parts[0])) {
-                    authHeader = "Bearer " + parts[1];
-                }
+                var kp = parseKey(Project.getBrokkKey());
+                authHeader = "Bearer " + kp.token();
             }
             Request request = new Request.Builder()
                     .url(baseUrl + "/chat/completions")
