@@ -288,7 +288,7 @@ public final class Models {
                     .maxTokens(getMaxOutputTokens(modelName))
                     .baseUrl(baseUrl) // Use dynamic base URL
                     .timeout(Duration.ofMinutes(3)) // default 60s is not enough in practice
-                    .apiKey("litellm") // placeholder, LiteLLM manages actual keys
+                    .apiKey("dummy-key") // placeholder, LiteLLM manages actual keys
                     .modelName(location); // Use the resolved location
 
             // Apply reasoning effort if not default and supported

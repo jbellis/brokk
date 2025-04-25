@@ -129,7 +129,7 @@ public class SettingsDialog extends JDialog {
         gbc.gridy = row++;
         var url = "https://brokk.ai";
         var loginLabel = new JLabel(
-            "<html>Sign up or login at <a href=\"" + url + "\">" + url + "</a></html>"
+            "<html><i>Sign up or login at <a href=\"" + url + "\">" + url + "</a></i></html>"
         );
         loginLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         loginLabel.addMouseListener(new MouseAdapter() {
