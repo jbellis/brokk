@@ -63,34 +63,34 @@ public class Project implements IProject, AutoCloseable {
     private static final String LLM_PROXY_KEY = "llmProxyUrl";
 
     // New enum to represent just which proxy to use
-    public enum LlmProxySetting { BROKK, LOCALHOST }
+    public enum LlmProxySetting {BROKK, LOCALHOST}
 
-private static final String LLM_PROXY_SETTING_KEY = "llmProxySetting";
+    private static final String LLM_PROXY_SETTING_KEY = "llmProxySetting";
 
-/** 
- * Gets the stored LLM proxy setting (BROKK or LOCALHOST). 
- */
-public static LlmProxySetting getLlmProxySetting() {
-    var props = loadGlobalProperties();
-    String val = props.getProperty(LLM_PROXY_SETTING_KEY, LlmProxySetting.BROKK.name());
-    try {
-        return LlmProxySetting.valueOf(val);
-    } catch (IllegalArgumentException e) {
-        return LlmProxySetting.BROKK;
+    /**
+     * Gets the stored LLM proxy setting (BROKK or LOCALHOST).
+     */
+    public static LlmProxySetting getLlmProxySetting() {
+        var props = loadGlobalProperties();
+        String val = props.getProperty(LLM_PROXY_SETTING_KEY, LlmProxySetting.BROKK.name());
+        try {
+            return LlmProxySetting.valueOf(val);
+        } catch (IllegalArgumentException e) {
+            return LlmProxySetting.BROKK;
+        }
     }
-}
 
-/** 
- * Sets the global LLM proxy setting (BROKK or LOCALHOST). 
- */
-public static void setLlmProxySetting(LlmProxySetting setting) {
-    var props = loadGlobalProperties();
-    props.setProperty(LLM_PROXY_SETTING_KEY, setting.name());
-    saveGlobalProperties(props);
-}
+    /**
+     * Sets the global LLM proxy setting (BROKK or LOCALHOST).
+     */
+    public static void setLlmProxySetting(LlmProxySetting setting) {
+        var props = loadGlobalProperties();
+        props.setProperty(LLM_PROXY_SETTING_KEY, setting.name());
+        saveGlobalProperties(props);
+    }
 
     // The actual endpoint URLs for each proxy
-    public static final String BROKK_PROXY_URL     = "https://proxy.brokk.ai";
+    public static final String BROKK_PROXY_URL = "https://proxy.brokk.ai";
     public static final String LOCALHOST_PROXY_URL = "http://localhost:4000";
 
     public Project(Path root, ContextManager.TaskRunner runner, AnalyzerListener analyzerListener) {
@@ -966,11 +966,11 @@ public static void setLlmProxySetting(LlmProxySetting setting) {
      * @return The configured proxy URL, defaulting to DEFAULT_LLM_PROXY if not set or blank.
      */
     public static String getLlmProxy() {
-    // Return the actual endpoint URL based on the enum setting
-    return getLlmProxySetting() == LlmProxySetting.BROKK
-            ? BROKK_PROXY_URL
-            : LOCALHOST_PROXY_URL;
-}
+        // Return the actual endpoint URL based on the enum setting
+        return getLlmProxySetting() == LlmProxySetting.BROKK
+               ? BROKK_PROXY_URL
+               : LOCALHOST_PROXY_URL;
+    }
 
     /**
      * Sets the global LLM proxy URL (including scheme, e.g., "https://...").
