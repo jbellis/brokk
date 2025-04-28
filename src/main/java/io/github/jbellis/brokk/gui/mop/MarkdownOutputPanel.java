@@ -3,6 +3,7 @@ package io.github.jbellis.brokk.gui.mop;
 import dev.langchain4j.data.message.*;
 import io.github.jbellis.brokk.ContextFragment;
 import io.github.jbellis.brokk.TaskEntry;
+import io.github.jbellis.brokk.gui.mop.stream.IncrementalBlockRenderer;
 import io.github.jbellis.brokk.prompts.EditBlockParser;
 import io.github.jbellis.brokk.util.Messages;
 import org.apache.logging.log4j.LogManager;
@@ -48,6 +49,9 @@ public class MarkdownOutputPanel extends JPanel implements Scrollable {
     // Theme-related fields
     private boolean isDarkTheme = false;
     private boolean blockClearAndReset = false;
+    
+    // The current incremental renderer for streaming updates
+    private IncrementalBlockRenderer currentRenderer;
 
     public MarkdownOutputPanel() {
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
@@ -167,6 +171,17 @@ public class MarkdownOutputPanel extends JPanel implements Scrollable {
         var lastMessage = messages.getLast();
         var newText = Messages.getRepr(lastMessage) + additionalText;
         var type = lastMessage.type();
+        
+        // If we have an incremental renderer, use it instead of rebuilding
+        if (currentRenderer != null) {
+            currentRenderer.update(newText);
+            
+            // Create a new message with the combined text and update our model
+            ChatMessage updatedMessage = Messages.create(newText, type);
+            messages.set(messages.size() - 1, updatedMessage);
+            
+            return;    // skip old rebuild logic for opt-in path
+        }
 
         // Create a new message with the combined text
         ChatMessage updatedMessage = Messages.create(newText, type);
@@ -217,6 +232,13 @@ public class MarkdownOutputPanel extends JPanel implements Scrollable {
         Component component = renderMessageComponent(message);
         messageComponents.add(component);
         add(component);
+        
+        // If this is an AI or USER message, set up incremental rendering
+        if (message.type() == ChatMessageType.AI || message.type() == ChatMessageType.USER) {
+            currentRenderer = new IncrementalBlockRenderer(isDarkTheme);
+            ((BaseChatMessagePanel) component).add(currentRenderer.getRoot(), BorderLayout.CENTER);
+            currentRenderer.update(Messages.getText(message));
+        }
 
         // Re-add spinner if it was visible
         if (spinnerWasVisible) {
