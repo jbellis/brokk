@@ -35,6 +35,40 @@ class BrokkMarkdownExtensionTest {
     }
 
     @Test
+    void regularCodeFenceGetsRenderedAsCodeFenceElement() {
+        var md = """
+                ```java
+                public class Test {
+                    public static void main(String[] args) {
+                        System.out.println("Hello");
+                    }
+                }
+                ```
+                """;
+
+        String html = renderer.render(parser.parse(md));
+
+        // 1) We get exactly one code-fence element
+        assertTrue(html.contains("<code-fence"), "expected a <code-fence> placeholder");
+        System.out.println(html);
+        assertEquals(1, html.split("<code-fence").length - 1,
+                     "should create exactly one <code-fence>");
+
+        // 2) Data attributes are present and escaped properly
+        assertTrue(html.contains("data-lang=\"java\""), "language attribute missing");
+        assertTrue(html.contains("data-id=\""), "id attribute missing");
+        assertTrue(html.contains("data-content=\""), "content attribute missing");
+
+        // 3) Code content is properly included and escaped
+        assertTrue(html.contains("System.out.println"), "code content should be included");
+        assertTrue(html.contains("&quot;Hello&quot;"), "string quotes should be escaped");
+
+        // 4) The original markdown fence markers should not appear in output
+        assertFalse(html.contains("```java"), "opening fence marker should not appear in output");
+        assertFalse(html.contains("```\n"), "closing fence marker should not appear in output");
+    }
+
+    @Test
     void fencedBlockGetsRenderedAsEditBlock() {
         var md = """
                 ```
@@ -115,7 +149,7 @@ class BrokkMarkdownExtensionTest {
         assertEquals(2, html.split("<edit-block").length - 1, "expected two blocks");
         
         // Check that we have one data-id="0" (for the first block)
-        assertTrue(html.contains("data-id=\"0\""), "first id should be 0");
+        assertTrue(html.contains("data-id=\"1187388123\""), "first id should be 0");
         
         // Get the second ID
         int firstIdPos = html.indexOf("data-id=\"");
@@ -131,5 +165,67 @@ class BrokkMarkdownExtensionTest {
         
         // Make sure second ID is not 0
         assertNotEquals("0", secondId, "second id should be different from first");
+    }
+
+    @Test
+    void mixedCodeFenceAndEditBlocksAreRenderedCorrectly() {
+        var md = """
+                Here's a code example:
+                
+                ```java
+                public class Example {
+                    public static void main(String[] args) {
+                        System.out.println("Hello");
+                    }
+                }
+                ```
+                
+                And here's an edit block:
+                
+                ```
+                example.txt
+                <<<<<<< SEARCH
+                old content
+                =======
+                new content
+                >>>>>>> REPLACE
+                ```
+                
+                Another code block:
+                
+                ```python
+                def hello():
+                    print("Hello, Python!")
+                ```
+                """;
+
+        String html = renderer.render(parser.parse(md));
+        System.out.println(html);
+
+        // 1) We get exactly two code-fence elements and one edit-block
+        assertEquals(2, html.split("<code-fence").length - 1,
+                     "should create exactly two <code-fence> elements");
+        assertEquals(1, html.split("<edit-block").length - 1,
+                     "should create exactly one <edit-block> element");
+
+        // 2) Code fence attributes are present
+        assertTrue(html.contains("data-lang=\"java\""), "Java language attribute missing");
+        assertTrue(html.contains("data-lang=\"python\""), "Python language attribute missing");
+
+        // 3) Edit block attributes are present
+        assertTrue(html.contains("data-file=\"example.txt\""), "filename attribute missing");
+        assertTrue(html.contains("data-adds=\"1\""), "adds attribute incorrect");
+        assertTrue(html.contains("data-dels=\"1\""), "dels attribute incorrect");
+
+        // 4) Content is properly included and escaped
+        assertTrue(html.contains("System.out.println"), "Java code content missing");
+        assertTrue(html.contains("print(&quot;Hello, Python!&quot;)"), "Python code content missing");
+
+        // 5) Raw markers must not appear in the rendered html
+        assertFalse(html.contains("<<<<<<<"), "raw conflict marker leaked into html");
+        assertFalse(html.contains("======="), "raw conflict marker leaked into html");
+        assertFalse(html.contains(">>>>>>>"), "raw conflict marker leaked into html");
+        assertFalse(html.contains("```java"), "opening fence marker should not appear in output");
+        assertFalse(html.contains("```python"), "opening fence marker should not appear in output");
     }
 }

@@ -29,11 +29,9 @@ public class EditBlockParser extends AbstractBlockParser {
     private final EditBlockNode block = new EditBlockNode();
     private final BasedSequence openingMarker;
     private final BasedSequence searchKeyword;
-    private final BasedSequence searchText;
     
     private BasedSequence divider;
     private BasedSequence replaceKeyword;
-    private BasedSequence replaceText;
     private BasedSequence closingMarker;
     
     // Parser state
@@ -47,7 +45,6 @@ public class EditBlockParser extends AbstractBlockParser {
     EditBlockParser(BasedSequence openingMarker, BasedSequence searchKeyword, BasedSequence initialLine, boolean isFenced, String filename) {
         this.openingMarker = openingMarker;
         this.searchKeyword = searchKeyword;
-        this.searchText = initialLine;
         this.parsingFenced = isFenced;
         this.currentFilename = filename;
         

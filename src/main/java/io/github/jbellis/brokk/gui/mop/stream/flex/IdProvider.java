@@ -33,11 +33,14 @@ public class IdProvider {
         // This ensures the same physical block gets the same ID even if content above it changes
         int startOffset = node.getStartOffset();
         
-        // Simple hash function to generate a positive integer ID
-        // For actual use, we just want something stable between parses
-        int id = Math.abs(31 * startOffset);
+        // Include node type name in the hash calculation
+        String nodeType = node.getClass().getSimpleName();
         
-        logger.debug("Generated ID {} for node at offset {}", id, startOffset);
+        // Combine node type and position for a more unique ID
+        int typeHash = nodeType.hashCode();
+        int id = Math.abs(31 * startOffset + typeHash);
+        
+        logger.debug("Generated ID {} for {} node at offset {}", id, nodeType, startOffset);
         return id;
     }
 }
