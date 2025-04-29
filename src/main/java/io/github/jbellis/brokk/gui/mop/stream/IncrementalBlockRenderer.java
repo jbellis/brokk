@@ -5,7 +5,9 @@ import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.data.MutableDataSet;
 import io.github.jbellis.brokk.gui.mop.ThemeColors;
-import io.github.jbellis.brokk.gui.mop.MarkdownRenderUtil;
+import io.github.jbellis.brokk.gui.mop.stream.blocks.ComponentData;
+import io.github.jbellis.brokk.gui.mop.stream.blocks.ComponentDataFactory;
+import io.github.jbellis.brokk.gui.mop.stream.blocks.MarkdownFactory;
 import io.github.jbellis.brokk.gui.mop.stream.flex.BrokkMarkdownExtension;
 import io.github.jbellis.brokk.gui.mop.stream.flex.IdProvider;
 import org.apache.logging.log4j.LogManager;
@@ -14,13 +16,10 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Node;
-import org.jsoup.nodes.TextNode;
 
 import javax.swing.*;
-import javax.swing.text.DefaultCaret;
-import java.awt.*;
 import java.util.*;
-import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Renders markdown content incrementally, reusing existing components when possible to minimize flickering
@@ -41,6 +40,16 @@ public final class IncrementalBlockRenderer {
     // Component tracking
     private final Map<Integer, BlockEntry> registry = new LinkedHashMap<>();
     private String lastHtmlFingerprint = "";
+    
+    // Component factories
+    private static final Map<String, ComponentDataFactory> FACTORIES = 
+            ServiceLoader.load(ComponentDataFactory.class)
+                         .stream()
+                         .map(ServiceLoader.Provider::get)
+                         .collect(Collectors.toMap(ComponentDataFactory::tagName, f -> f));
+    
+    // Fallback factory for markdown content
+    private final MarkdownFactory markdownFactory = new MarkdownFactory();
 
     /**
      * Creates a new incremental renderer with the given theme.
@@ -122,7 +131,7 @@ public final class IncrementalBlockRenderer {
             
             if (entry == null) {
                 // Create new component
-                JComponent comp = createComponent(cd);
+                JComponent comp = cd.createComponent(isDarkTheme);
                 entry = new BlockEntry(comp, cd.fp());
                 registry.put(cd.id(), entry);
                 root.add(comp);
@@ -131,7 +140,7 @@ public final class IncrementalBlockRenderer {
                 logger.debug("cd.fp()={} vs. entry.fp={}", cd.fp(), entry.fp);
                 if (!cd.fp().equals(entry.fp)) {
                     // Update existing component
-                    updateComponent(entry.comp, cd);
+                    cd.updateComponent(entry.comp);
                     entry.fp = cd.fp();
                     logger.debug("Updated component with id {}: {}", cd.id(), cd.getClass().getSimpleName());
                 }
@@ -156,193 +165,6 @@ public final class IncrementalBlockRenderer {
         // Revalidate and repaint
         root.revalidate();
         root.repaint();
-    }
-    
-    /**
-     * Creates a Swing component for the given ComponentData.
-     * 
-     * @param data The component data to create a Swing component for
-     * @return The created Swing component
-     */
-    private JComponent createComponent(ComponentData data) {
-        return switch (data) {
-            case MarkdownComponentData md -> createMarkdownComponent(md);
-            case CodeBlockComponentData code -> createCodeComponent(code);
-            case EditBlockComponentData edit -> createEditBlockComponent(edit);
-        };
-    }
-    
-    /**
-     * Updates an existing Swing component with new data.
-     * 
-     * @param component The component to update
-     * @param data The new data for the component
-     */
-    private void updateComponent(JComponent component, ComponentData data) {
-        switch (data) {
-            case MarkdownComponentData md -> updateMarkdownComponent(component, md);
-            case CodeBlockComponentData code -> updateCodeComponent(component, code);
-            case EditBlockComponentData edit -> updateEditBlockComponent(component, edit);
-        }
-    }
-    
-    /**
-     * Creates a component for displaying markdown content.
-     * 
-     * @param data The markdown component data
-     * @return A JEditorPane configured for HTML display
-     */
-    private JComponent createMarkdownComponent(MarkdownComponentData data) {
-        JEditorPane editor = MarkdownRenderUtil.createHtmlPane(isDarkTheme);
-        updateMarkdownComponent(editor, data);
-        
-        // Configure for left alignment and proper sizing
-        editor.setAlignmentX(Component.LEFT_ALIGNMENT);
-        editor.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
-        
-        return editor;
-    }
-    
-    /**
-     * Updates a markdown component with new content.
-     * 
-     * @param component The component to update
-     * @param data The new markdown data
-     */
-    private void updateMarkdownComponent(JComponent component, MarkdownComponentData data) {
-        if (component instanceof JEditorPane editor) {
-            // Record current scroll position
-            var viewport = SwingUtilities.getAncestorOfClass(JViewport.class, editor);
-            Point viewPosition = viewport instanceof JViewport ? ((JViewport)viewport).getViewPosition() : null;
-            
-            // Update content
-            editor.setText("<html><body>" + data.html() + "</body></html>");
-            
-            // Restore scroll position if possible
-            if (viewport instanceof JViewport && viewPosition != null) {
-                ((JViewport)viewport).setViewPosition(viewPosition);
-            }
-        }
-    }
-    
-    /**
-     * Creates a component for displaying code blocks.
-     * 
-     * @param data The code block component data
-     * @return A syntax-highlighted code component
-     */
-    private JComponent createCodeComponent(CodeBlockComponentData data) {
-        var textArea = MarkdownRenderUtil.createConfiguredCodeArea(data.lang(), data.body(), isDarkTheme);
-        return MarkdownRenderUtil.createCodeBlockPanel(textArea, data.lang(), isDarkTheme);
-    }
-    
-    /**
-     * Updates a code component with new content.
-     * 
-     * @param component The component to update
-     * @param data The new code data
-     */
-    private void updateCodeComponent(JComponent component, CodeBlockComponentData data) {
-        // Find the RSyntaxTextArea within the panel
-        var textAreas = findComponentsOfType(component, org.fife.ui.rsyntaxtextarea.RSyntaxTextArea.class);
-        if (!textAreas.isEmpty()) {
-            var textArea = textAreas.getFirst();
-            // Record caret position
-            int caretPos = textArea.getCaretPosition();
-            // Update text
-            textArea.setText(data.body());
-            // Set syntax style if changed
-            textArea.setSyntaxEditingStyle(getSyntaxStyle(data.lang()));
-            // Restore caret if in valid range
-            if (caretPos >= 0 && caretPos <= textArea.getDocument().getLength()) {
-                textArea.setCaretPosition(caretPos);
-            }
-        }
-    }
-    
-    /**
-     * Gets the appropriate syntax style constant for a language.
-     * 
-     * @param lang The programming language
-     * @return The RSyntaxTextArea syntax style constant
-     */
-    private String getSyntaxStyle(String lang) {
-        if (lang == null || lang.isEmpty()) {
-            return org.fife.ui.rsyntaxtextarea.SyntaxConstants.SYNTAX_STYLE_NONE;
-        }
-        
-        return switch(lang.toLowerCase()) {
-            case "java" -> org.fife.ui.rsyntaxtextarea.SyntaxConstants.SYNTAX_STYLE_JAVA;
-            case "python", "py" -> org.fife.ui.rsyntaxtextarea.SyntaxConstants.SYNTAX_STYLE_PYTHON;
-            case "javascript", "js" -> org.fife.ui.rsyntaxtextarea.SyntaxConstants.SYNTAX_STYLE_JAVASCRIPT;
-            case "json" -> org.fife.ui.rsyntaxtextarea.SyntaxConstants.SYNTAX_STYLE_JSON;
-            case "html" -> org.fife.ui.rsyntaxtextarea.SyntaxConstants.SYNTAX_STYLE_HTML;
-            case "xml" -> org.fife.ui.rsyntaxtextarea.SyntaxConstants.SYNTAX_STYLE_XML;
-            case "css" -> org.fife.ui.rsyntaxtextarea.SyntaxConstants.SYNTAX_STYLE_CSS;
-            case "sql" -> org.fife.ui.rsyntaxtextarea.SyntaxConstants.SYNTAX_STYLE_SQL;
-            case "bash", "sh" -> org.fife.ui.rsyntaxtextarea.SyntaxConstants.SYNTAX_STYLE_UNIX_SHELL;
-            default -> org.fife.ui.rsyntaxtextarea.SyntaxConstants.SYNTAX_STYLE_NONE;
-        };
-    }
-    
-    /**
-     * Creates a component for displaying edit blocks.
-     * 
-     * @param data The edit block component data
-     * @return A component displaying the edit block
-     */
-    private JComponent createEditBlockComponent(EditBlockComponentData data) {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setOpaque(false);
-        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        
-        // Create a label with the edit block information
-        JLabel label = new JLabel(String.format("<html><b>Edit Block:</b> %s (adds: %d, dels: %d)</html>", 
-                                              data.file(), data.adds(), data.dels()));
-        label.setForeground(ThemeColors.getColor(isDarkTheme, "chat_text"));
-        
-        panel.add(label, BorderLayout.CENTER);
-        panel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-        
-        return panel;
-    }
-    
-    /**
-     * Updates an edit block component with new data.
-     * 
-     * @param component The component to update
-     * @param data The new edit block data
-     */
-    private void updateEditBlockComponent(JComponent component, EditBlockComponentData data) {
-        if (component instanceof JPanel panel) {
-            // Find the label within the panel
-            var labels = findComponentsOfType(panel, JLabel.class);
-            if (!labels.isEmpty()) {
-                labels.getFirst().setText(String.format("<html><b>Edit Block:</b> %s (adds: %d, dels: %d)</html>", 
-                                                   data.file(), data.adds(), data.dels()));
-            }
-        }
-    }
-    
-    /**
-     * Finds all components of a specific type within a container.
-     * 
-     * @param <T> The component type to find
-     * @param container The container to search in
-     * @param type The class of the component type
-     * @return A list of found components of the specified type
-     */
-    private <T extends Component> List<T> findComponentsOfType(Container container, Class<T> type) {
-        List<T> result = new ArrayList<>();
-        for (Component comp : container.getComponents()) {
-            if (type.isInstance(comp)) {
-                result.add(type.cast(comp));
-            }
-            if (comp instanceof Container) {
-                result.addAll(findComponentsOfType((Container) comp, type));
-            }
-        }
-        return result;
     }
     
     /**
@@ -379,38 +201,23 @@ public final class IncrementalBlockRenderer {
         // Track text nodes until we hit a special block
         StringBuilder currentText = new StringBuilder();
         
-        // Counter for markdown components
-        int markdownCounter = 0;
-        
         // Process body as a flat sequence, handling text separately
         for (Node node : body.childNodes()) {
             if (node instanceof Element element) {
                 String tagName = element.tagName();
                 
-                if (tagName.equals("code-fence") || tagName.equals("edit-block")) {
+                var factory = FACTORIES.get(tagName);
+                if (factory != null) {
                     // We found a special block
                     
                     // If we have accumulated text, add it as a markdown component first
                     if (!currentText.isEmpty()) {
-                        // Use incremented counter for stable ID
-                        int textId = markdownCounter++;
-                        result.add(new MarkdownComponentData(textId, currentText.toString()));
+                        result.add(markdownFactory.fromText(currentText.toString()));
                         currentText.setLength(0);
                     }
                     
-                    // Then add the special block
-                    if (tagName.equals("code-fence")) {
-                        int id = Integer.parseInt(element.attr("data-id"));
-                        String lang = element.attr("data-lang");
-                        result.add(new CodeBlockComponentData(id, element.attr("data-content"), lang));
-                    } else { // edit-block
-                        int id = Integer.parseInt(element.attr("data-id"));
-                        int adds = Integer.parseInt(element.attr("data-adds"));
-                        int dels = Integer.parseInt(element.attr("data-dels"));
-                        String file = element.attr("data-file");
-                        result.add(new EditBlockComponentData(id, adds, dels, file));
-                    }
-                    
+                    // Add the special block
+                    result.add(factory.fromElement(element));
                     continue;
                 }
             }
@@ -421,51 +228,10 @@ public final class IncrementalBlockRenderer {
         
         // Don't forget any trailing text
         if (!currentText.isEmpty()) {
-            // Use incremented counter for stable ID
-            int textId = markdownCounter++;
-            result.add(new MarkdownComponentData(textId, currentText.toString()));
+            result.add(markdownFactory.fromText(currentText.toString()));
         }
         
         return result;
-    }
-    
-    /**
-     * Represents a component that can be rendered in the UI.
-     * Each component has a stable ID and a fingerprint for change detection.
-     */
-    sealed interface ComponentData {
-        int id();
-        String fp();
-    }
-    
-    /**
-     * Represents a Markdown prose segment between placeholders.
-     */
-    record MarkdownComponentData(int id, String html) implements ComponentData {
-        @Override
-        public String fp() {
-            return html.hashCode() + "";
-        }
-    }
-    
-    /**
-     * Represents a code fence block with syntax highlighting.
-     */
-    record CodeBlockComponentData(int id, String body, String lang) implements ComponentData {
-        @Override
-        public String fp() {
-            return body.length() + ":" + body.hashCode();
-        }
-    }
-    
-    /**
-     * Represents an edit block for file diffs.
-     */
-    record EditBlockComponentData(int id, int adds, int dels, String file) implements ComponentData {
-        @Override
-        public String fp() {
-            return adds + "|" + dels;
-        }
     }
     
     /**
