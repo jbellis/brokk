@@ -377,26 +377,26 @@ class BrokkMarkdownExtensionTest {
 
         String html = renderer.render(parser.parse(md));
         System.out.println(html);
-        
+
         // Verify HTML structure
         assertTrue(html.contains("<p>Here are the detailed changes:</p>"), "Paragraph should be preserved");
         assertTrue(html.contains("<h3>1. First, let's create a new ComponentData interface:</h3>"), "Heading should be preserved");
-        
+
         // Verify edit blocks are created
         assertEquals(2, html.split("<edit-block").length - 1, "Should have exactly 2 edit blocks");
-        
+
         // Verify first edit block attributes
-        assertTrue(html.contains("data-file=\"src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/ComponentData.java\""), 
-                  "First file path should be correct");
+        assertTrue(html.contains("data-file=\"src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/ComponentData.java\""),
+                   "First file path should be correct");
         assertTrue(html.contains("data-adds=\"37\""), "First adds count should be correct");
         assertTrue(html.contains("data-dels=\"0\""), "First dels count should be correct");
-        
+
         // Verify second edit block attributes
-        assertTrue(html.contains("data-file=\"src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/MarkdownComponentData.java\""), 
-                  "Second file path should be correct");
+        assertTrue(html.contains("data-file=\"src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/MarkdownComponentData.java\""),
+                   "Second file path should be correct");
         assertTrue(html.contains("data-adds=\"48\""), "Second adds count should be correct");
         assertTrue(html.contains("data-dels=\"0\""), "Second dels count should be correct");
-        
+
         // Verify IDs are present
         assertTrue(html.contains("data-id=\""), "ID attributes should be present");
     }
@@ -428,20 +428,39 @@ class BrokkMarkdownExtensionTest {
 
         String html = renderer.render(parser.parse(md));
         System.out.println(html);
-        
+
         // Verify HTML structure
         assertTrue(html.contains("<h3>4. MarkdownOutputPanel refactor</h3>"), "Heading should be preserved");
         assertTrue(html.contains("<p>4.1  Data structure</p>"), "Subheading should be preserved");
         assertTrue(html.contains("<p>This replaces the parallel <code>messageComponents</code>"), "Inline code should be preserved");
-        
+
         // Verify code blocks are created
         assertEquals(2, html.split("<code-fence").length - 1, "Should have exactly 2 code blocks");
-        
+
         // Verify code content is included
         assertTrue(html.contains("data-content=\"record Row"), "First code block content should be present");
         assertTrue(html.contains("data-content=\"var bubble"), "Second code block content should be present");
-        
+
         // Verify IDs are present
         assertTrue(html.contains("data-id=\""), "ID attributes should be present");
+    }
+
+    @Test
+    void realWorldEditBlocksGetsRenderedCorrectly3() {
+        var md = """
+                3.  **The Fix:**
+                    *   Remove the following two lines from the end of the `MarkdownOutputPanel.updateLastMessage` method:
+                        ```java
+                        revalidate();
+                        repaint();
+                        ```
+                
+                4.  **Expected Result:** By removing these lines, the update process will rely solely on the internal layout updates performed by the `IncrementalBlockRenderer` for the specific message being appended. The `BoxLayout` of the `MarkdownOutputPanel` will handle any necessary adjustments to the overall panel layout if the size of the last message bubble changes. This should significantly reduce the computational overhead during incremental updates and alleviate the scroll lag.
+                """;
+
+        String html = renderer.render(parser.parse(md));
+        System.out.println(html);
+
+
     }
 }

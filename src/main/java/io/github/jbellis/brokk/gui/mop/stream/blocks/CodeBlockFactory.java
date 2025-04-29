@@ -15,7 +15,7 @@ public class CodeBlockFactory implements ComponentDataFactory {
     public ComponentData fromElement(Element element) {
         int id = Integer.parseInt(element.attr("data-id"));
         String lang = element.attr("data-lang");
-        String content = element.attr("data-content");
+        String content = element.wholeText(); // Get text content with preserved whitespace
         
         return new CodeBlockComponentData(id, content, lang);
     }

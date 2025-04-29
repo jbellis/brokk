@@ -207,7 +207,9 @@ public final class IncrementalBlockRenderer {
             if (node instanceof Element element) {
                 String tagName = element.tagName();
                 
+                
                 var factory = FACTORIES.get(tagName);
+                logger.debug(html);
                 if (factory != null) {
                     // We found a special block
                     
