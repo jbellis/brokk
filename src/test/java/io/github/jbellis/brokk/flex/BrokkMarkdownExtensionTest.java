@@ -47,10 +47,10 @@ class BrokkMarkdownExtensionTest {
                 """;
 
         String html = renderer.render(parser.parse(md));
+        System.out.println(html);
 
         // 1) We get exactly one code-fence element
         assertTrue(html.contains("<code-fence"), "expected a <code-fence> placeholder");
-        System.out.println(html);
         assertEquals(1, html.split("<code-fence").length - 1,
                      "should create exactly one <code-fence>");
 
@@ -377,5 +377,71 @@ class BrokkMarkdownExtensionTest {
 
         String html = renderer.render(parser.parse(md));
         System.out.println(html);
+        
+        // Verify HTML structure
+        assertTrue(html.contains("<p>Here are the detailed changes:</p>"), "Paragraph should be preserved");
+        assertTrue(html.contains("<h3>1. First, let's create a new ComponentData interface:</h3>"), "Heading should be preserved");
+        
+        // Verify edit blocks are created
+        assertEquals(2, html.split("<edit-block").length - 1, "Should have exactly 2 edit blocks");
+        
+        // Verify first edit block attributes
+        assertTrue(html.contains("data-file=\"src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/ComponentData.java\""), 
+                  "First file path should be correct");
+        assertTrue(html.contains("data-adds=\"37\""), "First adds count should be correct");
+        assertTrue(html.contains("data-dels=\"0\""), "First dels count should be correct");
+        
+        // Verify second edit block attributes
+        assertTrue(html.contains("data-file=\"src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/MarkdownComponentData.java\""), 
+                  "Second file path should be correct");
+        assertTrue(html.contains("data-adds=\"48\""), "Second adds count should be correct");
+        assertTrue(html.contains("data-dels=\"0\""), "Second dels count should be correct");
+        
+        // Verify IDs are present
+        assertTrue(html.contains("data-id=\""), "ID attributes should be present");
+    }
+
+    @Test
+    void realWorldEditBlocksGetsRenderedCorrectly2() {
+        var md = """
+                ### 4. MarkdownOutputPanel refactor
+                
+                4.1  Data structure
+                ```
+                record Row(BaseChatMessagePanel bubble, IncrementalBlockRenderer renderer) {}
+                private final List<Row> rows = new ArrayList<>();
+                ```
+                This replaces the parallel `messageComponents` + `currentRenderer` duo.
+                
+                4.2  `addNewMessage` \s
+                ```
+                var bubble   = createSpeechBubble(message, isDarkTheme);
+                var renderer = new IncrementalBlockRenderer(isDarkTheme, POLICY.get(message.type()));
+                
+                bubble.add(renderer.getRoot(), BorderLayout.CENTER);
+                renderer.update(Messages.getText(message));
+                
+                rows.add(new Row(bubble, renderer));
+                add(bubble);
+                ```
+                """;
+
+        String html = renderer.render(parser.parse(md));
+        System.out.println(html);
+        
+        // Verify HTML structure
+        assertTrue(html.contains("<h3>4. MarkdownOutputPanel refactor</h3>"), "Heading should be preserved");
+        assertTrue(html.contains("<p>4.1  Data structure</p>"), "Subheading should be preserved");
+        assertTrue(html.contains("<p>This replaces the parallel <code>messageComponents</code>"), "Inline code should be preserved");
+        
+        // Verify code blocks are created
+        assertEquals(2, html.split("<code-fence").length - 1, "Should have exactly 2 code blocks");
+        
+        // Verify code content is included
+        assertTrue(html.contains("data-content=\"record Row"), "First code block content should be present");
+        assertTrue(html.contains("data-content=\"var bubble"), "Second code block content should be present");
+        
+        // Verify IDs are present
+        assertTrue(html.contains("data-id=\""), "ID attributes should be present");
     }
 }

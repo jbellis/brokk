@@ -196,8 +196,31 @@ public class EditBlockParser extends AbstractBlockParser {
                     if (fenceMatcher.matches()) {
                         logger.debug("Found potential fence opening: {}", line);
                         
-                        // Simple check - always create a parser for a fence opening
-                        // We'll validate the structure later in the parser
+                        // Look-ahead: is there a <<<<<<< SEARCH before the closing fence?
+                        var doc = line.getBaseSequence();          // whole document
+                        int pos = line.getEndOffset();             // character after the opening ```
+                        int linesChecked = 0;
+                        boolean headFound = false;
+                        boolean fenceClosed = false;
+
+                        while (pos < doc.length() && !headFound && !fenceClosed && linesChecked < 25) {
+                            int eol = doc.indexOf('\n', pos);
+                            if (eol == -1) eol = doc.length();
+                            var nextLine = doc.subSequence(pos, eol).toString();
+
+                            if (OPENING_FENCE.matcher(nextLine).matches()) fenceClosed = true;
+                            if (HEAD.matcher(nextLine).matches())          headFound = true;
+
+                            pos = eol + 1;
+                            linesChecked++;
+                        }
+
+                        if (!headFound) {
+                            // No SEARCH marker before the closing fence -> not an edit block
+                            return BlockStart.none();               // let Flexmark parse it as code-fence
+                        }
+                        
+                        // SEARCH found -> treat as fenced edit-block
                         return BlockStart.of(new EditBlockParser(
                                 line, BasedSequence.NULL, BasedSequence.NULL, true, null))
                                 .atIndex(state.getIndex());
