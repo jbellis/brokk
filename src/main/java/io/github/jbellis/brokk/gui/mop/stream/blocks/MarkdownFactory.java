@@ -26,4 +26,11 @@ public class MarkdownFactory implements ComponentDataFactory {
     public ComponentData fromText(String html) {
         return new MarkdownComponentData(++markdownCounter, html);
     }
+    
+    /**
+     * Resets the markdown counter to zero.
+     */
+    public static void resetCounter() {
+        markdownCounter = 0;
+    }
 }

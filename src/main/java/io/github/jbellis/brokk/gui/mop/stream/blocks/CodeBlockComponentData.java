@@ -1,7 +1,6 @@
 package io.github.jbellis.brokk.gui.mop.stream.blocks;
 
 import io.github.jbellis.brokk.gui.mop.MarkdownRenderUtil;
-import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 
 import javax.swing.*;

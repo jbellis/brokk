@@ -200,7 +200,8 @@ public final class IncrementalBlockRenderer {
         
         // Track text nodes until we hit a special block
         StringBuilder currentText = new StringBuilder();
-        
+        // reset counter to create stable ids for markdown segments
+        MarkdownFactory.resetCounter();
         // Process body as a flat sequence, handling text separately
         for (Node node : body.childNodes()) {
             if (node instanceof Element element) {
