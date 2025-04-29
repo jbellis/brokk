@@ -39,8 +39,6 @@ public class IdProvider {
         // Combine node type and position for a more unique ID
         int typeHash = nodeType.hashCode();
         int id = Math.abs(31 * startOffset + typeHash);
-        
-        logger.debug("Generated ID {} for {} node at offset {}", id, nodeType, startOffset);
         return id;
     }
 }

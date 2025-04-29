@@ -379,6 +379,9 @@ public final class IncrementalBlockRenderer {
         // Track text nodes until we hit a special block
         StringBuilder currentText = new StringBuilder();
         
+        // Counter for markdown components
+        int markdownCounter = 0;
+        
         // Process body as a flat sequence, handling text separately
         for (Node node : body.childNodes()) {
             if (node instanceof Element element) {
@@ -389,10 +392,8 @@ public final class IncrementalBlockRenderer {
                     
                     // If we have accumulated text, add it as a markdown component first
                     if (!currentText.isEmpty()) {
-                        // Create a temporary Flexmark node to generate ID
-                        com.vladsch.flexmark.util.ast.Node tempNode = 
-                            parser.parse(currentText.toString()).getFirstChild();
-                        int textId = idProvider.getId(tempNode);
+                        // Use incremented counter for stable ID
+                        int textId = markdownCounter++;
                         result.add(new MarkdownComponentData(textId, currentText.toString()));
                         currentText.setLength(0);
                     }
@@ -420,10 +421,8 @@ public final class IncrementalBlockRenderer {
         
         // Don't forget any trailing text
         if (!currentText.isEmpty()) {
-            // Create a temporary Flexmark node to generate ID
-            com.vladsch.flexmark.util.ast.Node tempNode = 
-                parser.parse(currentText.toString()).getFirstChild();
-            int textId = idProvider.getId(tempNode);
+            // Use incremented counter for stable ID
+            int textId = markdownCounter++;
             result.add(new MarkdownComponentData(textId, currentText.toString()));
         }
         
