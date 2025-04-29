@@ -16,8 +16,8 @@ public final class EditBlockUtils {
     
     // Pattern for the "=======" divider line
     public static final Pattern DIVIDER =
-            Pattern.compile("^ {0,3}={5,9}\\s*$", Pattern.MULTILINE);
-    
+            Pattern.compile("^ {0,3}={5,9}(?:\\s+(\\S.*))?\\s*$", Pattern.MULTILINE);
+
     // Pattern for the ">>>>>>> REPLACE [filename]" line (filename optional)
     public static final Pattern UPDATED =
             Pattern.compile("^ {0,3}>{5,9}\\s+REPLACE(?:\\s+(\\S.*))?\\s*$", Pattern.MULTILINE);

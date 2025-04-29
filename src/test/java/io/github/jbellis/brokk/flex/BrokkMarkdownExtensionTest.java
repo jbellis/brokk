@@ -27,7 +27,7 @@ class BrokkMarkdownExtensionTest {
                 .set(Parser.EXTENSIONS, List.of(BrokkMarkdownExtension.create()))
                 .set(IdProvider.ID_PROVIDER, idProvider)
                 // Keep html straightforward for string-comparison
-                .set(HtmlRenderer.SOFT_BREAK, "\n")
+                .set(HtmlRenderer.SOFT_BREAK, "<br />\n")
                 .set(HtmlRenderer.ESCAPE_HTML, true);
 
         parser = Parser.builder(options).build();
@@ -114,10 +114,10 @@ class BrokkMarkdownExtensionTest {
         String html = renderer.render(parser.parse(md));
 
         // Should still recognise the block and render a placeholder
-        assertTrue(html.contains("<edit-block"), 
-                  "unfenced block should still become an <edit-block>");
+        assertTrue(html.contains("<edit-block"),
+                   "unfenced block should still become an <edit-block>");
         assertTrue(html.contains("data-file=\"example.txt\""),
-                  "filename extracted from SEARCH line");
+                   "filename extracted from SEARCH line");
     }
 
     @Test
@@ -131,7 +131,7 @@ class BrokkMarkdownExtensionTest {
                 two
                 >>>>>>> REPLACE
                 ```
-
+                
                 ```
                 file2.txt
                 <<<<<<< SEARCH
@@ -147,22 +147,63 @@ class BrokkMarkdownExtensionTest {
         System.out.println(html);
         // Two edit-blocks with different ids
         assertEquals(2, html.split("<edit-block").length - 1, "expected two blocks");
-        
+
         // Check that we have one data-id="0" (for the first block)
         assertTrue(html.contains("data-id=\"1187388123\""), "first id should be 0");
-        
+
         // Get the second ID
         int firstIdPos = html.indexOf("data-id=\"");
         int secondIdPos = html.indexOf("data-id=\"", firstIdPos + 1);
-        
+
         // Make sure there is a second ID
         assertTrue(secondIdPos > 0, "should find a second ID");
-        
+
         // Extract the second ID
         int idStart = secondIdPos + 9; // length of 'data-id="'
         int idEnd = html.indexOf("\"", idStart);
         String secondId = html.substring(idStart, idEnd);
-        
+
+        // Make sure second ID is not 0
+        assertNotEquals("0", secondId, "second id should be different from first");
+    }
+
+    @Test
+    void multipleBlocksWithoutFencesReceiveDistinctIds() {
+        var md = """
+                <<<<<<< SEARCH file1.txt
+                one
+                =======
+                two
+                >>>>>>> REPLACE
+                
+                <<<<<<< SEARCH file2.txt
+                three
+                =======
+                four
+                >>>>>>> REPLACE
+                """;
+
+        String html = renderer.render(parser.parse(md));
+
+        System.out.println(html);
+        // Two edit-blocks with different ids
+        assertEquals(2, html.split("<edit-block").length - 1, "expected two blocks");
+
+        // Check that we have one data-id="0" (for the first block)
+        assertTrue(html.contains("data-id=\"1187388123\""), "first id should be 0");
+
+        // Get the second ID
+        int firstIdPos = html.indexOf("data-id=\"");
+        int secondIdPos = html.indexOf("data-id=\"", firstIdPos + 1);
+
+        // Make sure there is a second ID
+        assertTrue(secondIdPos > 0, "should find a second ID");
+
+        // Extract the second ID
+        int idStart = secondIdPos + 9; // length of 'data-id="'
+        int idEnd = html.indexOf("\"", idStart);
+        String secondId = html.substring(idStart, idEnd);
+
         // Make sure second ID is not 0
         assertNotEquals("0", secondId, "second id should be different from first");
     }
@@ -227,5 +268,114 @@ class BrokkMarkdownExtensionTest {
         assertFalse(html.contains(">>>>>>>"), "raw conflict marker leaked into html");
         assertFalse(html.contains("```java"), "opening fence marker should not appear in output");
         assertFalse(html.contains("```python"), "opening fence marker should not appear in output");
+    }
+
+
+    @Test
+    void realWorldEditBlocksGetsRenderedCorrectly() {
+        var md = """
+                Here are the detailed changes:
+                
+                ### 1. First, let's create a new ComponentData interface:
+                
+                <<<<<<< SEARCH src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/ComponentData.java
+                ======= src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/ComponentData.java
+                package io.github.jbellis.brokk.gui.mop.stream.blocks;
+                
+                import javax.swing.*;
+                
+                /**
+                 * Represents a component that can be rendered in the UI.
+                 * Each component has a stable ID and a fingerprint for change detection.
+                 */
+                public sealed interface ComponentData
+                    permits MarkdownComponentData, CodeBlockComponentData, EditBlockComponentData {
+                
+                    /**
+                     * Returns the unique identifier for this component.
+                     */
+                    int id();
+                
+                    /**
+                     * Returns a fingerprint that changes when the component's content changes.
+                     */
+                    String fp();
+                
+                    /**
+                     * Creates a new Swing component for this data.
+                     * 
+                     * @param darkTheme whether to use dark theme styling
+                     * @return a new Swing component
+                     */
+                    JComponent createComponent(boolean darkTheme);
+                
+                    /**
+                     * Updates an existing component with this data.
+                     * Implementations should preserve caret position and scroll state when possible.
+                     * 
+                     * @param component the component to update
+                     */
+                    void updateComponent(JComponent component);
+                }
+                >>>>>>> REPLACE src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/ComponentData.java
+                
+                ### 2. Now let's create concrete implementations:
+                
+                <<<<<<< SEARCH src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/MarkdownComponentData.java
+                ======= src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/MarkdownComponentData.java
+                package io.github.jbellis.brokk.gui.mop.stream.blocks;
+                
+                import io.github.jbellis.brokk.gui.mop.MarkdownRenderUtil;
+                
+                import javax.swing.*;
+                import javax.swing.text.JTextComponent;
+                import java.awt.*;
+                
+                /**
+                 * Represents a Markdown prose segment between placeholders.
+                 */
+                public record MarkdownComponentData(int id, String html) implements ComponentData {
+                    @Override
+                    public String fp() {
+                        return html.hashCode() + "";
+                    }
+                
+                    @Override
+                    public JComponent createComponent(boolean darkTheme) {
+                        JEditorPane editor = MarkdownRenderUtil.createHtmlPane(darkTheme);
+                
+                        // Update content
+                        editor.setText("<html><body>" + html + "</body></html>");
+                
+                        // Configure for left alignment and proper sizing
+                        editor.setAlignmentX(Component.LEFT_ALIGNMENT);
+                        editor.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+                
+                        return editor;
+                    }
+                
+                    @Override
+                    public void updateComponent(JComponent component) {
+                        if (component instanceof JEditorPane editor) {
+                            // Record current scroll position
+                            var viewport = SwingUtilities.getAncestorOfClass(JViewport.class, editor);
+                            Point viewPosition = viewport instanceof JViewport ? ((JViewport)viewport).getViewPosition() : null;
+                
+                            // Update content
+                            editor.setText("<html><body>" + html + "</body></html>");
+                
+                            // Restore scroll position if possible
+                            if (viewport instanceof JViewport && viewPosition != null) {
+                                ((JViewport)viewport).setViewPosition(viewPosition);
+                            }
+                        }
+                    }
+                }
+                >>>>>>> REPLACE src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/MarkdownComponentData.java
+                
+                """;
+
+        String html = renderer.render(parser.parse(md));
+        System.out.println(html);
     }
 }
