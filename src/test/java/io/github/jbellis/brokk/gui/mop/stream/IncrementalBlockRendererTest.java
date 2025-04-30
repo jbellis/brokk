@@ -2,9 +2,12 @@ package io.github.jbellis.brokk.gui.mop.stream;
 
 import io.github.jbellis.brokk.gui.mop.TestUtil;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.CodeBlockComponentData;
+import io.github.jbellis.brokk.gui.mop.stream.blocks.CompositeComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.EditBlockComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.MarkdownComponentData;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -97,5 +100,18 @@ public class IncrementalBlockRendererTest {
         assertEquals(5, editBlock.adds());
         assertEquals(3, editBlock.dels());
         assertEquals("Test.java", editBlock.file());
+    }
+    
+    @Test
+    void compositeBuildsChildComponents() {
+        var markdown = new MarkdownComponentData(1, "<p>hello</p>");
+        var code = new CodeBlockComponentData(2, "int x = 1;", "java");
+        var composite = new CompositeComponentData(99, List.of(markdown, code));
+        
+        var comp = composite.createComponent(false);
+        
+        // The composite should create a panel with two child components
+        assertEquals(2, comp.getComponentCount());
+        assertEquals(markdown.fp() + "-" + code.fp(), composite.fp());
     }
 }

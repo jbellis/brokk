@@ -7,7 +7,7 @@ import javax.swing.*;
  * Each component has a stable ID and a fingerprint for change detection.
  */
 public sealed interface ComponentData
-    permits MarkdownComponentData, CodeBlockComponentData, EditBlockComponentData {
+    permits MarkdownComponentData, CodeBlockComponentData, EditBlockComponentData, CompositeComponentData {
     
     /**
      * Returns the unique identifier for this component.
