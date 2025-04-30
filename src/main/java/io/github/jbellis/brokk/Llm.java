@@ -228,7 +228,8 @@ public class Llm {
         while (result.error == null
                 && !tools.isEmpty()
                 && !cr.aiMessage().hasToolExecutionRequests()
-                && toolChoice == ToolChoice.REQUIRED) {
+                && toolChoice == ToolChoice.REQUIRED)
+        {
             logger.debug("Enforcing tool selection");
             io.systemOutput("Enforcing tool selection");
 
@@ -342,18 +343,23 @@ public class Llm {
         }
 
         // If native tools are used, or no tools, send the (potentially preprocessed if tools were empty) messages.
-        var builder = ChatRequest.builder().messages(messagesToSend);
+        var requestBuilder = ChatRequest.builder().messages(messagesToSend);
         if (!tools.isEmpty()) {
             logger.debug("Performing native tool calls");
-            var params = OpenAiChatRequestParameters.builder()
+            var paramsBuilder = OpenAiChatRequestParameters.builder()
                     .toolSpecifications(tools)
-                    .parallelToolCalls(true)
-                    .toolChoice(toolChoice)
-                    .build();
-            builder.parameters(params);
+                    .parallelToolCalls(true);
+            var effort = ((OpenAiChatRequestParameters) model.defaultRequestParameters()).reasoningEffort();
+            if (toolChoice == ToolChoice.REQUIRED && effort == null) {
+                // Anthropic only supports TC.REQUIRED with reasoning off
+                // (and Anthropic is currently the only vendor that runs with native tool calls)
+                paramsBuilder = paramsBuilder
+                        .toolChoice(ToolChoice.REQUIRED);
+            }
+            requestBuilder.parameters(paramsBuilder.build());
         }
 
-        var request = builder.build();
+        var request = requestBuilder.build();
         return doSingleStreamingCall(request, echo);
     }
 

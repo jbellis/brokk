@@ -1,18 +1,29 @@
 package io.github.jbellis.brokk.prompts;
 
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ChatMessageType;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import io.github.jbellis.brokk.ContextManager;
+import io.github.jbellis.brokk.EditBlock;
+import io.github.jbellis.brokk.IConsoleIO;
 import io.github.jbellis.brokk.Models;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
+
+/**
+ * Generates prompts for the main coding agent loop, including instructions for SEARCH/REPLACE blocks.
+ */
 public abstract class CodePrompts {
-    public static final CodePrompts instance = new CodePrompts() {
-    };
+    public static final CodePrompts instance = new CodePrompts() {}; // Changed instance creation
 
     public static final String LAZY_REMINDER = """
             You are diligent and tireless!
@@ -52,7 +63,7 @@ public abstract class CodePrompts {
         var messages = new ArrayList<ChatMessage>();
         var reminder = reminderForModel(cm.getModels(), model);
 
-        messages.add(new SystemMessage(formatIntro(cm, reminder)));
+        messages.add(systemMessage(cm, reminder));
         messages.addAll(parser.exampleMessages());
         messages.addAll(cm.getHistoryMessages());
         messages.addAll(sessionMessages);
@@ -65,7 +76,7 @@ public abstract class CodePrompts {
     public final List<ChatMessage> collectAskMessages(ContextManager cm, String input) {
         var messages = new ArrayList<ChatMessage>();
 
-        messages.add(new SystemMessage(formatIntro(cm, "")));
+        messages.add(systemMessage(cm, ""));
         messages.addAll(cm.getHistoryMessages());
         messages.addAll(cm.getWorkspaceContentsMessages());
         messages.add(askRequest(input));
@@ -91,11 +102,11 @@ public abstract class CodePrompts {
         return workspaceBuilder.toString();
     }
 
-    protected String formatIntro(ContextManager cm, String reminder) {
+    protected SystemMessage systemMessage(ContextManager cm, String reminder) {
         var workspaceSummary = formatWorkspaceSummary(cm, true);
         var styleGuide = cm.getProject().getStyleGuide();
 
-        return """
+        var text = """
           <instructions>
           %s
           </instructions>
@@ -106,6 +117,8 @@ public abstract class CodePrompts {
           %s
           </style_guide>
           """.stripIndent().formatted(systemIntro(reminder), workspaceSummary, styleGuide).trim();
+
+        return new SystemMessage(text);
     }
 
     public String systemIntro(String reminder) {
@@ -169,5 +182,179 @@ public abstract class CodePrompts {
                </question>
                """.formatted(input);
         return new UserMessage(text);
+    }
+
+    /**
+     * Generates a message based on parse/apply errors from failed edit blocks
+     */
+    public static String getApplyFailureMessage(List<EditBlock.FailedBlock> failedBlocks,
+                                                EditBlockParser parser,
+                                                int succeededCount,
+                                                IConsoleIO io,
+                                                ContextManager cm)
+    {
+        if (failedBlocks.isEmpty()) {
+            return "";
+        }
+
+        // Group failed blocks by filename
+        var failuresByFile = failedBlocks.stream()
+                .filter(fb -> fb.block().filename() != null) // Only include blocks with filenames
+                .collect(Collectors.groupingBy(fb -> fb.block().filename()));
+
+        int totalFailCount = failedBlocks.size();
+        boolean singularFail = (totalFailCount == 1);
+        var pluralizeFail = singularFail ? "" : "s";
+
+        String fileDetails = failuresByFile.entrySet().stream()
+                .map(entry -> {
+                    var filename = entry.getKey();
+                    var fileFailures = entry.getValue();
+                    var file = cm.toFile(filename);
+                    String currentContentBlock;
+                    try {
+                        var content = file.read();
+                        currentContentBlock = """
+                                              <current_content>
+                                              %s
+                                              </current_content>
+                                              """.formatted(content.isBlank() ? "[File is empty]" : content).stripIndent();
+                    } catch (java.io.IOException e) {
+                        return null;
+                    }
+
+                    String failedBlocksXml = fileFailures.stream()
+                            .map(f -> """
+                                      <failed_block reason="%s">
+                                      <block>
+                                      %s
+                                      </block>
+                                      <commentary>
+                                      %s
+                                      </commentary>
+                                      </failed_block>
+                                      """.formatted(f.reason(), parser.repr(f.block()), f.commentary()).stripIndent())
+                            .collect(Collectors.joining("\n"));
+
+                    return """
+                           <file name="%s">
+                           %s
+                           
+                           <failed_blocks>
+                           %s
+                           </failed_blocks>
+                           </file>
+                           """.formatted(filename, currentContentBlock, failedBlocksXml).stripIndent();
+                })
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining("\n\n"));
+
+        // Instructions for the LLM
+        String instructions = """
+                      <instructions>
+                      # %d SEARCH/REPLACE block%s failed to match in %d files!
+                      
+                      Take a look at the CURRENT state of the relevant file%s provided above in the `<current_content>` tags.
+                      If the failed edits listed in the `<failed_blocks>` tags are still needed, please correct them based on the current content.
+                      Remember that the SEARCH text within a `<block>` must match EXACTLY the lines in the file -- but
+                      I can accommodate whitespace differences, so if you think the only problem is whitespace, you need to look closer.
+                      If the SEARCH text looks correct, double-check the filename too.
+                      
+                      Provide corrected SEARCH/REPLACE blocks for the failed edits only.
+                      </instructions>
+                      """.formatted(totalFailCount, pluralizeFail, failuresByFile.size(), pluralizeFail).stripIndent();
+
+        // Add info about successful blocks, if any
+        String successNote = "";
+        if (succeededCount > 0) {
+            boolean singularSuccess = (succeededCount == 1);
+            var pluralizeSuccess = singularSuccess ? "" : "s";
+            successNote = """
+                          <note>
+                          The other %d SEARCH/REPLACE block%s applied successfully. Do not re-send them. Just fix the failing blocks detailed above.
+                          </note>
+                          """.formatted(succeededCount, pluralizeSuccess).stripIndent();
+        }
+
+        // we don't send file details to the output
+        var summary = """
+                      \nFailed to apply %s block(s), retrying
+                      """.stripIndent().formatted(failedBlocks.size());
+        io.llmOutput(summary, ChatMessageType.CUSTOM);
+
+        // Construct the full message for the LLM
+        return """
+               %s
+               
+               %s
+               %s
+               """.formatted(instructions, fileDetails, successNote).stripIndent();
+    }
+
+    /**
+     * Collects messages for a full-file replacement request, typically used as a fallback
+     * when standard SEARCH/REPLACE fails repeatedly. Includes system intro, history, workspace,
+     * target file content, and the goal. Asks for the *entire* new file content back.
+     *
+     * @param cm              ContextManager to access history, workspace, style guide.
+     * @param targetFile      The file whose content needs full replacement.
+     * @param goal            The user's original goal or reason for the replacement (e.g., build error).
+     * @param taskMessages
+     * @return List of ChatMessages ready for the LLM.
+     */
+    public List<ChatMessage> collectFullFileReplacementMessages(ContextManager cm,
+                                                                ProjectFile targetFile,
+                                                                String goal,
+                                                                ArrayList<ChatMessage> taskMessages)
+    {
+        var messages = new ArrayList<ChatMessage>();
+        var styleGuide = cm.getProject().getStyleGuide();
+
+        // 1. System Intro + Style Guide
+        messages.add(systemMessage(cm, styleGuide));
+        // 2. No examples provided for full-file replacement
+
+        // 3. History Messages (provides conversational context)
+        messages.addAll(cm.getHistoryMessages());
+
+        // 4. Workspace
+        messages.addAll(cm.getWorkspaceContentsMessages());
+
+        // 5. task-messages-so-far
+        messages.addAll(taskMessages);
+
+        // 5. Target File Content + Goal
+        String currentContent;
+        try {
+            currentContent = targetFile.read();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read target file for full replacement prompt: " + targetFile, e);
+        }
+
+        var userMessage = """
+            You are now performing a full-file replacement because previous edits failed.
+            
+            Remember that this was the original goal:
+            <goal>
+            %s
+            </goal>
+            
+            Here is the current content of the file:
+            <file source="%s">
+            %s
+            </file>
+            
+            Review the conversation history, workspace contents, and the current source code.
+            Figure out what changes we are trying to make to implement the goal,
+            then provide the *complete and updated* new content for the entire file,
+            fenced with triple backticks. Omit language identifiers or other markdown options.
+            Think about your answer before starting to edit.
+            You MUST include the backtick fences, even if the correct content is an empty file.
+            DO NOT modify the file except for the changes pertaining to the goal!
+            DO NOT use the SEARCH/REPLACE format you see earlier -- that didn't work!
+            """.formatted(goal, targetFile, currentContent);
+        messages.add(new UserMessage(userMessage));
+
+        return messages;
     }
 }

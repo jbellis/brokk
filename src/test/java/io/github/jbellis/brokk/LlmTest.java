@@ -55,9 +55,11 @@ public class LlmTest {
             public Path getRoot() {
                 return tempDir;
             }
+
+
         };
         var models = new Models();
-        models.reinit(Project.DataRetentionPolicy.MINIMAL);
+        models.reinit(project);
         contextManager = new IContextManager() {
             @Override
             public IConsoleIO getIo() {

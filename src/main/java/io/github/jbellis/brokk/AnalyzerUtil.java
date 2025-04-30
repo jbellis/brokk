@@ -54,7 +54,7 @@ public class AnalyzerUtil {
                     var methods = entry.getValue();
                     if (!methods.isEmpty()) {
                         var fqcn = entry.getKey();
-                        var file = analyzer.getFileFor(fqcn).map(ProjectFile::toString).getOrElse(() -> "?");
+                        var file = analyzer.getFileFor(fqcn).map(ProjectFile::toString).orElse("?");
                         code.append("""
                                 <methods class="%s" file="%s">
                                 %s
@@ -183,8 +183,8 @@ public class AnalyzerUtil {
                 .distinct()
                 .map(fqcn -> {
                     Option<String> skeletonOpt = analyzer.getSkeleton(fqcn);
-                    Option<ProjectFile> fileOpt = analyzer.getFileFor(fqcn); // Need file for CodeUnit
-                    if (skeletonOpt.isDefined() && fileOpt.isDefined()) {
+                    var fileOpt = analyzer.getFileFor(fqcn); // Need file for CodeUnit
+                    if (skeletonOpt.isDefined() && fileOpt.isPresent()) {
                         return Map.entry(CodeUnit.cls(fileOpt.get(), fqcn), skeletonOpt.get());
                     }
                     return null;
@@ -245,7 +245,7 @@ public class AnalyzerUtil {
                 var classSource = analyzer.getClassSource(className);
                 if (classSource != null && !classSource.isEmpty()) {
                     // If source is found, format it with a header and add to the map
-                    String filename = analyzer.getFileFor(className).map(ProjectFile::toString).getOrElse(() -> "unknown file");
+                    String filename = analyzer.getFileFor(className).map(ProjectFile::toString).orElse("unknown file");
                     String formattedSource = "Source code of %s (from %s):\n\n%s".formatted(className, filename, classSource);
                     sources.put(className, formattedSource);
                     // If classSource is null or empty, we simply don't add an entry for this className

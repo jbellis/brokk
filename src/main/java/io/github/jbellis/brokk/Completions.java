@@ -20,6 +20,7 @@ public class Completions {
         // empty pattern -> alphabetic list
         if (pattern.isEmpty()) {
             return allDefs.stream()
+                    .distinct() // collapse method overloads
                     .sorted(Comparator.comparing(CodeUnit::fqName))
                     .toList();
         }
@@ -45,6 +46,7 @@ public class Completions {
                 .filter(sc -> sc.score() != Integer.MAX_VALUE)
                 .sorted(Comparator.<Scored>comparingInt(Scored::score)
                                 .thenComparing(sc -> sc.cu().fqName()))
+                .distinct()
                 .map(Scored::cu)
                 .toList();
     }

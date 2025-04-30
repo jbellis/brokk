@@ -2,6 +2,7 @@ package io.github.jbellis.brokk.gui;
 
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessageType;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import io.github.jbellis.brokk.*;
 import io.github.jbellis.brokk.ContextFragment.TaskFragment;
@@ -10,6 +11,7 @@ import io.github.jbellis.brokk.agents.CodeAgent;
 import io.github.jbellis.brokk.agents.ContextAgent;
 import io.github.jbellis.brokk.agents.SearchAgent;
 import io.github.jbellis.brokk.gui.TableUtils.FileReferenceList.FileReferenceData;
+import io.github.jbellis.brokk.gui.components.BrowserLabel;
 import io.github.jbellis.brokk.gui.dialogs.ArchitectOptionsDialog;
 import io.github.jbellis.brokk.gui.dialogs.SettingsDialog;
 import io.github.jbellis.brokk.prompts.CodePrompts;
@@ -33,8 +35,8 @@ import java.util.concurrent.CompletableFuture;
 import io.github.jbellis.brokk.gui.mop.ThemeColors;
 
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 
@@ -79,8 +81,10 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
     private final JPanel centerPanel;
     private final Timer contextSuggestionTimer; // Timer for debouncing quick context suggestions
     private final AtomicReference<Future<?>> currentQuickSuggestionTask = new AtomicReference<>(); // Holds the running quick suggestion task
+    private final AtomicBoolean suppressExternalSuggestionsTrigger = new AtomicBoolean(false); // Flag to prevent self-refresh from table actions
     private JPanel overlayPanel; // Panel used to initially disable command input
-    private boolean lowBalanceNotified = false; // Flag to track if the low balance warning has been shown
+    private boolean lowBalanceNotified = false;
+    private boolean freeTierNotified = false;
 
 
     public InstructionsPanel(Chrome chrome) {
@@ -376,7 +380,7 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
                 JMenuItem editItem = new JMenuItem("Edit " + targetRef.getFullPath());
                 editItem.addActionListener(e1 -> {
                     if (targetRef.getRepoFile() != null) {
-                        // suppressExternalSuggestionsTrigger.set(true); // No longer needed here
+                        suppressExternalSuggestionsTrigger.set(true);
                         cm.editFiles(List.of(targetRef.getRepoFile()));
                     } else {
                         chrome.toolErrorRaw("Cannot edit file: " + targetRef.getFullPath() + " - no ProjectFile available");
@@ -393,7 +397,7 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
                 JMenuItem readItem = new JMenuItem("Read " + targetRef.getFullPath());
                 readItem.addActionListener(e1 -> {
                     if (targetRef.getRepoFile() != null) {
-                        // suppressExternalSuggestionsTrigger.set(true); // No longer needed here
+                        suppressExternalSuggestionsTrigger.set(true);
                         cm.addReadOnlyFiles(List.of(targetRef.getRepoFile()));
                     } else {
                         chrome.toolErrorRaw("Cannot read file: " + targetRef.getFullPath() + " - no ProjectFile available");
@@ -405,15 +409,13 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
                 JMenuItem summarizeItem = new JMenuItem("Summarize " + targetRef.getFullPath());
                 summarizeItem.addActionListener(e1 -> {
                     if (targetRef.getRepoFile() != null) {
-                        cm.submitContextTask("Summarize", () -> {
-                            // suppressExternalSuggestionsTrigger.set(true); // No longer needed here
-                            boolean success = cm.addSummaries(Set.of(targetRef.getRepoFile()), Set.of());
-                            if (success) {
-                                chrome.systemOutput("Summarized " + targetRef.getFullPath());
-                            } else {
-                                chrome.toolErrorRaw("No summarizable code found");
-                            }
-                        });
+                        suppressExternalSuggestionsTrigger.set(true);
+                        boolean success = cm.addSummaries(Set.of(targetRef.getRepoFile()), Set.of());
+                        if (success) {
+                            chrome.systemOutput("Summarized " + targetRef.getFullPath());
+                        } else {
+                            chrome.toolErrorRaw("No summarizable code found");
+                        }
                     } else {
                         chrome.toolErrorRaw("Cannot summarize: " + targetRef.getFullPath() + " - ProjectFile information not available");
                     }
@@ -787,7 +789,7 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
                         failureReasonLabel.setVisible(false);
                         suggestionCardLayout.show(suggestionContentPanel, "TABLE"); // Show table
                     });
-                } else if (!recommendations.success()) { // Handle any failure, including single pass
+                } else { // Handle any failure, including single pass
                     logger.debug("Quick context suggestion failed: {}", recommendations.reasoning());
                     SwingUtilities.invokeLater(() -> {
                         boolean isDark = UIManager.getBoolean("laf.dark");
@@ -797,14 +799,6 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
                         tableScrollPane.setVisible(false); // Ensure table scrollpane is hidden just in case
                         referenceFileTable.setValueAt(List.of(), 0, 0); // Clear table data
                         suggestionCardLayout.show(suggestionContentPanel, "LABEL"); // Show label
-                    });
-                } else {
-                    // Handle other potential non-success cases, maybe clear or show generic message?
-                    logger.warn("Quick context suggestion returned unexpected state: {}", recommendations);
-                    SwingUtilities.invokeLater(() -> {
-                        referenceFileTable.setValueAt(List.of(), 0, 0);
-                        failureReasonLabel.setVisible(false);
-                        suggestionCardLayout.show(suggestionContentPanel, "TABLE"); // Show empty table
                     });
                 }
             } catch (InterruptedException interruptedException) {
@@ -834,17 +828,18 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
      */
     private void triggerDeepScan(ActionEvent e) {
         var goal = getInstructions();
-        DeepScanDialog.triggerDeepScan(chrome, goal);
-        // Button disabling/enabling and input field disabling/enabling are handled
-        // within DeepScanDialog.triggerDeepScan and its dialog callbacks.
+        try {
+            DeepScanDialog.triggerDeepScan(chrome, goal);
+        } finally {
+            chrome.getContextManager().submitBackgroundTask("", this::checkBalanceAndNotify);
+        }
     }
-
 
     /**
      * Checks the user's balance if using the Brokk proxy and displays a notification
      * if the balance is low.
      */
-    private void checkBalanceAndNotify() {
+    public void checkBalanceAndNotify() {
         if (Project.getLlmProxySetting() != Project.LlmProxySetting.BROKK) {
             return; // Only check balance when using Brokk proxy
         }
@@ -852,43 +847,72 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
         var contextManager = chrome.getContextManager();
         var models = contextManager.getModels();
 
-        try {
-            float balance = models.getUserBalance();
-            logger.debug("Checked balance: ${}", String.format("%.2f", balance));
+        contextManager.submitBackgroundTask("", () -> {
+            try {
+                float balance = models.getUserBalance();
+                logger.debug("Checked balance: ${}", String.format("%.2f", balance));
 
-            // If balance drops below the minimum paid threshold, reinitialize models to enforce free tier
-            if (balance < Models.MINIMUM_PAID_BALANCE) {
-                logger.warn("Balance below minimum paid threshold (${}), reinitializing models to free tier.", Models.MINIMUM_PAID_BALANCE);
-                // This will refetch models and apply the lowBalance filter based on MINIMUM_PAID_BALANCE
-                models.reinit(contextManager.getProject());
-            }
+                // If balance drops below the minimum paid threshold, reinitialize models to enforce free tier
+                if (balance < Models.MINIMUM_PAID_BALANCE) {
+                    logger.debug("Balance below minimum paid threshold (${}), reinitializing models to free tier.", Models.MINIMUM_PAID_BALANCE);
+                    // This will refetch models and apply the lowBalance filter based on MINIMUM_PAID_BALANCE
+                    models.reinit(contextManager.getProject());
 
-            // Check for the $2.00 warning threshold
-            if (balance < 2.00f) {
-                if (!lowBalanceNotified) { // Only show the dialog once unless balance recovers
-                    lowBalanceNotified = true; // Set the flag so we don't show it again
                     SwingUtilities.invokeLater(() -> {
-                        var messagePanel = new JPanel(new BorderLayout(0, 5)); // Panel for text and link
-                        var balanceMessage = String.format("Low account balance: $%.2f.", balance);
-                        messagePanel.add(new JLabel(balanceMessage), BorderLayout.NORTH);
+                        if (freeTierNotified) {
+                            // Only show the dialog once unless balance recovers
+                            return;
+                        }
 
-                        var browserLabel = new io.github.jbellis.brokk.gui.components.BrowserLabel(Models.TOP_UP_URL, "Top up at " + Models.TOP_UP_URL + " to avoid interruptions.");
-                        messagePanel.add(browserLabel, BorderLayout.SOUTH);
+                        var panel = new JPanel();
+                        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+                        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+                        panel.add(new JLabel("Brokk is running in the free tier. Only low-cost models are available."));
+                        panel.add(Box.createVerticalStrut(5));
+                        var label = new JLabel("To enable smarter models, subscribe or top up at:");
+                        panel.add(label);
+                        var browserLabel = new BrowserLabel(Models.TOP_UP_URL);
+                        browserLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+                        label.setAlignmentX(Component.LEFT_ALIGNMENT);
+                        panel.add(browserLabel);
 
                         JOptionPane.showMessageDialog(
                                 chrome.getFrame(),
-                                messagePanel, // Use the panel with the clickable label
+                                panel,
+                                "Balance Exhausted",
+                                JOptionPane.WARNING_MESSAGE
+                        );
+                    });
+                } else if (balance < Models.LOW_BALANCE_WARN_AT) {
+                    if (lowBalanceNotified) {
+                        // Only show the dialog once unless balance recovers
+                        return;
+                    }
+
+                    lowBalanceNotified = true;
+                    SwingUtilities.invokeLater(() -> {
+                        var panel = new JPanel(new BorderLayout(0, 5)); // Panel for text and link
+                        var balanceMessage = String.format("Low account balance: $%.2f.", balance);
+                        panel.add(new JLabel(balanceMessage), BorderLayout.NORTH);
+
+                        var browserLabel = new io.github.jbellis.brokk.gui.components.BrowserLabel(Models.TOP_UP_URL, "Top up at " + Models.TOP_UP_URL + " to avoid interruptions.");
+                        panel.add(browserLabel, BorderLayout.SOUTH);
+
+                        JOptionPane.showMessageDialog(
+                                chrome.getFrame(),
+                                panel,
                                 "Low Balance Warning",
                                 JOptionPane.WARNING_MESSAGE);
                     });
+                } else {
+                    // reset the notification flag
+                    lowBalanceNotified = false;
                 }
-            } else {
-                // Balance is $2.00 or above, reset the notification flag
-                lowBalanceNotified = false;
+            } catch (java.io.IOException e) {
+                logger.error("Failed to check user balance", e);
             }
-        } catch (java.io.IOException e) {
-            logger.error("Failed to check user balance", e);
-        }
+        });
     }
 
 
@@ -899,10 +923,6 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
     private void executeCodeCommand(StreamingChatLanguageModel model, String input) {
         var contextManager = chrome.getContextManager();
         var project = contextManager.getProject();
-
-        // Simplified check: Log if test files exist but none are in context.
-        // Does not block the command anymore.
-        checkTestsPresence(contextManager);
 
         project.pauseAnalyzerRebuilds();
         try {
@@ -1017,7 +1037,7 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
             chrome.llmOutput("\n# Answer\n%s".formatted(((ContextFragment.SearchFragment) result.output()).explanation()), ChatMessageType.AI);
             contextManager.addToHistory(result, false);
         } catch (InterruptedException e) {
-            chrome.toolErrorRaw("Search agent interrupted without answering");
+            chrome.toolErrorRaw("Search agent cancelled without answering");
         }
     }
 
@@ -1076,35 +1096,28 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
         }
 
         // Disable buttons immediately to provide feedback
-        disableButtons();
         chrome.getProject().addToInstructionsHistory(goal, 20);
         clearCommandInput();
 
         // Submit the action. The dialog and core logic run in the background.
-        contextManager.submitAction("Architect", goal, () -> {
+        submitAction("Architect", goal, () -> {
             ArchitectAgent.ArchitectOptions options = null; // Initialize to null
             try {
                 // Show options dialog within the background task using the new static method
                 options = ArchitectOptionsDialog.showDialog(chrome, contextManager);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt(); // Re-interrupt the thread
-                logger.warn("Architect options dialog interrupted", e);
+                logger.debug("Architect options dialog interrupted", e);
                 // options remains null, handled below
             }
 
             if (options == null) {
                 // User cancelled or dialog was interrupted
                 chrome.systemOutput("Architect command cancelled during option selection.");
-                // Re-enable buttons as the task is effectively aborted
-                SwingUtilities.invokeLater(this::enableButtons);
-                return; // Exit the lambda
+                return;
             }
-            try {
-                // Proceed with execution using the selected options
-                executeAgentCommand(architectModel, goal, options);
-            } finally {
-                checkBalanceAndNotify(); // Check balance after action completes
-            }
+            // Proceed with execution using the selected options
+            executeAgentCommand(architectModel, goal, options);
         });
     }
 
@@ -1131,39 +1144,9 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
         chrome.getProject().addToInstructionsHistory(input, 20);
         clearCommandInput();
         disableButtons();
-        // Submit the action directly, test checks are now non-blocking inside executeCodeCommand
-        chrome.getContextManager().submitAction("Code", input, () -> {
-            try {
-                executeCodeCommand(codeModel, input);
-            } finally {
-                checkBalanceAndNotify(); // Check balance after action completes
-            }
+        submitAction("Code", input, () -> {
+            executeCodeCommand(codeModel, input);
         });
-    }
-
-    /**
-     * Checks if test files exist in the project and if any are currently in context.
-     * Logs a debug message if tests exist but none are included.
-     * This check is non-blocking.
-     */
-    private void checkTestsPresence(ContextManager contextManager) {
-        var projectTestFiles = contextManager.getTestFiles();
-        if (projectTestFiles.isEmpty()) {
-            return; // No tests in project, nothing to check.
-        }
-
-        var contextFiles = Stream.concat(
-                contextManager.getEditableFiles().stream(),
-                contextManager.getReadonlyFiles().stream()
-        ).collect(Collectors.toSet());
-
-        boolean testsInContext = projectTestFiles.stream().anyMatch(contextFiles::contains);
-
-        if (!testsInContext) {
-            logger.debug("Initiating Code command, but no test files from the project are currently in the context.");
-            // Optionally add a subtle system message if desired:
-            // chrome.systemOutput("Note: No test files currently in context.");
-        }
     }
 
 
@@ -1189,12 +1172,8 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
         clearCommandInput();
         disableButtons();
         // Submit the action, calling the private execute method inside the lambda
-        chrome.getContextManager().submitAction("Ask", input, () -> {
-            try {
-                executeAskCommand(askModel, input);
-            } finally {
-                checkBalanceAndNotify(); // Check balance after action completes
-            }
+        submitAction("Ask", input, () -> {
+            executeAskCommand(askModel, input);
         });
     }
 
@@ -1220,12 +1199,8 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
         clearCommandInput();
         disableButtons();
         // Submit the action, calling the private execute method inside the lambda
-        chrome.getContextManager().submitAction("Search", input, () -> {
-            try {
-                executeSearchCommand(searchModel, input);
-            } finally {
-                checkBalanceAndNotify(); // Check balance after action completes
-            }
+        submitAction("Search", input, () -> {
+            executeSearchCommand(searchModel, input);
         });
     }
 
@@ -1239,7 +1214,24 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
         clearCommandInput();
         disableButtons();
         // Submit the action, calling the private execute method inside the lambda
-        chrome.getContextManager().submitAction("Run", input, () -> executeRunCommand(input));
+        submitAction("Run", input, () -> executeRunCommand(input));
+    }
+
+    /**
+     * sets the llm output to indicate the action has started, and submits the task on the user pool
+     */
+    public Future<?> submitAction(String action, String input, Runnable task) {
+        var cm = chrome.getContextManager();
+        // need to set the correct parser here since we're going to append to the same fragment during the action
+        action = (action + " MODE").toUpperCase();
+        chrome.setLlmOutput(new ContextFragment.TaskFragment(cm.getParserForWorkspace(), List.of(new UserMessage(action, input)), input));
+        return cm.submitUserTask(action, true, () -> {
+            try {
+                task.run();
+            } finally {
+                checkBalanceAndNotify();
+            }
+        });
     }
 
     // Methods to disable and enable buttons.
@@ -1251,17 +1243,19 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
             searchButton.setEnabled(false);
             runButton.setEnabled(false);
             stopButton.setEnabled(true);
-            micButton.setEnabled(false);
-            configureModelsButton.setEnabled(false); // Disable configure models button during action
             chrome.disableHistoryPanel();
-            // Disable command input and deep scan button during actions
-            setCommandInputAndDeepScanEnabled(false);
         });
     }
 
     @Override
     public void contextChanged(Context newCtx) {
-        // No longer need to check suppressExternalSuggestionsTrigger here
+        // Check if the update was triggered by one of the table's own actions
+        if (suppressExternalSuggestionsTrigger.getAndSet(false)) {
+            logger.debug("Suppressing context suggestion due to internal table action.");
+            return;
+        }
+
+        // Otherwise, proceed with the normal suggestion logic
         if (!contextSuggestionTimer.isRunning()) {
             triggerContextSuggestion(null);
         }
@@ -1275,14 +1269,10 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
             codeButton.setEnabled(projectLoaded);
             askButton.setEnabled(projectLoaded);
             searchButton.setEnabled(projectLoaded);
-            runButton.setEnabled(true); // Run in shell is always available
+            runButton.setEnabled(true);
             stopButton.setEnabled(false);
-            // Mic button remains enabled unless an action is running.
-            micButton.setEnabled(true);
-            configureModelsButton.setEnabled(projectLoaded); // Enable configure models if project loaded
+            configureModelsButton.setEnabled(projectLoaded);
             chrome.enableHistoryPanel();
-            // Enable command input and deep scan button only if project loaded and overlay is hidden
-            setCommandInputAndDeepScanEnabled(projectLoaded && !this.overlayPanel.isVisible());
         });
     }
 

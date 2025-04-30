@@ -348,11 +348,11 @@ public class SearchTools {
                          if (!result.isEmpty()) {
                              result.append("\n\n");
                          }
-                         // Include filename from analyzer if possible
-                         String filename = getAnalyzer().getFileFor(className).map(ProjectFile::toString).getOrElse(() -> "unknown file");
-                         result.append("Source code of ").append(className)
-                               .append(" (from ").append(filename).append("):\n\n")
-                               .append(classSource);
+                          // Include filename from analyzer if possible
+                          String filename = getAnalyzer().getFileFor(className).map(ProjectFile::toString).orElseGet(() -> "unknown file"); // Use orElseGet for Optional
+                          result.append("Source code of ").append(className)
+                                .append(" (from ").append(filename).append("):\n\n")
+                                .append(classSource);
                     }
                 }
             }

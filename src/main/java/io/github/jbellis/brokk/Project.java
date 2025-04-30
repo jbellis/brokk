@@ -1012,6 +1012,7 @@ public class Project implements IProject, AutoCloseable {
      * @param genericDefaultModel The model name to use as a final fallback if a configured or preferred default is missing.
      * @return A list of warning messages describing the overrides performed.
      */
+    @Override
     public List<String> overrideMissingModels(Set<String> availableModels, String genericDefaultModel) {
         var warnings = new ArrayList<String>();
 
@@ -1134,6 +1135,7 @@ public class Project implements IProject, AutoCloseable {
      *
      * @return The current DataRetentionPolicy.
      */
+    @Override
     public DataRetentionPolicy getDataRetentionPolicy() {
         String value = projectProps.getProperty(DATA_RETENTION_POLICY_KEY);
         return DataRetentionPolicy.fromString(value);

@@ -229,29 +229,23 @@ public class GitCommitTab extends JPanel {
         suggestMessageButton.setToolTipText("Suggest a commit message for the selected files");
         suggestMessageButton.setEnabled(false);
         suggestMessageButton.addActionListener(e -> {
-            chrome.disableUserActionButtons();
             List<ProjectFile> selectedFiles = getSelectedFilesFromTable();
             // Execute the suggestion task and handle the result on the EDT
             Future<String> suggestionFuture = suggestMessageAsync(selectedFiles);
             contextManager.submitUserTask("Handling suggestion result", () -> {
                 try {
                     String suggestedMessage = suggestionFuture.get(); // Wait for the result from the Future
-                    SwingUtilities.invokeLater(() -> {
-                        if (suggestedMessage != null && !suggestedMessage.isBlank()) {
-                            setCommitMessageText(suggestedMessage);
-                        } // Error/empty handled within suggestMessageAsync
-                        chrome.enableUserActionButtons();
-                    });
+                    if (suggestedMessage != null && !suggestedMessage.isBlank()) {
+                        setCommitMessageText(suggestedMessage);
+                    }
                 } catch (ExecutionException ex) {
                     logger.error("Error getting suggested commit message:", ex.getCause());
                     SwingUtilities.invokeLater(() -> {
                         chrome.toolErrorRaw("Error suggesting commit message: " + ex.getCause().getMessage());
-                        chrome.enableUserActionButtons();
                     });
                 } catch (InterruptedException ex) {
                     Thread.currentThread().interrupt();
                     logger.warn("Interrupted while waiting for commit message suggestion");
-                    SwingUtilities.invokeLater(chrome::enableUserActionButtons);
                 }
             });
         });
@@ -261,7 +255,6 @@ public class GitCommitTab extends JPanel {
         stashButton.setToolTipText("Save your changes to the stash");
         stashButton.setEnabled(false);
         stashButton.addActionListener(e -> {
-            chrome.disableUserActionButtons();
             String userMessage = commitMessageArea.getText().trim();
             List<ProjectFile> selectedFiles = getSelectedFilesFromTable();
 
@@ -279,19 +272,17 @@ public class GitCommitTab extends JPanel {
                         performStash(selectedFiles, finalStashDescription);
                     } catch (ExecutionException | InterruptedException ex) {
                         logger.error("Error getting suggested message or stashing:", ex);
-                        SwingUtilities.invokeLater(() -> {
-                            chrome.toolErrorRaw("Error during auto-stash: " + ex.getMessage());
-                            chrome.enableUserActionButtons();
-                        });
+                        SwingUtilities.invokeLater(() ->
+                            chrome.toolErrorRaw("Error during auto-stash: " + ex.getMessage())
+                        );
                         if (ex instanceof InterruptedException) {
                             Thread.currentThread().interrupt();
                         }
                     } catch (Exception ex) {
                         logger.error("Error stashing changes with suggested message:", ex);
-                        SwingUtilities.invokeLater(() -> {
-                            chrome.toolErrorRaw("Error stashing changes: " + ex.getMessage());
-                            chrome.enableUserActionButtons();
-                        });
+                        SwingUtilities.invokeLater(() ->
+                            chrome.toolErrorRaw("Error stashing changes: " + ex.getMessage())
+                        );
                     }
                 });
             } else {
@@ -305,10 +296,9 @@ public class GitCommitTab extends JPanel {
                         performStash(selectedFiles, stashDescription.isEmpty() ? "Stash created by Brokk" : stashDescription);
                     } catch (Exception ex) {
                         logger.error("Error stashing changes with provided message:", ex);
-                        SwingUtilities.invokeLater(() -> {
-                            chrome.toolErrorRaw("Error stashing changes: " + ex.getMessage());
-                            chrome.enableUserActionButtons();
-                        });
+                        SwingUtilities.invokeLater(() ->
+                           chrome.toolErrorRaw("Error stashing changes: " + ex.getMessage())
+                        );
                     }
                 });
             }
@@ -319,11 +309,9 @@ public class GitCommitTab extends JPanel {
         commitButton.setToolTipText("Commit files with the message");
         commitButton.setEnabled(false);
         commitButton.addActionListener(e -> {
-            chrome.disableUserActionButtons();
             List<ProjectFile> selectedFiles = getSelectedFilesFromTable();
             String msg = commitMessageArea.getText().trim();
             if (msg.isEmpty()) {
-                chrome.enableUserActionButtons();
                 return;
             }
             contextManager.submitUserTask("Committing files", () -> {
@@ -346,14 +334,12 @@ public class GitCommitTab extends JPanel {
                         updateCommitPanel();
                         gitPanel.updateLogTab();
                         gitPanel.selectCurrentBranchInLogTab();
-                        chrome.enableUserActionButtons();
                     });
                 } catch (Exception ex) {
                     logger.error("Error committing files:", ex);
-                    SwingUtilities.invokeLater(() -> {
-                        chrome.toolErrorRaw("Error committing files: " + ex.getMessage());
-                        chrome.enableUserActionButtons();
-                    });
+                    SwingUtilities.invokeLater(() ->
+                        chrome.toolErrorRaw("Error committing files: " + ex.getMessage())
+                    );
                 }
             });
         });
@@ -619,6 +605,8 @@ public class GitCommitTab extends JPanel {
      * Performs the actual stash operation and updates the UI.
      */
     private void performStash(List<ProjectFile> selectedFiles, String stashDescription) throws Exception {
+        assert !SwingUtilities.isEventDispatchThread();
+
         if (selectedFiles.isEmpty()) {
             getRepo().createStash(stashDescription);
         } else {
@@ -633,10 +621,9 @@ public class GitCommitTab extends JPanel {
                                   : selectedFiles.size() + " files";
                 chrome.systemOutput("Stashed " + fileList + ": " + stashDescription);
             }
-            commitMessageArea.setText(""); // Clear message area after stash
+            commitMessageArea.setText("");
             updateCommitPanel();
             gitPanel.updateLogTab();
-            chrome.enableUserActionButtons();
         });
     }
 
@@ -720,5 +707,15 @@ public class GitCommitTab extends JPanel {
      */
     public void setCommitMessageText(String message) {
         commitMessageArea.setText(message);
+    }
+
+    public void disableButtons() {
+        stashButton.setEnabled(false);
+        commitButton.setEnabled(false);
+    }
+
+    public void enableButtons() {
+        stashButton.setEnabled(true);
+        commitButton.setEnabled(true);
     }
 }

@@ -196,7 +196,7 @@ public class VoiceInputButton extends JButton {
         var audioBytes = micBuffer.toByteArray();
 
         // We do the STT in the background so as not to block the UI
-        contextManager.submitUserTask("Transcribing Audio", () -> {
+        contextManager.submitBackgroundTask("Transcribing Audio", () -> {
             contextManager.getIo().systemOutput("Transcribing audio");
             try {
                 // Our original AudioFormat from startMicCapture

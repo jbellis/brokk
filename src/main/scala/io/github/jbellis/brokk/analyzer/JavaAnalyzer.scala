@@ -1,6 +1,5 @@
 package io.github.jbellis.brokk.analyzer
 
-import io.github.jbellis.brokk.analyzer.{AbstractAnalyzer, FunctionLocation, Language, SymbolAmbiguousException, SymbolNotFoundException}
 import io.joern.dataflowengineoss.layers.dataflows.OssDataFlow
 import io.joern.javasrc2cpg.{Config, JavaSrc2Cpg}
 import io.joern.joerncli.CpgBasedTool
@@ -138,7 +137,7 @@ class JavaAnalyzer private(sourcePath: Path, cpgInit: Cpg)
   override def getFunctionLocation(
                                     fqMethodName: String,
                                     paramNames: java.util.List[String]
-                                  ): FunctionLocation = {
+                                  ): IAnalyzer.FunctionLocation = {
     import scala.jdk.CollectionConverters.*
 
     var methodPattern = Regex.quote(fqMethodName)
@@ -184,7 +183,7 @@ class JavaAnalyzer private(sourcePath: Path, cpgInit: Cpg)
    * Turns a method node into a FunctionLocation.
    * Throws SymbolNotFoundError if file/line info or code extraction fails.
    */
-  private def toFunctionLocation(chosen: Method): FunctionLocation = {
+  private def toFunctionLocation(chosen: Method): IAnalyzer.FunctionLocation = {
     val fileOpt = toFile(chosen.typeDecl.filename.headOption.getOrElse(""))
     if (fileOpt.isEmpty || chosen.lineNumber.isEmpty || chosen.lineNumberEnd.isEmpty) {
       throw new SymbolNotFoundException("File or line info missing for chosen method.")
@@ -210,7 +209,7 @@ class JavaAnalyzer private(sourcePath: Path, cpgInit: Cpg)
       throw new SymbolNotFoundException("Could not read code for chosen method.")
     }
 
-    FunctionLocation(file, start, end, maybeCode.get)
+    IAnalyzer.FunctionLocation(file, start, end, maybeCode.get)
   }
 
 }

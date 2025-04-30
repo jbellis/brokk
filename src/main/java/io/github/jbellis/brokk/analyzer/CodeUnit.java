@@ -137,4 +137,8 @@ public record CodeUnit(ProjectFile source, CodeUnitType kind, String fqName)
     {
         return new CodeUnit(source, CodeUnitType.FIELD, reference);
     }
+
+    public static Optional<CodeUnit> cls(IAnalyzer analyzer, String fqcn) {
+        return analyzer.getFileFor(fqcn).map(pf -> cls(pf, fqcn));
+    }
 }

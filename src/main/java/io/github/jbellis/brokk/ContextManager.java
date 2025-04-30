@@ -28,7 +28,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.jetbrains.annotations.NotNull;
-import scala.Option;
 
 import javax.swing.*;
 import java.io.IOException;
@@ -235,6 +234,8 @@ public class ContextManager implements IContextManager, AutoCloseable {
         // Ensure style guide and build details are loaded/generated asynchronously
         ensureStyleGuide();
         ensureBuildDetailsAsync(); // Changed from ensureBuildCommand
+
+        chrome.getInstructionsPanel().checkBalanceAndNotify();
     }
 
     @Override
@@ -329,24 +330,14 @@ public class ContextManager implements IContextManager, AutoCloseable {
         return models.get(modelName, reasoning);
     }
 
-    public Future<?> submitAction(String action, String input, Runnable task) {
-        // need to set the correct parser here since we're going to append to the same fragment during the action
-        action = (action + " MODE").toUpperCase();
-        io.setLlmOutput(new ContextFragment.TaskFragment(getParserForWorkspace(), List.of(new UserMessage(action, input)), input));
-        return submitLlmTask(action, task);
-    }
-
-    public Future<?> submitLlmTask(String description, Runnable task) {
-        return submitUserTask(description, task, true);
-    }
-
     public Future<?> submitUserTask(String description, Runnable task) {
-        return submitUserTask(description, task, false);
+        return submitUserTask(description, false, task);
     }
 
-    private Future<?> submitUserTask(String description, Runnable task, boolean isLlmTask) {
+    public Future<?> submitUserTask(String description, boolean isLlmTask, Runnable task) {
         return userActionExecutor.submit(() -> {
             userActionThread.set(Thread.currentThread());
+            io.disableActionButtons();
 
             try {
                 if (isLlmTask) {
@@ -360,7 +351,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
                 io.toolErrorRaw("Error while " + description + ": " + e.getMessage());
             } finally {
                 io.actionComplete();
-                io.enableUserActionButtons();
+                io.enableActionButtons();
                 // Unblock LLM output if this was an LLM task
                 if (isLlmTask) {
                     io.blockLlmOutput(false);
@@ -372,6 +363,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
     public <T> Future<T> submitUserTask(String description, Callable<T> task) {
         return userActionExecutor.submit(() -> {
             userActionThread.set(Thread.currentThread());
+            io.disableActionButtons();
 
             try {
                 return task.call();
@@ -384,7 +376,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
                 throw e;
             } finally {
                 io.actionComplete();
-                io.enableUserActionButtons();
+                io.enableActionButtons();
             }
         });
     }
@@ -398,8 +390,6 @@ public class ContextManager implements IContextManager, AutoCloseable {
             } catch (Exception e) {
                 logger.error("Error while " + description, e);
                 io.toolErrorRaw("Error while " + description + ": " + e.getMessage());
-            } finally {
-                io.enableUserActionButtons();
             }
         });
     }
@@ -519,29 +509,15 @@ public class ContextManager implements IContextManager, AutoCloseable {
      */
     public Future<?> undoContextAsync()
     {
-        return undoContextAsync(1);
-    }
-
-    /**
-     * undo multiple context changes to reach a specific point in history
-     */
-    public Future<?> undoContextAsync(int stepsToUndo)
-    {
-        return contextActionExecutor.submit(() -> {
-            try {
-                UndoResult result = contextHistory.undo(stepsToUndo, io);
-                if (result.wasUndone()) {
-                    var currentContext = contextHistory.topContext();
-                    io.updateContextHistoryTable(currentContext);
-                    project.saveContext(currentContext);
-                    io.systemOutput("Undid " + result.steps() + " step" + (result.steps() > 1 ? "s" : "") + "!");
-                } else {
-                    io.toolErrorRaw("no undo state available");
-                }
-            } catch (CancellationException cex) {
-                io.systemOutput("Undo canceled.");
-            } finally {
-                io.enableUserActionButtons();
+        return submitUserTask("Undo", () -> {
+            UndoResult result = contextHistory.undo(1, io);
+            if (result.wasUndone()) {
+                var currentContext = contextHistory.topContext();
+                io.updateContextHistoryTable(currentContext);
+                project.saveContext(currentContext);
+                io.systemOutput("Undid " + result.steps() + " step" + (result.steps() > 1 ? "s" : "") + "!");
+            } else {
+                io.toolErrorRaw("no undo state available");
             }
         });
     }
@@ -551,21 +527,15 @@ public class ContextManager implements IContextManager, AutoCloseable {
      */
     public Future<?> undoContextUntilAsync(Context targetContext)
     {
-        return contextActionExecutor.submit(() -> {
-            try {
-                UndoResult result = contextHistory.undoUntil(targetContext, io);
-                if (result.wasUndone()) {
-                    var currentContext = contextHistory.topContext();
-                    io.updateContextHistoryTable(currentContext);
-                    project.saveContext(currentContext);
-                    io.systemOutput("Undid " + result.steps() + " step" + (result.steps() > 1 ? "s" : "") + "!");
-                } else {
-                    io.toolErrorRaw("Context not found or already at that point");
-                }
-            } catch (CancellationException cex) {
-                io.systemOutput("Undo canceled.");
-            } finally {
-                io.enableUserActionButtons();
+        return submitUserTask("Undoing", () -> {
+            UndoResult result = contextHistory.undoUntil(targetContext, io);
+            if (result.wasUndone()) {
+                var currentContext = contextHistory.topContext();
+                io.updateContextHistoryTable(currentContext);
+                project.saveContext(currentContext);
+                io.systemOutput("Undid " + result.steps() + " step" + (result.steps() > 1 ? "s" : "") + "!");
+            } else {
+                io.toolErrorRaw("Context not found or already at that point");
             }
         });
     }
@@ -573,23 +543,16 @@ public class ContextManager implements IContextManager, AutoCloseable {
     /**
      * redo last undone context
      */
-    public Future<?> redoContextAsync()
-    {
-        return contextActionExecutor.submit(() -> {
-            try {
-                boolean wasRedone = contextHistory.redo(io);
-                if (wasRedone) {
-                    var currentContext = contextHistory.topContext();
-                    io.updateContextHistoryTable(currentContext);
-                    project.saveContext(currentContext);
-                    io.systemOutput("Redo!");
-                } else {
-                    io.toolErrorRaw("no redo state available");
-                }
-            } catch (CancellationException cex) {
-                io.systemOutput("Redo canceled.");
-            } finally {
-                io.enableUserActionButtons();
+    public Future<?> redoContextAsync() {
+        return submitUserTask("Redoing", () -> {
+            boolean wasRedone = contextHistory.redo(io);
+            if (wasRedone) {
+                var currentContext = contextHistory.topContext();
+                io.updateContextHistoryTable(currentContext);
+                project.saveContext(currentContext);
+                io.systemOutput("Redo!");
+            } else {
+                io.toolErrorRaw("no redo state available");
             }
         });
     }
@@ -597,16 +560,13 @@ public class ContextManager implements IContextManager, AutoCloseable {
     /**
      * Reset the context to match the files and fragments from a historical context
      */
-    public Future<?> resetContextToAsync(Context targetContext)
-    {
-        return contextActionExecutor.submit(() -> {
+    public Future<?> resetContextToAsync(Context targetContext) {
+        return submitUserTask("Resetting context", () -> {
             try {
                 pushContext(ctx -> Context.createFrom(targetContext, ctx));
                 io.systemOutput("Reset workspace to historical state");
             } catch (CancellationException cex) {
                 io.systemOutput("Reset workspace canceled.");
-            } finally {
-                io.enableUserActionButtons();
             }
         });
     }
@@ -669,8 +629,6 @@ public class ContextManager implements IContextManager, AutoCloseable {
                 }
             } catch (CancellationException cex) {
                 io.systemOutput("Capture canceled.");
-            } finally {
-                io.enableUserActionButtons();
             }
         });
     }
@@ -716,9 +674,8 @@ public class ContextManager implements IContextManager, AutoCloseable {
         // Extract the class from the method name for sources
         Set<CodeUnit> sources = new HashSet<>();
         String className = ContextFragment.toClassname(methodName);
-        Option<ProjectFile> sourceFile;
-        sourceFile = getAnalyzerUninterrupted().getFileFor(className);
-        if (sourceFile.isDefined()) {
+        java.util.Optional<ProjectFile> sourceFile = getAnalyzerUninterrupted().getFileFor(className);
+        if (sourceFile.isPresent()) {
             sources.add(CodeUnit.cls(sourceFile.get(), className));
         }
 
@@ -748,9 +705,8 @@ public class ContextManager implements IContextManager, AutoCloseable {
         // Extract the class from the method name for sources
         Set<CodeUnit> sources = new HashSet<>();
         String className = ContextFragment.toClassname(methodName);
-        Option<ProjectFile> sourceFile;
-        sourceFile = getAnalyzerUninterrupted().getFileFor(className);
-        if (sourceFile.isDefined()) {
+        java.util.Optional<ProjectFile> sourceFile = getAnalyzerUninterrupted().getFileFor(className);
+        if (sourceFile.isPresent()) {
             sources.add(CodeUnit.cls(sourceFile.get(), className));
         }
 
@@ -782,7 +738,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
             if (methodSource.isDefined()) {
                 String className = ContextFragment.toClassname(methodFullName);
                 var sourceFile = analyzer.getFileFor(className);
-                if (sourceFile.isDefined()) {
+                if (sourceFile.isPresent()) { // Use isPresent() for Optional
                     sources.add(CodeUnit.cls(sourceFile.get(), className));
                 }
                 content.append(methodFullName).append(":\n");
@@ -1279,7 +1235,6 @@ public class ContextManager implements IContextManager, AutoCloseable {
     @Override
     public <T> Future<T> submitBackgroundTask(String taskDescription, Callable<T> task) {
         assert taskDescription != null;
-        assert !taskDescription.isBlank();
         Future<T> future = backgroundTasks.submit(() -> {
             try {
                 io.backgroundOutput(taskDescription);

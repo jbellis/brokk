@@ -95,8 +95,8 @@ public class WorkspaceTools {
                 classesNotFound.add("<blank or null>"); // Indicate a bad entry in the input list
                 continue;
             }
-            var fileOpt = analyzer.getFileFor(className);
-            if (fileOpt.isDefined()) {
+            var fileOpt = analyzer.getFileFor(className); // Returns Optional now
+            if (fileOpt.isPresent()) { // Use isPresent() for Optional
                 filesToAdd.add(fileOpt.get());
             } else {
                 classesNotFound.add(className);
@@ -413,8 +413,8 @@ public class WorkspaceTools {
                 notFoundClasses.add("<blank or null>");
                 return;
             }
-            var fileOpt = analyzer.getFileFor(className);
-            if (fileOpt.isDefined()) {
+            var fileOpt = analyzer.getFileFor(className); // Returns Optional now
+            if (fileOpt.isPresent()) { // Use isPresent()
                 foundFiles.add(fileOpt.get().toString());
             } else {
                 notFoundClasses.add(className);
@@ -502,11 +502,11 @@ public class WorkspaceTools {
         // Extract the class from the method name for sources
         Set<CodeUnit> sources = new HashSet<>();
         String className = ContextFragment.toClassname(methodName);
-        var sourceFile = getAnalyzer().getFileFor(className);
-        sourceFile.foreach(pf -> sources.add(CodeUnit.cls(pf, className))); // Use foreach for Option
-
-        // Use UsageFragment to represent the call graph
-        String type = "Callers (depth " + depth + ")";
+         var sourceFile = getAnalyzer().getFileFor(className);
+         sourceFile.ifPresent(pf -> sources.add(CodeUnit.cls(pf, className)));
+ 
+         // Use UsageFragment to represent the call graph
+         String type = "Callers (depth " + depth + ")";
         var fragment = new ContextFragment.CallGraphFragment(type, methodName, sources, formattedGraph);
         contextManager.addVirtualFragment(fragment);
 
@@ -546,11 +546,11 @@ public class WorkspaceTools {
         // Extract the class from the method name for sources
         Set<CodeUnit> sources = new HashSet<>();
         String className = ContextFragment.toClassname(methodName);
-        var sourceFile = getAnalyzer().getFileFor(className);
-        sourceFile.foreach(pf -> sources.add(CodeUnit.cls(pf, className))); // Use foreach for Option
-
-        // Use UsageFragment to represent the call graph
-        String type = "Callees (depth " + depth + ")";
+         var sourceFile = getAnalyzer().getFileFor(className);
+         sourceFile.ifPresent(pf -> sources.add(CodeUnit.cls(pf, className)));
+ 
+         // Use UsageFragment to represent the call graph
+         String type = "Callees (depth " + depth + ")";
         var fragment = new ContextFragment.CallGraphFragment(type, methodName, sources, formattedGraph);
         contextManager.addVirtualFragment(fragment);
 

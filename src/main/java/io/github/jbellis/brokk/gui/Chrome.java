@@ -74,8 +74,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
         registerGlobalKeyboardShortcuts();
 
         if (contextManager == null) {
-            instructionsPanel.disableButtons();
-            // Context action buttons are now in menus – no direct disabling needed here.
+            disableActionButtons();
         }
     }
 
@@ -154,7 +153,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
      * Sets up .gitignore entries and adds .brokk project files to git
      */
     private void setupGitIgnore() {
-        contextManager.submitUserTask("Updating .gitignore", () -> {
+        contextManager.submitBackgroundTask("Updating .gitignore", () -> {
             try {
                 var gitRepo = (GitRepo) getProject().getRepo();
                 var root = getProject().getRoot();
@@ -209,11 +208,8 @@ public class Chrome implements AutoCloseable, IConsoleIO {
                 systemOutput("Added .brokk project files to git");
 
                 // Update commit message
-                SwingUtilities.invokeLater(() -> {
-                    gitPanel.setCommitMessageText("Update for Brokk project files");
-                    updateCommitPanel();
-                });
-
+                gitPanel.setCommitMessageText("Update for Brokk project files");
+                updateCommitPanel();
             } catch (Exception e) {
                 logger.error("Error setting up git ignore", e);
                 toolError("Error setting up git ignore: " + e.getMessage());
@@ -357,12 +353,14 @@ public class Chrome implements AutoCloseable, IConsoleIO {
         return instructionsPanel.getInstructions();
     }
 
-    public void disableUserActionButtons() {
+    public void disableActionButtons() {
         instructionsPanel.disableButtons();
+        gitPanel.getCommitTab().disableButtons();
     }
 
-    public void enableUserActionButtons() {
+    public void enableActionButtons() {
         instructionsPanel.enableButtons();
+        gitPanel.getCommitTab().enableButtons();
     }
 
     public void updateCommitPanel() {

@@ -14,7 +14,7 @@ public abstract class ArchitectPrompts extends CodePrompts {
 
     public List<ChatMessage> collectMessages(ContextManager cm, List<ChatMessage> sessionMessages) throws InterruptedException {
         var messages = new ArrayList<ChatMessage>();
-        messages.add(new SystemMessage(formatIntro(cm, CodePrompts.ARCHITECT_REMINDER)));
+        messages.add(systemMessage(cm, CodePrompts.ARCHITECT_REMINDER));
         messages.addAll(cm.getWorkspaceContentsMessages());
         messages.addAll(cm.getHistoryMessages());
         messages.addAll(sessionMessages);
@@ -42,11 +42,11 @@ public abstract class ArchitectPrompts extends CodePrompts {
     }
 
     @Override
-    protected String formatIntro(ContextManager cm, String reminder) {
+    protected SystemMessage systemMessage(ContextManager cm, String reminder) {
         var workspaceSummary = formatWorkspaceSummary(cm, false);
         var styleGuide = cm.getProject().getStyleGuide();
 
-        return """
+        var text = """
           <instructions>
           %s
           </instructions>
@@ -57,6 +57,7 @@ public abstract class ArchitectPrompts extends CodePrompts {
           %s
           </style_guide>
           """.stripIndent().formatted(systemIntro(reminder), workspaceSummary, styleGuide).trim();
+        return new SystemMessage(text);
     }
 
     @Override
@@ -93,7 +94,7 @@ public abstract class ArchitectPrompts extends CodePrompts {
         Use Search Agent whenever you are not sure where to find relevant code or how the user's goal relates to the project.
         Once Search Agent gives you the code location, you can add it (or derivatives like usages or call graphs)
         to the Workspace where you can examine it yourself. Search Agent is slow! so use it only when
-        you don't know where to find the necessary information yourself. (Remember, it's fine to add things 
+        you don't know where to find the necessary information yourself. (Remember, it's fine to add things
         just to see if they are relevant, and drop them later if it turns out that they are not.)
 
         If you are not COMPLETELY SURE what part of the goal refers to, you MUST

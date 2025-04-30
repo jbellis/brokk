@@ -12,6 +12,7 @@ import io.shiftleft.codepropertygraph.generated.language.*
 import io.shiftleft.codepropertygraph.generated.nodes.{Call, Method, TypeDecl}
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.layers.LayerCreatorContext
+import scala.jdk.OptionConverters.RichOptional
 
 import java.io.{Closeable, IOException}
 import java.nio.file.Path
@@ -239,8 +240,11 @@ abstract class AbstractAnalyzer protected(sourcePath: Path, private[brokk] val c
     targetMap.update(target, targetMap.getOrElse(target, 0) + count)
   }
 
-  override def getFileFor(fqcn: String): Option[ProjectFile] = {
-    cpg.typeDecl.fullNameExact(fqcn).headOption.flatMap(toFile)
+  override def getFileFor(fqcn: String): java.util.Optional[ProjectFile] = {
+    val scalaOpt = cpg.typeDecl.fullNameExact(fqcn).headOption.flatMap(toFile)
+    scalaOpt match
+      case Some(file) => java.util.Optional.of(file)
+      case None       => java.util.Optional.empty()
   }
 
   private def toFile(td: TypeDecl): Option[ProjectFile] = {
@@ -894,7 +898,7 @@ abstract class AbstractAnalyzer protected(sourcePath: Path, private[brokk] val c
 
     // Map sorted FQCNs to CodeUnit tuples, filtering out those without files
     val sortedCodeUnits = filteredSortedAll.flatMap { case (fqcn, score) =>
-      getFileFor(fqcn).map(file => (CodeUnit.cls(file, fqcn), score))
+      getFileFor(fqcn).toScala.map(file => (CodeUnit.cls(file, fqcn), score))
     }
 
     // Coalesce and convert score to Java Double, filtering out zero scores

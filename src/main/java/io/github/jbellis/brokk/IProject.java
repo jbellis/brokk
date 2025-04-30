@@ -7,6 +7,7 @@ import io.github.jbellis.brokk.analyzer.ProjectFile;
 import io.github.jbellis.brokk.git.IGitRepo;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
 
 public interface IProject {
@@ -44,5 +45,13 @@ public interface IProject {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    default Project.DataRetentionPolicy getDataRetentionPolicy() {
+        return Project.DataRetentionPolicy.MINIMAL;
+    }
+
+    default List<String> overrideMissingModels(Set<String> availableModels, String genericDefaultModel) {
+        return List.of();
     }
 }

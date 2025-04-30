@@ -1,5 +1,6 @@
 package io.github.jbellis.brokk.gui.dialogs;
 
+import io.github.jbellis.brokk.Models;
 import io.github.jbellis.brokk.agents.BuildAgent;
 import io.github.jbellis.brokk.Project;
 import io.github.jbellis.brokk.Project.DataRetentionPolicy;
@@ -9,6 +10,7 @@ import org.apache.logging.log4j.Logger;
 
 import javax.swing.*;
 import java.awt.*;
+
 import io.github.jbellis.brokk.gui.components.BrowserLabel;
 
 import java.awt.event.WindowAdapter;
@@ -122,23 +124,63 @@ public class SettingsDialog extends JDialog {
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL; // Make field expand horizontally
         panel.add(brokkKeyField, gbc);
+        row++; // Increment row after adding the key field
 
-        // Sign-up/login link using BrowserLabel
-        gbc.gridx = 1;
-        gbc.gridy = row++;
-        var signupUrl = "https://brokk.ai";
-        var loginLabel = new BrowserLabel(signupUrl, "Sign up or get your key at " + signupUrl);
-        // Make it look like the old italic label
-        loginLabel.setFont(loginLabel.getFont().deriveFont(Font.ITALIC));
-        panel.add(loginLabel, gbc);
-
-        // Reset fill after Brokk Key
-        gbc.fill = GridBagConstraints.NONE;
-
-        // --- LLM Proxy Setting ---
-        row++;
+        // Balance Display
         gbc.gridx = 0;
         gbc.gridy = row;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.anchor = GridBagConstraints.WEST;
+        panel.add(new JLabel("Balance:"), gbc);
+
+        var balanceField = new JTextField("Loading..."); // Initial loading text
+        balanceField.setEditable(false);
+        balanceField.setColumns(8); // Give it a reasonable minimum size
+        gbc.gridx = 1;
+        gbc.gridy = row++;
+        gbc.weightx = 0.0; // Don't let balance field grow
+        gbc.fill = GridBagConstraints.NONE;
+        // Create a sub-panel to hold balance and top-up link together
+        var balancePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0)); // Left align, 5px horizontal gap
+
+        // Asynchronously fetch and display balance
+        var contextManager = chrome.getContextManager();
+        var models = contextManager.getModels();
+        contextManager.submitBackgroundTask("Fetching user balance", () -> {
+            try {
+                float balance = models.getUserBalance();
+                SwingUtilities.invokeLater(() -> balanceField.setText(String.format("$%.2f", balance)));
+            } catch (java.io.IOException e) {
+                logger.debug("Failed to fetch user balance", e);
+                SwingUtilities.invokeLater(() -> balanceField.setText("Error")); // Indicate error
+            }
+        });
+
+        balancePanel.add(balanceField);
+
+        var topUpUrl = Models.TOP_UP_URL;
+        var topUpLabel = new BrowserLabel(topUpUrl, "Top Up");
+        balancePanel.add(topUpLabel);
+
+        panel.add(balancePanel, gbc); // Add the balance panel to the main panel
+        row++; // Increment row after adding the balance panel
+
+        // Sign-up/login link using BrowserLabel
+        gbc.gridx = 1; // Position under the balance panel (in the second column)
+        gbc.gridy = row++; // Use current row, then increment
+        var signupUrl = "https://brokk.ai";
+        var signupLabel = new BrowserLabel(signupUrl, "Sign up or get your key at " + signupUrl);
+        // Make it look like the old italic label
+        signupLabel.setFont(signupLabel.getFont().deriveFont(Font.ITALIC));
+        gbc.fill = GridBagConstraints.HORIZONTAL; // Allow it to fill horizontally if needed
+        gbc.weightx = 1.0; // Allow horizontal expansion
+        panel.add(signupLabel, gbc);
+
+        // --- LLM Proxy Setting ---
+        // Reset constraints for the next section
+        gbc.gridx = 0;
+        gbc.gridy = row; // Use the incremented row
         gbc.weightx = 0.0;
         panel.add(new JLabel("LLM Proxy:"), gbc);
 
@@ -216,16 +258,19 @@ public class SettingsDialog extends JDialog {
         lightRadio.putClientProperty("theme", false);
         darkRadio.putClientProperty("theme", true);
 
-        // Panel to hold radio buttons together
-        var themeRadioPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0)); // No gaps
-        themeRadioPanel.add(lightRadio);
-        themeRadioPanel.add(darkRadio);
-
+        // Light radio on this row
         gbc.gridx = 1;
         gbc.gridy = row++;
-        gbc.weightx = 1.0; // Let the radio button panel take remaining space if needed
-        // No fill needed here as FlowLayout handles sizing
-        panel.add(themeRadioPanel, gbc);
+        gbc.weightx = 1.0; // Let radio take space
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        panel.add(lightRadio, gbc);
+
+        // Dark radio on next line
+        gbc.gridy = row++;
+        panel.add(darkRadio, gbc);
+
+        // Reset fill for the next item
+        gbc.fill = GridBagConstraints.NONE;
 
         // Add vertical glue to push components to the top
         gbc.gridx = 0;
@@ -732,11 +777,11 @@ public class SettingsDialog extends JDialog {
 
         // -- Apply Brokk Key --
         String currentBrokkKey = Project.getBrokkKey();
-        String newBrokkKey = brokkKeyField.getText().trim(); // Read from the new field
+        String newBrokkKey = brokkKeyField.getText().trim();
         if (!newBrokkKey.equals(currentBrokkKey)) {
             if (!newBrokkKey.isEmpty()) {
                 try {
-                    io.github.jbellis.brokk.Models.KeyParts kp = io.github.jbellis.brokk.Models.parseKey(newBrokkKey);
+                    Models.parseKey(newBrokkKey);
                 } catch (IllegalArgumentException ex) {
                     JOptionPane.showMessageDialog(this,
                                                   "Invalid Brokk Key: " + ex.getMessage(),
@@ -751,52 +796,32 @@ public class SettingsDialog extends JDialog {
 
         // -- Apply LLM Proxy Setting --
         Project.LlmProxySetting proxySetting = brokkProxyRadio.isSelected()
-                                                ? Project.LlmProxySetting.BROKK
-                                                : Project.LlmProxySetting.LOCALHOST;
+                                               ? Project.LlmProxySetting.BROKK
+                                               : Project.LlmProxySetting.LOCALHOST;
         Project.setLlmProxySetting(proxySetting);
         logger.debug("Applied LLM Proxy Setting: {}", proxySetting);
 
 
         // -- Apply Theme --
-        // Find the themeRadioPanel (it's the component holding theme radio buttons)
-        Component themeComponent = null;
-        // Locate the panel holding the theme radio buttons based on content, not fixed grid coordinates
+        // -- Apply Theme --
+        // Find the selected theme radio button directly in the global panel
+        boolean foundSelectedTheme = false;
         for (Component comp : globalPanel.getComponents()) {
-            if (comp instanceof JPanel panel) {
-                // Check if the panel contains the light/dark radio buttons we created
-                boolean hasLight = false;
-                boolean hasDark = false;
-                for(Component child : panel.getComponents()) {
-                    if (child instanceof JRadioButton radio) {
-                        if ("Light".equals(radio.getText())) hasLight = true;
-                        if ("Dark".equals(radio.getText())) hasDark = true;
-                    }
+            if (comp instanceof JRadioButton radio && radio.isSelected() && radio.getClientProperty("theme") != null) {
+                boolean newIsDark = (Boolean) radio.getClientProperty("theme");
+                String newTheme = newIsDark ? "dark" : "light";
+                // Only switch theme if it actually changed
+                if (!newTheme.equals(Project.getTheme())) {
+                    chrome.switchTheme(newIsDark); // switchTheme calls Project.setTheme internally
+                    logger.debug("Applied Theme: {}", newTheme);
                 }
-                if (hasLight && hasDark) {
-                    themeComponent = comp;
-                    break;
-                }
+                foundSelectedTheme = true;
+                break;
             }
         }
-
-        if (themeComponent instanceof JPanel themeRadioPanel) {
-            for (Component radioComp : themeRadioPanel.getComponents()) {
-                if (radioComp instanceof JRadioButton radio && radio.isSelected()) {
-                    boolean useDark = (Boolean) radio.getClientProperty("theme");
-                    // Only switch theme if it actually changed
-                    boolean newIsDark = (Boolean) radio.getClientProperty("theme");
-                    String newTheme = newIsDark ? "dark" : "light";
-                    // Only switch theme if it actually changed
-                    if (!newTheme.equals(Project.getTheme())) {
-                        chrome.switchTheme(newIsDark); // switchTheme calls Project.setTheme internally
-                        logger.debug("Applied Theme: {}", newTheme);
-                    }
-                    break;
-                }
-            }
-        } else {
-            // Log error or handle case where theme panel wasn't found as expected
-            logger.error("Could not find theme radio button panel in SettingsDialog.");
+        if (!foundSelectedTheme) {
+             // This shouldn't happen if the ButtonGroup ensures one is always selected, but log just in case.
+            logger.warn("No theme radio button was selected in SettingsDialog.");
         }
 
         // Apply Project Settings (if project is open and tab is enabled)
@@ -835,13 +860,13 @@ public class SettingsDialog extends JDialog {
                 dataRetentionPanel.applyPolicy();
                 var newPolicy = project.getDataRetentionPolicy();
                 // Refresh models if the policy changed, as it might affect availability
-                    if (oldPolicy != newPolicy && newPolicy != Project.DataRetentionPolicy.UNSET) {
-                        // Submit as background task so it doesn't block the settings dialog closing
-                        chrome.getContextManager().submitBackgroundTask("Refreshing models due to policy change", () -> {
-                            chrome.getContextManager().getModels().reinit(project);
-                        });
-                    }
+                if (oldPolicy != newPolicy && newPolicy != Project.DataRetentionPolicy.UNSET) {
+                    // Submit as background task so it doesn't block the settings dialog closing
+                    chrome.getContextManager().submitBackgroundTask("Refreshing models due to policy change", () -> {
+                        chrome.getContextManager().getModels().reinit(project);
+                    });
                 }
+            }
 
             // Apply Model Selections and Reasoning Levels
             applyModelAndReasoning(project, architectModelComboBox, architectReasoningComboBox,
@@ -898,7 +923,7 @@ public class SettingsDialog extends JDialog {
     /**
      * Updates the enabled state and selection of a reasoning combo box based on the selected model.
      */
-    private void updateReasoningComboBox(JComboBox<String> modelComboBox, JComboBox<Project.ReasoningLevel> reasoningComboBox, io.github.jbellis.brokk.Models models) {
+    private void updateReasoningComboBox(JComboBox<String> modelComboBox, JComboBox<Project.ReasoningLevel> reasoningComboBox, Models models) {
         if (modelComboBox == null || reasoningComboBox == null) return; // Not initialized yet
 
         String selectedModelName = (String) modelComboBox.getSelectedItem();
@@ -1060,7 +1085,7 @@ public class SettingsDialog extends JDialog {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
         var infoLabel = new JLabel("<html>Please enter your Brokk Key to continue.<br>" +
-                                   "You can sign up for free at:</html>");
+                                           "You can sign up for free at:</html>");
         panel.add(infoLabel, gbc);
 
         // --- Signup URL Link ---
@@ -1089,15 +1114,15 @@ public class SettingsDialog extends JDialog {
         gbc.gridwidth = 2;
         gbc.anchor = GridBagConstraints.CENTER;
         gbc.fill = GridBagConstraints.NONE;
-        
+
         var buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
-        
+
         var okButton = new JButton("OK");
         var exitButton = new JButton("Exit");
-        
+
         buttonPanel.add(okButton);
         buttonPanel.add(exitButton);
-        
+
         panel.add(buttonPanel, gbc);
 
         // --- Action Listeners for Buttons ---
@@ -1109,7 +1134,7 @@ public class SettingsDialog extends JDialog {
             }
             try {
                 // Validate the key structure
-                io.github.jbellis.brokk.Models.parseKey(newBrokkKey);
+                Models.parseKey(newBrokkKey);
                 // If valid, save it and close the dialog
                 Project.setBrokkKey(newBrokkKey);
                 logger.debug("Brokk Key successfully configured.");
@@ -1124,7 +1149,7 @@ public class SettingsDialog extends JDialog {
                 keyField.selectAll();
             }
         });
-        
+
         // Exit button action - exit the application
         exitButton.addActionListener(e -> {
             logger.debug("User chose to exit from signup dialog");
@@ -1152,12 +1177,12 @@ public class SettingsDialog extends JDialog {
 
         // Add Escape key binding to trigger OK button
         dialog.getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
-              .put(KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0), "cancel");
+                .put(KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0), "cancel");
         dialog.getRootPane().getActionMap().put("cancel", new AbstractAction() {
             @Override
             public void actionPerformed(java.awt.event.ActionEvent e) {
-                 // Treat Escape like clicking OK for validation purposes
-                 okButton.doClick();
+                // Treat Escape like clicking OK for validation purposes
+                okButton.doClick();
             }
         });
         // Set default button

@@ -5,7 +5,11 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import io.github.jbellis.brokk.ContextFragment;
+import io.github.jbellis.brokk.ContextManager;
+import io.github.jbellis.brokk.analyzer.ProjectFile;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -28,7 +32,7 @@ public final class QuickEditPrompts {
     {
         var messages = new ArrayList<ChatMessage>();
         // A system message containing the workspace/style guide info and instructions:
-        messages.add(new SystemMessage(formatIntro(styleGuide)));
+        messages.add(systemMessage(quickEditIntro(), styleGuide));
         // Example quick-edit usage (optional but mirrors how DefaultPrompts includes examples):
         messages.addAll(exampleMessages());
         messages.addAll(contentMessages(fileContents, relatedCode));
@@ -71,24 +75,24 @@ public final class QuickEditPrompts {
     /**
      * Formats an intro with a short system-level prompt plus workspace/style guide details.
      */
-    private String formatIntro(String styleGuide) {
+    private SystemMessage systemMessage(String instructions, String styleGuide) {
         assert styleGuide != null;
-        
-        return """
+        var text = """
           <instructions>
           %s
           </instructions>
           <style_guide>
           %s
           </style_guide>
-          """.stripIndent().formatted(systemIntro(), styleGuide);
+          """.stripIndent().formatted(instructions, styleGuide);
+        return new SystemMessage(text);
     }
 
     /**
      * The core system instructions, analogous to DefaultPrompts.systemIntro(),
      * but for quick edits (no search/replace).
      */
-    public String systemIntro() {
+    public String quickEditIntro() {
         return """
                 Act as an expert software developer performing a QUICK EDIT of user-provided text.
                 You will receive the original source file and the code to replace;
@@ -97,6 +101,14 @@ public final class QuickEditPrompts {
                 """.stripIndent();
     }
 
+    public String fullReplaceIntro() {
+        return """
+                Act as an expert software developer.
+                You will receive a source file and other relevant context;
+                you must output the REPLACEMENT CODE for the ENTIRE FILE, fenced in triple backticks.
+                Always apply any relevant best practices or style guidelines to the snippet.
+                """.stripIndent();
+    }
     /**
      * Example conversation that demonstrates how the quick edit should be returned.
      */

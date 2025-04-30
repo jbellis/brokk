@@ -4,7 +4,6 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ChatMessageType;
 import io.github.jbellis.brokk.*;
 import io.github.jbellis.brokk.gui.mop.MarkdownOutputPanel;
-import io.github.jbellis.brokk.prompts.EditBlockParser;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -165,12 +164,28 @@ public class HistoryOutputPanel extends JPanel {
                     contextManager.setSelectedContext(ctx);
                     chrome.loadContext(ctx);
                 }
-            }
-        });
+             }
+         });
 
-        // Add right-click context menu for history operations
-        historyTable.addMouseListener(new MouseAdapter() {
-            @Override
+         // Add mouse listener for right-click context menu and double-click action
+         historyTable.addMouseListener(new MouseAdapter() {
+             @Override
+             public void mouseClicked(MouseEvent e) {
+                 if (e.getClickCount() == 2) { // Double-click
+                     int row = historyTable.rowAtPoint(e.getPoint());
+                     if (row >= 0) {
+                         Context context = (Context) historyModel.getValueAt(row, 2);
+                         var output = context.getParsedOutput();
+                         if (output != null) {
+                             // Open in new window
+                             new OutputWindow(HistoryOutputPanel.this, output,
+                                              chrome.themeManager != null && chrome.themeManager.isDarkTheme());
+                         }
+                     }
+                 }
+             }
+
+             @Override
             public void mouseReleased(MouseEvent e) {
                 if (e.isPopupTrigger()) {
                     showContextHistoryPopupMenu(e);
@@ -213,7 +228,6 @@ public class HistoryOutputPanel extends JPanel {
         undoButton.setMinimumSize(undoSize);
         undoButton.setMaximumSize(undoSize);
         undoButton.addActionListener(e -> {
-            chrome.disableUserActionButtons();
             contextManager.undoContextAsync();
         });
 
@@ -225,7 +239,6 @@ public class HistoryOutputPanel extends JPanel {
         redoButton.setMinimumSize(redoSize);
         redoButton.setMaximumSize(redoSize);
         redoButton.addActionListener(e -> {
-            chrome.disableUserActionButtons();
             contextManager.redoContextAsync();
         });
 
@@ -286,7 +299,6 @@ public class HistoryOutputPanel extends JPanel {
      * Restore context to a specific point in history
      */
     private void undoHistoryUntil(Context targetContext) {
-        chrome.disableUserActionButtons();
         contextManager.undoContextUntilAsync(targetContext);
     }
 
@@ -295,7 +307,6 @@ public class HistoryOutputPanel extends JPanel {
      * while preserving current conversation history
      */
     private void resetContextTo(Context targetContext) {
-        chrome.disableUserActionButtons();
         contextManager.resetContextToAsync(targetContext);
     }
 

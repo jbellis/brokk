@@ -108,7 +108,7 @@ public class GitPanel extends JPanel
      */
     public void setCommitMessageText(String message)
     {
-        commitTab.setCommitMessageText(message);
+        SwingUtilities.invokeLater(() -> commitTab.setCommitMessageText(message));
     }
 
     /**
@@ -223,6 +223,10 @@ public class GitPanel extends JPanel
                 break;
             }
         }
+    }
+
+    public GitCommitTab getCommitTab() {
+        return commitTab;
     }
 
     /**

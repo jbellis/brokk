@@ -107,7 +107,6 @@ public class MenuBar {
         var undoItem = new JMenuItem("Undo");
         undoItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_Z, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
         undoItem.addActionListener(e -> {
-            chrome.disableUserActionButtons();
             chrome.contextManager.undoContextAsync();
         });
         undoItem.setEnabled(hasProject);
@@ -117,7 +116,6 @@ public class MenuBar {
         redoItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_Z,
                                                        Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.SHIFT_DOWN_MASK));
         redoItem.addActionListener(e -> {
-            chrome.disableUserActionButtons();
             chrome.contextManager.redoContextAsync();
         });
         redoItem.setEnabled(hasProject);

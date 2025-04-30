@@ -237,7 +237,7 @@ class AnalyzerTest {
     import scala.jdk.javaapi.*
 
     val seeds = CollectionConverters.asJava(Map("D" -> (1.0: java.lang.Double)))
-    val ranked = analyzer.getPagerank(seeds, 3)
+    val ranked = analyzer.getPagerank(seeds, 3, false)
 
     // D calls A and B
     assert(ranked.size() == 2, ranked)
@@ -252,7 +252,7 @@ class AnalyzerTest {
 
     // Seed with CamelClass, which has no connections
     val seeds = CollectionConverters.asJava(Map("CamelClass" -> (1.0: java.lang.Double)))
-    val ranked = analyzer.getPagerank(seeds, 5)
+    val ranked = analyzer.getPagerank(seeds, 5, false)
 
     // Expect an empty list because CamelClass has few connections,
     // and after filtering itself and zero-scores, nothing should remain.

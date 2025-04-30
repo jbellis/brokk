@@ -6,8 +6,8 @@ import dev.langchain4j.data.message.ChatMessageType;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import io.github.jbellis.brokk.*;
-import io.github.jbellis.brokk.agents.BuildAgent.BuildDetails;
 import io.github.jbellis.brokk.Llm.StreamingResult;
+import io.github.jbellis.brokk.agents.BuildAgent.BuildDetails;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
 import io.github.jbellis.brokk.prompts.CodePrompts;
@@ -18,12 +18,11 @@ import io.github.jbellis.brokk.util.LogDescription;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -132,14 +131,14 @@ public class CodeAgent {
                     // Partial parse => ask LLM to continue from last parsed block
                     parseFailures = 0;
                     var partialMsg = """
-                            It looks like we got cut off. The last block I successfully parsed was:
-                            
-                            <block>
-                            %s
-                            </block>
-                            
-                            Please continue from there (WITHOUT repeating that one).
-                            """.stripIndent().formatted(newlyParsedBlocks.getLast());
+                                     It looks like we got cut off. The last block I successfully parsed was:
+                                     
+                                     <block>
+                                     %s
+                                     </block>
+                                     
+                                     Please continue from there (WITHOUT repeating that one).
+                                     """.stripIndent().formatted(newlyParsedBlocks.getLast());
                     nextRequest = new UserMessage(partialMsg);
                     io.llmOutput("Incomplete response after %d blocks parsed; retrying".formatted(newlyParsedBlocks.size()),
                                  ChatMessageType.CUSTOM);
@@ -200,25 +199,31 @@ public class CodeAgent {
                     applyFailures++;
                 }
 
-                var parseRetryPrompt = getApplyFailureMessage(editResult.failedBlocks(),
-                                                              parser,
-                                                              succeededCount,
-                                                              io,
-                                                              contextManager);
+                var parseRetryPrompt = CodePrompts.getApplyFailureMessage(editResult.failedBlocks(),
+                                                                          parser,
+                                                                          succeededCount,
+                                                                          io,
+                                                                          contextManager);
                 if (!parseRetryPrompt.isEmpty()) {
                     if (applyFailures >= MAX_PARSE_ATTEMPTS) {
-                        io.systemOutput("Diff-apply retry limit reached; ending session");
-                        // Capture filenames from the failed blocks for details
-                        var failedFilenames = editResult.failedBlocks().stream()
-                                .map(fb -> fb.block().filename())
-                                .filter(Objects::nonNull) // Ensure filename is not null
-                                .distinct()
-                                .collect(Collectors.joining(","));
-                        stopDetails = new SessionResult.StopDetails(SessionResult.StopReason.APPLY_ERROR, failedFilenames);
-                        break;
+                        logger.debug("Apply failure limit reached ({}), attempting full file replacement fallback.", applyFailures);
+                        stopDetails = attemptFullFileReplacements(editResult.failedBlocks(), originalContents, userInput, sessionMessages);
+                        if (stopDetails != null) {
+                            // Full replacement also failed or was interrupted
+                            io.systemOutput("Code Agent stopping after failing to apply edits to " + stopDetails.explanation());
+                            break;
+                        } else {
+                            // Full replacement succeeded, reset failures and continue loop (will likely rebuild)
+                            logger.debug("Full file replacement fallback successful.");
+                            applyFailures = 0; // Reset since we made progress via fallback
+                            // fall past else blocks to build check
+                        }
+                    } else {
+                        // Normal retry with corrected blocks
+                        io.llmOutput("\nFailed to apply %s block(s), asking LLM to retry".formatted(editResult.failedBlocks().size()), ChatMessageType.CUSTOM);
+                        nextRequest = new UserMessage(parseRetryPrompt);
+                        continue;
                     }
-                    nextRequest = new UserMessage(parseRetryPrompt);
-                    continue;
                 }
             } else {
                 // If we had successful apply, reset applyErrors
@@ -257,6 +262,131 @@ public class CodeAgent {
                                  new ContextFragment.TaskFragment(finalMessages, userInput),
                                  Map.copyOf(originalContents),
                                  stopDetails);
+    }
+
+
+    /**
+     * Fallback mechanism when standard SEARCH/REPLACE fails repeatedly.
+     * Attempts to replace the entire content of each failed file using QuickEdit prompts.
+     * Runs replacements in parallel.
+     *
+     * @param failedBlocks      The list of blocks that failed to apply.
+     * @param originalContents  Map to record original content before replacement.
+     * @param originalUserInput The initial user goal for context.
+     * @param sessionMessages
+     * @return StopDetails if the fallback fails or is interrupted, null otherwise.
+     */
+    private SessionResult.StopDetails attemptFullFileReplacements(List<EditBlock.FailedBlock> failedBlocks,
+                                                                  Map<ProjectFile, String> originalContents,
+                                                                  String originalUserInput,
+                                                                  ArrayList<ChatMessage> sessionMessages)
+    {
+        var failuresByFile = failedBlocks.stream()
+                .map(fb -> fb.block().filename())
+                .filter(Objects::nonNull)
+                .distinct()
+                .map(contextManager::toFile)
+                .toList();
+
+        if (failuresByFile.isEmpty()) {
+            logger.debug("Fatal: no filenames present in failed blocks");
+            return new SessionResult.StopDetails(SessionResult.StopReason.APPLY_ERROR, "No filenames present in failed blocks");
+        }
+
+        io.systemOutput("Attempting full file replacement for: " + failuresByFile.stream().map(ProjectFile::toString).collect(Collectors.joining(", ")));
+
+        var succeededCount = new AtomicInteger(0);
+
+        // Process files in parallel using streams
+        var futures = failuresByFile.stream().parallel().map(file -> CompletableFuture.supplyAsync(() -> {
+             try {
+                 // Record original content *just before* replacement
+                 originalContents.putIfAbsent(file, file.read());
+
+                 // Prepare request
+                 var goal = "The previous attempt to modify this file using SEARCH/REPLACE failed repeatedly. Original goal: " + originalUserInput;
+                 var messages = CodePrompts.instance.collectFullFileReplacementMessages(contextManager, file, goal, sessionMessages);
+                 var coder = contextManager.getLlm(contextManager.getModels().quickModel(), "Full File Replacement: " + file.getFileName());
+
+                 // Send request
+                 StreamingResult result = coder.sendRequest(messages, false);
+
+                 // Process response
+                 if (result.error() != null) {
+                     return Optional.of("LLM error for %s: %s".formatted(file, result.error().getMessage()));
+                 }
+                 var response = result.chatResponse();
+                 if (response == null || response.aiMessage() == null || response.aiMessage().text() == null || response.aiMessage().text().isBlank()) {
+                     return Optional.of("Empty LLM response for %s".formatted(file));
+                 }
+
+                 // Extract and apply
+                 var newContent = EditBlock.extractCodeFromTripleBackticks(response.aiMessage().text());
+                 if (newContent == null || newContent.isBlank()) {
+                     // Allow empty if response wasn't just ``` ```
+                     if (response.aiMessage().text().strip().equals("```\n```") || response.aiMessage().text().strip().equals("``` ```")) {
+                         // Treat explicitly empty fenced block as success
+                         newContent = "";
+                     } else {
+                         return Optional.of("Could not extract fenced code block from response for %s".formatted(file));
+                     }
+                 }
+
+                 file.write(newContent);
+                 logger.debug("Successfully applied full file replacement for {}", file);
+                 succeededCount.incrementAndGet();
+                 return Optional.<String>empty(); // Success
+             } catch (InterruptedException e) {
+                 throw new CancellationException();
+             } catch (IOException e) {
+                 throw new UncheckedIOException(e);
+             }
+         }, contextManager.getBackgroundTasks())
+        ).toList();
+
+        // Wait for all parallel tasks submitted via supplyAsync; if any is cancelled, cancel the others immediately
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        } catch (CancellationException e) {
+            Thread.currentThread().interrupt();
+        } catch (CompletionException e) {
+            // log this later
+        }
+        if (Thread.currentThread().isInterrupted()) {
+            logger.debug("Interrupted during or after waiting for full file replacement tasks. Cancelling pending tasks.");
+            futures.forEach(f -> f.cancel(true)); // Attempt to cancel ongoing tasks
+            return new SessionResult.StopDetails(SessionResult.StopReason.INTERRUPTED);
+        }
+
+        // Not cancelled -- collect results
+        var actualFailureMessages = futures.stream()
+                .map(f -> {
+                    assert f.isDone();
+                    try {
+                        return f.getNow(Optional.of("Should never happen"));
+                    } catch (CancellationException ce) {
+                        // we already caught cancellations above
+                        throw new AssertionError();
+                    } catch (CompletionException ce) {
+                        logger.error("Unexpected error applying change", ce);
+                        return Optional.of("Unexpected error : " + ce.getCause().getMessage());
+                    }
+                })
+                .flatMap(Optional::stream)
+                .toList();
+
+        if (succeededCount.get() == failuresByFile.size()) {
+            assert actualFailureMessages.isEmpty() : actualFailureMessages;
+            return null;
+        } else {
+            // Report combined errors
+            var combinedError = String.join("\n", actualFailureMessages);
+            if (succeededCount.get() < failuresByFile.size()) {
+                combinedError = "%d/%d files succeeded.\n".formatted(succeededCount.get(), failuresByFile.size()) + combinedError;
+            }
+            logger.debug("Full file replacement fallback finished with issues for {} file(s): {}", actualFailureMessages.size(), combinedError);
+            return new SessionResult.StopDetails(SessionResult.StopReason.APPLY_ERROR, "Full replacement failed or was cancelled for %d file(s).".formatted(failuresByFile.size() - succeededCount.get()));
+        }
     }
 
     private List<ChatMessage> getMessagesForHistory(EditBlockParser parser) {
@@ -473,25 +603,25 @@ public class CodeAgent {
             // Construct the prompt for the LLM
             logger.debug("Found relevant tests {}, asking LLM for specific command.", workspaceTestFiles);
             var prompt = """
-                    Given the build details and the list of test files modified or relevant to the recent changes,
-                    give the shell command to run *only* these specific tests. (You may chain multiple
-                    commands with &&, if necessary.)
-                    
-                    Build Details:
-                    Test All Command: %s
-                    Build/Lint Command: %s
-                    Other Instructions: %s
-                    
-                    Test Files to execute:
-                    %s
-                    
-                    Provide *only* the command line string to execute these specific tests.
-                    Do not include any explanation or formatting.
-                    If you cannot determine a more specific command, respond with an empty string.
-                    """.formatted(details.testAllCommand(),
-                                  details.buildLintCommand(),
-                                  details.instructions(),
-                                  workspaceTestFiles.stream().map(ProjectFile::toString).collect(Collectors.joining("\n"))).stripIndent();
+                         Given the build details and the list of test files modified or relevant to the recent changes,
+                         give the shell command to run *only* these specific tests. (You may chain multiple
+                         commands with &&, if necessary.)
+                         
+                         Build Details:
+                         Test All Command: %s
+                         Build/Lint Command: %s
+                         Other Instructions: %s
+                         
+                         Test Files to execute:
+                         %s
+                         
+                         Provide *only* the command line string to execute these specific tests.
+                         Do not include any explanation or formatting.
+                         If you cannot determine a more specific command, respond with an empty string.
+                         """.formatted(details.testAllCommand(),
+                                       details.buildLintCommand(),
+                                       details.instructions(),
+                                       workspaceTestFiles.stream().map(ProjectFile::toString).collect(Collectors.joining("\n"))).stripIndent();
             // Need a coder instance specifically for this task
             var inferTestCoder = cm.getLlm(cm.getModels().quickModel(), "Infer tests");
             // Ask the LLM
@@ -589,123 +719,17 @@ public class CodeAgent {
      */
     private static String formatBuildErrorsForLLM(String latestBuildError) {
         return """
-                The build failed with the following error:
-                
-                %s
-                
-                Please analyze the error message, review the conversation history for previous attempts, and provide SEARCH/REPLACE blocks to fix the error.
-                
-                IMPORTANT: If you determine that the build errors are not improving or are going in circles after reviewing the history,
-                do your best to explain the problem but DO NOT provide any edits.
-                Otherwise, provide the edits as usual.
-                """.stripIndent().formatted(latestBuildError);
+               The build failed with the following error:
+               
+               %s
+               
+               Please analyze the error message, review the conversation history for previous attempts, and provide SEARCH/REPLACE blocks to fix the error.
+               
+               IMPORTANT: If you determine that the build errors are not improving or are going in circles after reviewing the history,
+               do your best to explain the problem but DO NOT provide any edits.
+               Otherwise, provide the edits as usual.
+               """.stripIndent().formatted(latestBuildError);
     }
-
-    /**
-     * Generates a message based on parse/apply errors from failed edit blocks
-     */
-    private static String getApplyFailureMessage(List<EditBlock.FailedBlock> failedBlocks,
-                                                 EditBlockParser parser,
-                                                 int succeededCount,
-                                                 IConsoleIO io,
-                                                 ContextManager cm)
-        {
-            if (failedBlocks.isEmpty()) {
-                return "";
-            }
-    
-            // Group failed blocks by filename
-            var failuresByFile = failedBlocks.stream()
-                    .filter(fb -> fb.block().filename() != null) // Only include blocks with filenames
-                    .collect(Collectors.groupingBy(fb -> fb.block().filename()));
-    
-            int totalFailCount = failedBlocks.size();
-            boolean singularFail = (totalFailCount == 1);
-            var pluralizeFail = singularFail ? "" : "s";
-    
-            String fileDetails = failuresByFile.entrySet().stream()
-                    .map(entry -> {
-                        var filename = entry.getKey();
-                        var fileFailures = entry.getValue();
-                        var file = cm.toFile(filename);
-                        String currentContentBlock;
-                        try {
-                            var content = file.read();
-                            currentContentBlock = """
-                                    <current_content>
-                                    %s
-                                    </current_content>
-                                    """.formatted(content.isBlank() ? "[File is empty]" : content).stripIndent();
-                        } catch (java.io.IOException e) {
-                            logger.warn("Could not read file {} to include in failure message: {}", filename, e.getMessage());
-                            currentContentBlock = "<current_content>[Could not read current file content: %s]</current_content>"
-                                    .formatted(e.getMessage());
-                        }
-    
-                        String failedBlocksXml = fileFailures.stream()
-                                .map(f -> """
-                                        <failed_block reason="%s">
-                                          <block>
-                                          %s
-                                          </block>
-                                          <commentary>%s</commentary>
-                                        </failed_block>
-                                        """.formatted(f.reason(), parser.repr(f.block()), f.commentary()).stripIndent())
-                                .collect(Collectors.joining("\n"));
-    
-                        return """
-                               <file name="%s">
-                               %s
-                               
-                                 <failed_blocks>
-                                 %s
-                                 </failed_blocks>
-                               </file>
-                               """.formatted(filename, currentContentBlock, failedBlocksXml).stripIndent();
-                    })
-                    .collect(Collectors.joining("\n\n")); // Join details for different files
-    
-            // Instructions for the LLM
-            String instructions = """
-                    <instructions>
-                    # %d SEARCH/REPLACE block%s failed to match in %d files!
-                    
-                    Take a look at the CURRENT state of the relevant file%s provided above in the `<current_content>` tags.
-                    If the failed edits listed in the `<failed_blocks>` tags are still needed, please correct them based on the current content.
-                    Remember that the SEARCH text within a `<block>` must match EXACTLY the lines in the file -- but
-                    I can match across whitespace changes, so if you think the only difference is whitespace, you need to look closer.
-                    If the SEARCH text looks correct, double-check the filename too.
-                    
-                    Provide corrected SEARCH/REPLACE blocks for the failed edits only.
-                    </instructions>
-                    """.formatted(totalFailCount, pluralizeFail, failuresByFile.size(), pluralizeFail).stripIndent();
-
-            // Add info about successful blocks, if any
-            String successNote = "";
-            if (succeededCount > 0) {
-                boolean singularSuccess = (succeededCount == 1);
-                var pluralizeSuccess = singularSuccess ? "" : "s";
-                successNote = """
-                        <note>
-                        The other %d SEARCH/REPLACE block%s applied successfully. Do not re-send them. Just fix the failing blocks detailed above.
-                        </note>
-                        """.formatted(succeededCount, pluralizeSuccess).stripIndent();
-            }
-
-            // we don't send file details to the output
-            var summary = """
-                    \nFailed to apply %s block(s), retrying
-                    """.stripIndent().formatted(failedBlocks.size());
-            io.llmOutput(summary, ChatMessageType.CUSTOM);
-
-            // Construct the full message for the LLM
-            return """
-                    %s
-                    
-                    %s
-                    %s
-                    """.formatted(instructions, fileDetails, successNote).stripIndent();
-        }
 
     /**
      * Executes the verification command and updates build error history.
@@ -729,11 +753,11 @@ public class CodeAgent {
 
         // Build failed
         io.llmOutput("""
-                             \n**Verification Failed:** %s
-                             ```
-                             %s
-                             ```
-                             """.stripIndent().formatted(result.error(), result.output()), ChatMessageType.CUSTOM);
+                     \n**Verification Failed:** %s
+                     ```
+                     %s
+                     ```
+                     """.stripIndent().formatted(result.error(), result.output()), ChatMessageType.CUSTOM);
         // Add the combined error and output to the history for the next request
         return result.error() + "\n\n" + result.output();
     }

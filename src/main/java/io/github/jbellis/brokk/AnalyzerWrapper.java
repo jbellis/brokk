@@ -311,7 +311,8 @@ public class AnalyzerWrapper implements AutoCloseable {
         logger.debug("Rebuilding analyzer");
         future = runner.submit("Rebuilding code intelligence", () -> {
             try {
-                return createAndSaveAnalyzer();
+                currentAnalyzer = createAndSaveAnalyzer();
+                return currentAnalyzer;
             } finally {
                 synchronized (AnalyzerWrapper.this) {
                     rebuildInProgress = false;
@@ -331,7 +332,7 @@ public class AnalyzerWrapper implements AutoCloseable {
     /**
      * Get the analyzer, showing a spinner UI while waiting if requested.
      */
-    private IAnalyzer get(boolean notifyWhenBlocked) throws InterruptedException {
+    public IAnalyzer get() throws InterruptedException {
         if (SwingUtilities.isEventDispatchThread()) {
             throw new UnsupportedOperationException("Never call blocking get() from EDT");
         }
@@ -342,29 +343,13 @@ public class AnalyzerWrapper implements AutoCloseable {
         }
 
         // Otherwise, this must be the very first build (or a failed one).
-        if (notifyWhenBlocked) {
-            if (logger.isDebugEnabled()) {
-                Exception e = new Exception("Stack trace");
-                logger.debug("Blocking on analyzer creation", e);
-            }
-            listener.onBlocked();
-        }
+        listener.onBlocked();
         try {
             // Block until the future analyzer finishes building
-            var built = future.get();
-            currentAnalyzer = built;
-            return built;
+            return future.get();
         } catch (ExecutionException e) {
             throw new RuntimeException("Failed to create analyzer", e);
         }
-    }
-
-    /**
-     * Get the analyzer, showing a spinner UI while waiting.
-     * For use in user-facing operations.
-     */
-    public IAnalyzer get() throws InterruptedException {
-        return get(true);
     }
 
     /**

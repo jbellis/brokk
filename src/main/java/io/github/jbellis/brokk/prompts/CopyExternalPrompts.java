@@ -2,7 +2,6 @@ package io.github.jbellis.brokk.prompts;
 
 import com.google.common.collect.Streams;
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.SystemMessage;
 import io.github.jbellis.brokk.ContextManager;
 
 import java.util.ArrayList;
@@ -14,7 +13,7 @@ public abstract class CopyExternalPrompts extends CodePrompts {
 
     public List<ChatMessage> collectMessages(ContextManager cm) {
         // omits edit instructions and examples
-        return Streams.concat(Stream.of(new SystemMessage(formatIntro(cm, CodePrompts.LAZY_REMINDER))),
+        return Streams.concat(Stream.of(systemMessage(cm, CodePrompts.LAZY_REMINDER)),
                               collectMessagesInternal(cm).stream())
                         .toList();
     }

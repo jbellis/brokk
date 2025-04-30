@@ -31,8 +31,9 @@ class DisabledAnalyzer extends IAnalyzer {
   override def getSkeletonHeader(className: String): Option[String] =
     None
 
-  override def getFileFor(fqcn: String): Option[ProjectFile] =
-    None
+  override def getFileFor(fqcn: String): java.util.Optional[ProjectFile] = {
+    java.util.Optional.empty()
+  }
 
   override def searchDefinitions(pattern: String): util.List[CodeUnit] =
     Collections.emptyList()
