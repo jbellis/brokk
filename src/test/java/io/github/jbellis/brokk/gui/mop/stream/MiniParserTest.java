@@ -4,6 +4,8 @@ import io.github.jbellis.brokk.gui.mop.stream.blocks.CodeBlockComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.CodeBlockFactory;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.ComponentDataFactory;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.CompositeComponentData;
+import io.github.jbellis.brokk.gui.mop.stream.blocks.EditBlockComponentData;
+import io.github.jbellis.brokk.gui.mop.stream.blocks.EditBlockFactory;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.MarkdownComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.MarkdownFactory;
 import org.jsoup.Jsoup;
@@ -30,6 +32,7 @@ public class MiniParserTest {
         mdFactory = new MarkdownFactory();
         factories = new HashMap<>();
         factories.put("code-fence", new CodeBlockFactory());
+        factories.put("edit-block", new EditBlockFactory());
     }
     
     @Test
@@ -144,5 +147,102 @@ public class MiniParserTest {
         assertNotNull(codeBlock);
         assertEquals("java", codeBlock.lang());
         assertEquals("deeplyNested();", codeBlock.body());
+    }
+    
+    @Test
+    void testEditBlockInsideBlockquote() {
+        var html = "<blockquote>" +
+                  "  <p>Here's an edit block:</p>" +
+                  "  <edit-block data-id=\"456\" data-file=\"Main.java\" data-adds=\"10\" data-dels=\"5\"></edit-block>" +
+                  "  <p>End of quote.</p>" +
+                  "</blockquote>";
+        var doc = Jsoup.parse(html);
+        var element = doc.body().child(0); // <blockquote> element
+        
+        var components = parser.parse(element, mdFactory, factories);
+        
+        // Should produce a single CompositeComponentData
+        assertEquals(1, components.size());
+        assertTrue(components.getFirst() instanceof CompositeComponentData);
+        
+        // Ensure the edit block was found
+        var composite = (CompositeComponentData) components.getFirst();
+        assertTrue(composite.children().stream().anyMatch(c -> c instanceof EditBlockComponentData));
+        
+        // Find the edit block and verify its content
+        var editBlock = composite.children().stream()
+                .filter(c -> c instanceof EditBlockComponentData)
+                .map(c -> (EditBlockComponentData)c)
+                .findFirst()
+                .orElse(null);
+        
+        assertNotNull(editBlock);
+        assertEquals("Main.java", editBlock.file());
+        assertEquals(10, editBlock.adds());
+        assertEquals(5, editBlock.dels());
+    }
+    
+    @Test
+    void testMultipleCustomTagsInDifferentDepths() {
+        var html = "<div>" +
+                  "  <p>Intro text</p>" +
+                  "  <blockquote>" +
+                  "    <code-fence data-id=\"123\" data-lang=\"java\" data-content=\"nested();\"/>" +
+                  "  </blockquote>" +
+                  "  <ul><li>" +
+                  "    <edit-block data-id=\"456\" data-file=\"Test.java\" data-adds=\"3\" data-dels=\"2\"></edit-block>" +
+                  "  </li></ul>" +
+                  "  <p>Conclusion</p>" +
+                  "</div>";
+        var doc = Jsoup.parse(html);
+        var element = doc.body().child(0); // <div> element
+        
+        var components = parser.parse(element, mdFactory, factories);
+        
+        // Should produce a single CompositeComponentData
+        assertEquals(1, components.size());
+        assertTrue(components.getFirst() instanceof CompositeComponentData);
+        
+        // Check that we found both custom tags
+        var composite = (CompositeComponentData) components.getFirst();
+        assertEquals(5, composite.children().size(), "Should have 5 children (3 markdown + 2 custom tags)");
+        
+        // Count the number of each type
+        long codeBlocks = composite.children().stream()
+                .filter(c -> c instanceof CodeBlockComponentData)
+                .count();
+        long editBlocks = composite.children().stream()
+                .filter(c -> c instanceof EditBlockComponentData)
+                .count();
+        
+        assertEquals(1, codeBlocks, "Should have 1 code block");
+        assertEquals(1, editBlocks, "Should have 1 edit block");
+    }
+    
+    @Test
+    void testComponentCreationWithThemes() {
+        var html = "<div>" +
+                  "  <code-fence data-id=\"123\" data-lang=\"java\" data-content=\"testTheme();\"/>" +
+                  "</div>";
+        var doc = Jsoup.parse(html);
+        var element = doc.body().child(0);
+        
+        var components = parser.parse(element, mdFactory, factories);
+        assertEquals(1, components.size());
+        
+        // Test component creation with light theme
+        var lightComponent = components.getFirst().createComponent(false);
+        assertNotNull(lightComponent);
+        
+        // Test component creation with dark theme
+        var darkComponent = components.getFirst().createComponent(true);
+        assertNotNull(darkComponent);
+        
+        // For composites, verify all children are created
+        if (components.getFirst() instanceof CompositeComponentData composite) {
+            // A composite should create a panel with components for each child
+            var panel = composite.createComponent(false);
+            assertEquals(composite.children().size(), panel.getComponentCount());
+        }
     }
 }

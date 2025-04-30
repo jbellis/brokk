@@ -183,4 +183,93 @@ public class IncrementalBlockRendererTest {
         var panel = (JPanel)rootPanel.getComponent(0);
         assertTrue(panel.getComponentCount() > 0, "Panel should contain components");
     }
+    
+    @Test
+    void multipleMixedCustomTagsAreParsed() {
+        String md = """
+            Here's a list with mixed content:
+            
+            - Item 1: normal text
+            - Item 2: with code
+              ```java
+              System.out.println("Item 2");
+              ```
+            - Item 3: with edit block
+              <<<<<<< SEARCH Test.java
+              void test() {}
+              ======= Test.java
+              void test() { return; }
+              >>>>>>> REPLACE Test.java
+            """;
+        
+        var cds = TestUtil.parseMarkdown(md);
+        
+        // Should produce at least one composite
+        assertTrue(
+            cds.stream().anyMatch(c -> c instanceof CompositeComponentData),
+            "Should detect mixed custom tags as a CompositeComponentData"
+        );
+        
+        // Find any composite and verify it has both types of custom blocks
+        var composite = cds.stream()
+            .filter(c -> c instanceof CompositeComponentData)
+            .map(c -> (CompositeComponentData)c)
+            .findFirst()
+            .orElseThrow();
+        
+        boolean hasCodeBlock = composite.children().stream()
+            .anyMatch(c -> c instanceof CodeBlockComponentData);
+            
+        boolean hasEditBlock = composite.children().stream()
+            .anyMatch(c -> c instanceof EditBlockComponentData);
+            
+        assertTrue(hasCodeBlock || hasEditBlock, 
+            "Composite should contain either a CodeBlockComponentData or EditBlockComponentData");
+    }
+    
+    @Test
+    void multipleMixedCustomTagsAreParsed2() {
+        String md = """
+            Here's a list with mixed content:
+            
+            - Item 1: normal text
+            - Item 2: with code
+              ```java
+              System.out.println("Item 2");
+              ```
+            - Item 3: with edit block
+              ```
+              Test.java
+              <<<<<<< SEARCH
+              void test() {}
+              ======= Test.java
+              void test() { return; }
+              >>>>>>> REPLACE
+              ```
+            """;
+        
+        var cds = TestUtil.parseMarkdown(md);
+        
+        // Should produce at least one composite
+        assertTrue(
+            cds.stream().anyMatch(c -> c instanceof CompositeComponentData),
+            "Should detect mixed custom tags as a CompositeComponentData"
+        );
+        
+        // Find any composite and verify it has both types of custom blocks
+        var composite = cds.stream()
+            .filter(c -> c instanceof CompositeComponentData)
+            .map(c -> (CompositeComponentData)c)
+            .findFirst()
+            .orElseThrow();
+        
+        boolean hasCodeBlock = composite.children().stream()
+            .anyMatch(c -> c instanceof CodeBlockComponentData);
+            
+        boolean hasEditBlock = composite.children().stream()
+            .anyMatch(c -> c instanceof EditBlockComponentData);
+            
+        assertTrue(hasCodeBlock || hasEditBlock, 
+            "Composite should contain either a CodeBlockComponentData or EditBlockComponentData");
+    }
 }
