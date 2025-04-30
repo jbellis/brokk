@@ -54,7 +54,7 @@ public record CompositeComponentData(
             return;
         }
         
-        Boolean darkTheme = (Boolean) panel.getClientProperty("THEME_FLAG");
+        Boolean darkTheme = (Boolean) panel.getClientProperty(THEME_FLAG);
 
         // Check if number of children matches number of components
         var components = panel.getComponents();

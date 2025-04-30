@@ -1,0 +1,3 @@
+io.github.jbellis.brokk.gui.mop.stream.blocks.MarkdownFactory
+io.github.jbellis.brokk.gui.mop.stream.blocks.CodeBlockFactory
+io.github.jbellis.brokk.gui.mop.stream.blocks.EditBlockFactory
