@@ -45,14 +45,23 @@ public record CompositeComponentData(
             return;
         }
         
-        // Simple first implementation - rebuild all children when anything changes
-        // A more sophisticated implementation could do per-child diffing
-        panel.removeAll();
-        
-        for (ComponentData child : children) {
-            var childComp = child.createComponent(panel.getBackground().equals(Color.BLACK));
-            childComp.setAlignmentX(Component.LEFT_ALIGNMENT);
-            panel.add(childComp);
+        // Check if number of children matches number of components
+        var components = panel.getComponents();
+        if (components.length != children.size()) {
+            // Child count mismatch, rebuild all components
+            panel.removeAll();
+            for (ComponentData child : children) {
+                var childComp = child.createComponent(panel.getBackground().equals(Color.BLACK));
+                childComp.setAlignmentX(Component.LEFT_ALIGNMENT);
+                panel.add(childComp);
+            }
+        } else {
+            // Update existing components without rebuilding
+            for (int i = 0; i < children.size(); i++) {
+                if (components[i] instanceof JComponent jcomp) {
+                    children.get(i).updateComponent(jcomp);
+                }
+            }
         }
         
         panel.revalidate();

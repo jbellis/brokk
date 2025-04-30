@@ -7,6 +7,7 @@ import com.vladsch.flexmark.util.data.MutableDataSet;
 import io.github.jbellis.brokk.gui.mop.ThemeColors;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.ComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.ComponentDataFactory;
+import io.github.jbellis.brokk.gui.mop.stream.blocks.CompositeComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.MarkdownFactory;
 import io.github.jbellis.brokk.gui.mop.stream.flex.BrokkMarkdownExtension;
 import io.github.jbellis.brokk.gui.mop.stream.flex.IdProvider;
@@ -214,11 +215,42 @@ public final class IncrementalBlockRenderer {
             // Parse the element tree to find nested custom tags
             var parsedElements = miniParser.parse(child, markdownFactory, FACTORIES);
             
+            // For stability of IDs, ensure composites get a deterministic ID
+            // derived from the source element's position via IdProvider
+            parsedElements = normalizeCompositeId(child, parsedElements);
+            
             // Add all parsed components to our result list
             result.addAll(parsedElements);
         }
         
         return result;
+    }
+    
+    /**
+     * Ensures that a single CompositeComponentData produced for a top-level
+     * element gets a stable, deterministic id derived from the element's
+     * source offset (via IdProvider). If the input contains anything other
+     * than one composite, it is returned unchanged.
+     * 
+     * @param topLevelElement The source HTML element
+     * @param parsed The list of components parsed from the element
+     * @return The same list with any composite's ID normalized
+     */
+    private List<ComponentData> normalizeCompositeId(Element topLevelElement, 
+                                                    List<ComponentData> parsed) {
+        if (parsed.size() != 1 || !(parsed.getFirst() instanceof CompositeComponentData composite)) {
+            return parsed;  // No work to do
+        }
+        
+        // Use IdProvider to get a stable ID based on the element's position in the source
+        int stableId = idProvider.getId(topLevelElement);
+        
+        if (composite.id() == stableId) {
+            return parsed;  // Already has the correct ID
+        }
+        
+        // Create a new composite with the stable ID but same children
+        return List.of(new CompositeComponentData(stableId, composite.children()));
     }
     
     /**

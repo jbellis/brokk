@@ -41,4 +41,27 @@ public class IdProvider {
         int id = Math.abs(31 * startOffset + typeHash);
         return id;
     }
+    
+    /**
+     * Generates a stable ID for a JSoup Element based on its string representation
+     * and position in the document.
+     * 
+     * @param element the JSoup element to generate an ID for
+     * @return a deterministic integer ID
+     */
+    public int getId(org.jsoup.nodes.Element element) {
+        // Use element's tag name, attributes, and class names to create a stable hash
+        String tagName = element.tagName();
+        String attributes = element.attributes().toString();
+        
+        // Combine these characteristics for a unique fingerprint
+        int hash = tagName.hashCode();
+        hash = 31 * hash + attributes.hashCode();
+        
+        // Use element's source position if available (elementSiblingIndex is the position among siblings)
+        int position = element.elementSiblingIndex();
+        hash = 31 * hash + position;
+        
+        return Math.abs(hash);
+    }
 }

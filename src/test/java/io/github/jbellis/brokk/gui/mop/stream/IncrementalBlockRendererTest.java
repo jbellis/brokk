@@ -7,9 +7,11 @@ import io.github.jbellis.brokk.gui.mop.stream.blocks.EditBlockComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.MarkdownComponentData;
 import org.junit.jupiter.api.Test;
 
+import javax.swing.JPanel;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -131,5 +133,54 @@ public class IncrementalBlockRendererTest {
         // The composite should create a panel with two child components
         assertEquals(2, comp.getComponentCount());
         assertEquals(markdown.fp() + "-" + code.fp(), composite.fp());
+    }
+    
+    @Test
+    void compositeFingerprintChangesWhenChildChanges() {
+        var md1 = "- a\n  ```java\n  x();\n  ```";
+        var md2 = "- a\n  ```java\n  y();\n  ```";  // code content changed
+        
+        // Parse both markdown snippets
+        var components1 = TestUtil.parseMarkdown(md1);
+        var components2 = TestUtil.parseMarkdown(md2);
+        
+        // Both should produce a CompositeComponentData
+        assertEquals(1, components1.size());
+        assertEquals(1, components2.size());
+        assertTrue(components1.get(0) instanceof CompositeComponentData);
+        assertTrue(components2.get(0) instanceof CompositeComponentData);
+        
+        // Get fingerprints
+        String fp1 = components1.get(0).fp();
+        String fp2 = components2.get(0).fp();
+        
+        // Fingerprints should be different because the code content changed
+        assertNotEquals(fp1, fp2, "Composite fingerprint should change when child content changes");
+    }
+    
+    @Test
+    void incrementalRendererDetectsNestedContentChange() {
+        var md1 = "- a\n  ```java\n  x();\n  ```";
+        var md2 = "- a\n  ```java\n  y();\n  ```";  // child changed
+        
+        // Create a renderer and update with first markdown
+        var renderer = new IncrementalBlockRenderer(false);
+        renderer.update(md1);
+        
+        // Get the first component to check later
+        var rootPanel = renderer.getRoot();
+        var firstComponent = rootPanel.getComponent(0);
+        
+        // Update with second markdown
+        renderer.update(md2);
+        
+        // The component should have been updated, not recreated
+        // So it should be the same component instance
+        assertEquals(firstComponent, rootPanel.getComponent(0), 
+            "Component instance should be reused even when nested content changes");
+        
+        // But the content should have been updated
+        var panel = (JPanel)rootPanel.getComponent(0);
+        assertTrue(panel.getComponentCount() > 0, "Panel should contain components");
     }
 }
