@@ -6,7 +6,6 @@ import com.vladsch.flexmark.html.renderer.NodeRenderer;
 import com.vladsch.flexmark.html.renderer.NodeRendererContext;
 import com.vladsch.flexmark.html.renderer.NodeRenderingHandler;
 import com.vladsch.flexmark.util.data.DataHolder;
-import com.vladsch.flexmark.util.ast.Document;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -37,13 +36,7 @@ public class CodeFenceRenderer implements NodeRenderer {
      * Renders a fenced code block as a placeholder HTML element.
      */
     private void render(FencedCodeBlock node, NodeRendererContext context, HtmlWriter html) {
-        // Only convert *direct* document children
-        if (!(node.getParent() instanceof Document)) {
-            // Nested -> let Flexmark's standard renderer handle it
-            context.delegateRender();
-            return;
-        }
-        
+       
         int id = idProvider.getId(node);
         String language = node.getInfo().toString();
         

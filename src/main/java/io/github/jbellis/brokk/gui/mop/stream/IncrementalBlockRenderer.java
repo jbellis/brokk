@@ -98,9 +98,8 @@ public final class IncrementalBlockRenderer {
      * @param markdown the markdown text to display
      */
     public void update(String markdown) {
-        // Parse with Flexmark
-        var document = parser.parse(markdown);
-        var html = renderer.render(document);
+        
+        var html = createHtml(markdown);
         
         // Skip if nothing changed
         String htmlFp = html.hashCode() + "";
@@ -183,6 +182,12 @@ public final class IncrementalBlockRenderer {
                 root.add(entry.comp);
             }
         }
+    }
+
+    private String createHtml(String md) {
+        // Parse with Flexmark
+        var document = parser.parse(md);
+        return renderer.render(document);
     }
     
     /**
