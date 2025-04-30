@@ -24,6 +24,8 @@ public record CompositeComponentData(
                .collect(Collectors.joining("-"));
     }
 
+    private static final String THEME_FLAG = "brokk.darkTheme";
+
     @Override
     public JComponent createComponent(boolean darkTheme) {
         var panel = new JPanel();
@@ -32,6 +34,9 @@ public record CompositeComponentData(
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
         var bgColor = ThemeColors.getColor(darkTheme, "message_background");
         panel.setBackground(bgColor);
+        
+        // Store the theme flag for later use in updateComponent
+        panel.putClientProperty(THEME_FLAG, darkTheme);
         
         // Create and add each child component in order
         for (ComponentData child : children) {
@@ -49,13 +54,15 @@ public record CompositeComponentData(
             return;
         }
         
+        Boolean darkTheme = (Boolean) panel.getClientProperty("THEME_FLAG");
+
         // Check if number of children matches number of components
         var components = panel.getComponents();
         if (components.length != children.size()) {
             // Child count mismatch, rebuild all components
             panel.removeAll();
             for (ComponentData child : children) {
-                var childComp = child.createComponent(panel.getBackground().equals(Color.BLACK));
+                var childComp = child.createComponent(darkTheme);
                 childComp.setAlignmentX(Component.LEFT_ALIGNMENT);
                 panel.add(childComp);
             }
@@ -67,7 +74,7 @@ public record CompositeComponentData(
                 }
             }
         }
-        
+
         panel.revalidate();
         panel.repaint();
     }
