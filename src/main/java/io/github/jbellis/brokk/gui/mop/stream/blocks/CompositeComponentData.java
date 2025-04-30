@@ -1,5 +1,7 @@
 package io.github.jbellis.brokk.gui.mop.stream.blocks;
 
+import io.github.jbellis.brokk.gui.mop.ThemeColors;
+
 import javax.swing.*;
 import java.awt.*;
 import java.util.List;
@@ -26,8 +28,10 @@ public record CompositeComponentData(
     public JComponent createComponent(boolean darkTheme) {
         var panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setOpaque(false);
+        panel.setOpaque(true);
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        var bgColor = ThemeColors.getColor(darkTheme, "message_background");
+        panel.setBackground(bgColor);
         
         // Create and add each child component in order
         for (ComponentData child : children) {
