@@ -94,10 +94,11 @@ public interface ContextFragment extends Serializable {
     String syntaxStyle();
 
     /**
-     * should AutoContext exclude classes found in this fragment?
+     * If false, the classes returned by sources() will be pruned from AutoContext suggestions.
+     * (Corollary: if sources() always returns empty, this doesn't matter.)
      */
     default boolean isEligibleForAutoContext() {
-        return isText();
+        return true;
     }
 
     static Set<ProjectFile> parseRepoFiles(String text, IProject project) {
@@ -177,16 +178,21 @@ public interface ContextFragment extends Serializable {
         public String toString() {
             return "ProjectPathFragment('%s')".formatted(file);
         }
+
+        @Override
+        public boolean isEligibleForAutoContext() {
+            return false;
+        }
     }
 
     /**
      * Represents a specific revision of a ProjectFile from Git history.
      */
-    record GitFileFragment(ProjectFile file, String revision, int id) implements PathFragment {
+    record GitFileFragment(ProjectFile file, String revision, String content, int id) implements PathFragment {
         private static final long serialVersionUID = 2L;
 
-        public GitFileFragment(ProjectFile file, String revision) {
-            this(file, revision, NEXT_ID.getAndIncrement());
+        public GitFileFragment(ProjectFile file, String revision, String content) {
+            this(file, revision, content, NEXT_ID.getAndIncrement());
         }
 
         private String shortRevision() {
@@ -213,9 +219,8 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
-        public boolean isEligibleForAutoContext() {
-            // Content is historical, not suitable for auto-context
-            return false;
+        public String text() {
+            return content;
         }
 
         @Override
@@ -254,11 +259,6 @@ public interface ContextFragment extends Serializable {
         @Override
         public Set<CodeUnit> sources(IProject project) {
             return Set.of();
-        }
-
-        @Override
-        public boolean isEligibleForAutoContext() {
-            return false;
         }
     }
 
@@ -400,11 +400,6 @@ public interface ContextFragment extends Serializable {
         public int hashCode() {
             // Use id for hashCode
             return Integer.hashCode(id());
-        }
-
-        @Override
-        public boolean isEligibleForAutoContext() {
-            return isText();
         }
     }
 
@@ -692,13 +687,55 @@ public interface ContextFragment extends Serializable {
     }
 
     class UsageFragment extends VirtualFragment {
-        private static final long serialVersionUID = 2L;
+        private static final long serialVersionUID = 3L;
+        private final String targetIdentifier;
+        private final Set<CodeUnit> classes;
+        private final String code;
+
+        public UsageFragment(String targetIdentifier, Set<CodeUnit> classes, String code) {
+            super();
+            assert targetIdentifier != null;
+            assert classes != null;
+            assert code != null;
+            this.targetIdentifier = targetIdentifier;
+            this.classes = classes;
+            this.code = code;
+        }
+
+        @Override
+        public String text() {
+            return code;
+        }
+
+        @Override
+        public Set<CodeUnit> sources(IProject project) {
+            return classes;
+        }
+
+        @Override
+        public Set<ProjectFile> files(IProject project) {
+            return classes.stream().map(CodeUnit::source).collect(java.util.stream.Collectors.toSet());
+        }
+
+        @Override
+        public String description() {
+            return "Uses of %s".formatted(targetIdentifier);
+        }
+
+        @Override
+        public String syntaxStyle() {
+            return SyntaxConstants.SYNTAX_STYLE_JAVA;
+        }
+    }
+
+    class CallGraphFragment extends VirtualFragment {
+        private static final long serialVersionUID = 1L;
         private final String type;
         private final String targetIdentifier;
         private final Set<CodeUnit> classes;
         private final String code;
 
-        public UsageFragment(String type, String targetIdentifier, Set<CodeUnit> classes, String code) {
+        public CallGraphFragment(String type, String targetIdentifier, Set<CodeUnit> classes, String code) {
             super();
             assert type != null;
             assert targetIdentifier != null;
@@ -888,11 +925,6 @@ public interface ContextFragment extends Serializable {
         @Override
         public String description() {
             return "Task History (" + history.size() + " task%s)".formatted(history.size() > 1 ? "s" : "");
-        }
-
-        @Override
-        public boolean isEligibleForAutoContext() {
-            return false;
         }
 
         @Override

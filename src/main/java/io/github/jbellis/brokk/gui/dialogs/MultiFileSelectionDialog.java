@@ -131,7 +131,7 @@ public class MultiFileSelectionDialog extends JDialog {
         }
 
         // --- Create Classes Tab (if requested) ---
-        if (modes.contains(SelectionMode.CLASSES)) {
+        if (modes.contains(SelectionMode.CLASSES) && analyzer.isCpg()) {
             tabbedPane.addTab("Classes", createClassSelectionPanel());
         }
 
@@ -204,7 +204,8 @@ public class MultiFileSelectionDialog extends JDialog {
         fileInput = new JTextArea(3, 30);
         fileInput.setLineWrap(true);
         fileInput.setWrapStyleWord(true);
-        var provider = new FileCompletionProvider(this.completableFiles);
+        // Pass allowExternalFiles to the provider
+        var provider = new FileCompletionProvider(this.completableFiles, this.allowExternalFiles);
         fileAutoCompletion = new AutoCompletion(provider);
         // Trigger with Ctrl+Space
         fileAutoCompletion.setAutoActivationEnabled(false);
@@ -315,15 +316,18 @@ public class MultiFileSelectionDialog extends JDialog {
         if (node.getUserObject() instanceof FileTree.FileTreeNode fileNode) {
             appendFilenameToInput(fileNode.getFile().getAbsolutePath());
         } else if (!allowExternalFiles && node.getUserObject() instanceof String filename) {
-            // This case might be simplified if FileTreeNode is always used
-            // Reconstruct relative path (assuming this logic is still needed)
+            // This case might be simplified if FileTreeNode is always used.
+            // Reconstruct relative path using Path methods for platform neutrality.
             Object[] pathComponents = node.getPath();
-            StringBuilder rel = new StringBuilder();
-            for (int i = 1; i < pathComponents.length; i++) { // Skip root
-                if (i > 1) rel.append("/");
-                rel.append(pathComponents[i].toString());
+            if (pathComponents.length > 1) {
+                // Start with the first component after the root
+                Path relativePath = Path.of(pathComponents[1].toString());
+                // Join subsequent components
+                for (int i = 2; i < pathComponents.length; i++) {
+                    relativePath = relativePath.resolve(pathComponents[i].toString());
+                }
+                appendFilenameToInput(relativePath.toString());
             }
-            appendFilenameToInput(rel.toString());
         }
     }
 
@@ -485,16 +489,13 @@ public class MultiFileSelectionDialog extends JDialog {
         logger.debug("Raw class names parsed: {}", classNames);
 
         List<CodeUnit> resolvedClasses = new ArrayList<>();
-        IAnalyzer az = null;
+        IAnalyzer az;
         try {
             az = analyzer.get();
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
-        if (az == null || az.isEmpty()) {
-            logger.warn("Analyzer is not available or empty, cannot resolve class names.");
-            return resolvedClasses;
-        }
+        assert az != null && az.isCpg();
 
         // Get all potential code units using Completions utility and filter for classes
         // This aligns with how SymbolCompletionProvider works and avoids assuming IAnalyzer.getClasses()
@@ -611,11 +612,13 @@ public class MultiFileSelectionDialog extends JDialog {
      */
     public class FileCompletionProvider extends DefaultCompletionProvider {
         private final Future<Set<ProjectFile>> projectFilesFuture;
+        private final boolean allowExternalFiles; // Added field
 
-        public FileCompletionProvider(Future<Set<ProjectFile>> projectFilesFuture) {
+        public FileCompletionProvider(Future<Set<ProjectFile>> projectFilesFuture, boolean allowExternalFiles) {
             super();
             assert projectFilesFuture != null;
             this.projectFilesFuture = projectFilesFuture;
+            this.allowExternalFiles = allowExternalFiles; // Store the flag
         }
 
         @Override
@@ -626,25 +629,50 @@ public class MultiFileSelectionDialog extends JDialog {
 
         @Override
         public List<Completion> getCompletions(JTextComponent tc) {
-            String pattern = getAlreadyEnteredText(tc).trim();
+            String pattern = getAlreadyEnteredText(tc);
             if (pattern.isEmpty()) return List.of();
 
-            Set<ProjectFile> projectFiles;
+            Path potentialPath = null;
+            boolean isAbsolutePattern;
+            try {
+                potentialPath = Path.of(pattern);
+                isAbsolutePattern = potentialPath.isAbsolute();
+            } catch (java.nio.file.InvalidPathException e) {
+                // Invalid path syntax, treat as non-absolute project path for now
+                isAbsolutePattern = false;
+            }
+
+            if (allowExternalFiles && isAbsolutePattern) {
+                // Generate absolute path completions (List<Completion>)
+                // Pass the Path object to avoid re-parsing
+                return getAbsolutePathCompletions(potentialPath, pattern); // Return List<Completion> directly
+            } else {
+                // Fallback to project file completion
+                String trimmedPattern = pattern.trim();
+                if (trimmedPattern.isEmpty()) return List.of();
+
+                Set<ProjectFile> projectFiles;
                 try {
                     projectFiles = projectFilesFuture.get();
                 } catch (InterruptedException | ExecutionException e) {
-                    logger.debug(e);
+                    logger.debug("Error getting project files for completion", e);
                     return List.of();
                 }
-    
-                var completions = Completions.scoreShortAndLong(pattern,
-                                                                projectFiles,
-                                                                ProjectFile::getFileName,
-                                                                ProjectFile::toString,
-                                                                this::createRepoCompletion);
-    
-                AutoCompleteUtil.sizePopupWindows(fileAutoCompletion, tc, completions);
-                return completions.stream().map(c -> (Completion) c).toList();
+
+                // Generate project file completions (List<ShorthandCompletion>)
+                List<ShorthandCompletion> projectCompletions = Completions.scoreShortAndLong(
+                        trimmedPattern,
+                        projectFiles,
+                        ProjectFile::getFileName,
+                        ProjectFile::toString,
+                        this::createRepoCompletion);
+
+                // Call sizePopupWindows only when we have ShorthandCompletions
+                AutoCompleteUtil.sizePopupWindows(fileAutoCompletion, tc, projectCompletions);
+
+                // Return the list, casting back to the required List<Completion> type
+                return projectCompletions.stream().map(c -> (Completion) c).toList();
+            }
         }
 
         /**
@@ -652,10 +680,87 @@ public class MultiFileSelectionDialog extends JDialog {
          */
         private ShorthandCompletion createRepoCompletion(ProjectFile file) {
             String relativePath = file.toString();
-            // Replacement text includes quotes if needed, and a trailing space
-            String replacement = (relativePath.contains(" ") ? "\"" + relativePath + "\"" : relativePath) + " ";
-            // Display text is the filename, summary is the full relative path
+            String replacement = quotePathIfNecessary(relativePath) + " ";
             return new ShorthandCompletion(this, file.getFileName(), replacement, relativePath);
+        }
+
+        /**
+         * /**
+         * Provides completions for absolute filesystem paths.
+         *
+         * @param inputPath The Path object representing the user's input.
+         * @param pattern   The original string pattern entered by the user (used for display and edge cases).
+         * @return A list of matching completions.
+         */
+        private List<Completion> getAbsolutePathCompletions(Path inputPath, String pattern) {
+            List<Completion> pathCompletions = new ArrayList<>();
+            try {
+                Path parentDir;
+                String filePrefix;
+                boolean endsWithSeparator = pattern.endsWith(inputPath.getFileSystem().getSeparator());
+
+                // Determine the directory to list and the prefix to match
+                if (endsWithSeparator) {
+                    // User typed "C:\folder\" or "/folder/", list contents of "folder"
+                    parentDir = inputPath;
+                    filePrefix = "";
+                } else {
+                    // User typed "C:\folder\fi" or "/folder/fi"
+                    parentDir = inputPath.getParent();
+                    // Handle cases like "C:\" where getParent() might be null, but it's a valid directory
+                    if (parentDir == null && inputPath.getRoot() != null && inputPath.getNameCount() == 0) {
+                        parentDir = inputPath.getRoot(); // e.g., C:\ or /
+                        filePrefix = ""; // No prefix to match in this case
+                    } else if (parentDir != null) {
+                        // Get the filename part as the prefix
+                        filePrefix = inputPath.getFileName() != null ? inputPath.getFileName().toString() : "";
+                    } else {
+                        // Should not happen for valid absolute paths unless it's just the root?
+                        // If input is just "C:" or "/", parent is null, filename is null. Treat as root.
+                        parentDir = inputPath.getRoot();
+                        if (parentDir == null) { // Should be extremely rare, e.g. malformed input caught earlier
+                            logger.warn("Could not determine parent directory or root for path: {}", pattern);
+                            return List.of();
+                        }
+                        filePrefix = "";
+                    }
+                }
+
+
+                // Ensure parentDir exists and is a directory before listing
+                if (!Files.isDirectory(parentDir)) {
+                    // If parent is null (e.g., invalid input like "/../") or not a directory, no completions
+                    logger.debug("Parent directory for absolute path completion is null or not a directory: {}", parentDir);
+                    return List.of();
+                }
+
+                // Use a final variable for the lambda expression
+                final String effectiveFilePrefix = filePrefix.toLowerCase();
+                if (Files.isDirectory(parentDir)) {
+                    try (var stream = Files.newDirectoryStream(parentDir, p -> p.getFileName().toString().toLowerCase().startsWith(effectiveFilePrefix))) {
+                        for (Path p : stream) {
+                            String absolutePath = p.toAbsolutePath().toString();
+                            String replacement = quotePathIfNecessary(absolutePath) + " ";
+                            String display = p.getFileName().toString();
+                            pathCompletions.add(new org.fife.ui.autocomplete.BasicCompletion(this, replacement, display, absolutePath));
+                        }
+                    } catch (java.io.IOException e) {
+                        logger.debug("IOException while listing directory for completion: {}", parentDir, e);
+                        // Ignore and return whatever we have found so far, or empty list
+                    }
+                }
+            } catch (java.nio.file.InvalidPathException e) {
+                logger.debug("Invalid path entered for completion: {}", pattern, e);
+            }
+
+            // Sort completions alphabetically by display name
+            pathCompletions.sort(Comparator.comparing(Completion::getInputText));
+            return pathCompletions;
+        }
+
+        /** Quotes a path string if it contains spaces. */
+        private String quotePathIfNecessary(String path) {
+            return path.contains(" ") ? "\"" + path + "\"" : path;
         }
     }
 
@@ -705,14 +810,15 @@ public class MultiFileSelectionDialog extends JDialog {
         @Override
         public List<Completion> getCompletions(JTextComponent comp) {
             String pattern = getAlreadyEnteredText(comp).trim();
+            if (pattern.isEmpty()) return List.of();
+
             IAnalyzer az;
             try {
                 az = analyzer.get();
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
-
-            if (pattern.isEmpty() || az == null || az.isEmpty()) return List.of();
+            assert az != null && az.isCpg();
 
             List<CodeUnit> availableCompletions;
             try {

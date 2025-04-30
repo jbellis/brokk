@@ -672,8 +672,9 @@ public class CodeAgent {
                     
                     Take a look at the CURRENT state of the relevant file%s provided above in the `<current_content>` tags.
                     If the failed edits listed in the `<failed_blocks>` tags are still needed, please correct them based on the current content.
-                    Remember that the SEARCH text within a `<block>` must match EXACTLY the lines in the file.
-                    If the SEARCH text looks correct, double-check the filename and context (like line numbers if provided in commentary).
+                    Remember that the SEARCH text within a `<block>` must match EXACTLY the lines in the file -- but
+                    I can match across whitespace changes, so if you think the only difference is whitespace, you need to look closer.
+                    If the SEARCH text looks correct, double-check the filename too.
                     
                     Provide corrected SEARCH/REPLACE blocks for the failed edits only.
                     </instructions>

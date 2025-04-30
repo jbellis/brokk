@@ -193,7 +193,7 @@ class AnalyzerTest {
 
   @Test
   def getClassesInFilePythonTest(): Unit = {
-    val analyzer = JavaAnalyzer(Path.of("src/test/resources/testcode"), Language.Python)
+    val analyzer = JavaAnalyzer(Path.of("src/test/resources/testcode"), Language.PYTHON)
     val file = analyzer.toFile("A.py").get
     val classes = analyzer.getClassesInFile(file)
     //    val expected = Set("D", "D$DSub", "D$DSubStatic").map(name => CodeUnit.cls(file, name))

@@ -53,10 +53,13 @@ public class AnalyzerUtil {
                 for (var entry : groupedMethods.entrySet()) {
                     var methods = entry.getValue();
                     if (!methods.isEmpty()) {
-                        code.append("In ").append(entry.getKey()).append(":\n\n");
-                        for (String ms : methods) {
-                            code.append(ms).append("\n\n");
-                        }
+                        var fqcn = entry.getKey();
+                        var file = analyzer.getFileFor(fqcn).map(ProjectFile::toString).getOrElse(() -> "?");
+                        code.append("""
+                                <methods class="%s" file="%s">
+                                %s
+                                </methods>
+                                """.formatted(fqcn, file, String.join("\n\n", methods)));
                     }
                 }
             }
@@ -121,14 +124,15 @@ public class AnalyzerUtil {
                 .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().get()));
     }
 
-    private record StackEntry(String method, int depth) {}
+    private record StackEntry(String method, int depth) {
+    }
 
     /**
      * Helper method to recursively format the call graph (both callers and callees)
      */
     public static String formatCallGraph(Map<String, List<CallSite>> callgraph,
-                                          String rootMethodName,
-                                          boolean isCallerGraph)
+                                         String rootMethodName,
+                                         boolean isCallerGraph)
     {
         var result = new StringBuilder();
         String arrow = isCallerGraph ? "<-" : "->";
@@ -146,11 +150,11 @@ public class AnalyzerUtil {
             }
             sites.stream().sorted().forEach(site -> {
                 result.append("""
-                 %s %s
-                 ```
-                 %s
-                 ```
-                """.stripIndent().indent(2 * entry.depth)
+                                       %s %s
+                                       ```
+                                       %s
+                                       ```
+                                      """.stripIndent().indent(2 * entry.depth)
                                       .formatted(arrow, site.target().fqName(), site.sourceLine()));
 
                 // Process this method's callers/callees (if not already processed)
@@ -170,7 +174,7 @@ public class AnalyzerUtil {
      * @return A map of CodeUnit to its skeleton string. Returns an empty map if no skeletons are found.
      */
     public static Map<CodeUnit, String> getClassSkeletonsData(IAnalyzer analyzer, List<String> classNames) {
-        assert !analyzer.isEmpty() : "Analyzer is not available.";
+        assert analyzer.isCpg() : "CPG Analyzer is not available.";
         if (classNames == null || classNames.isEmpty()) {
             return Map.of();
         }
@@ -196,7 +200,7 @@ public class AnalyzerUtil {
      * @return A map of method name to its source code string. Returns an empty map if no sources are found.
      */
     public static Map<String, String> getMethodSourcesData(IAnalyzer analyzer, List<String> methodNames) {
-        assert !analyzer.isEmpty() : "Analyzer is not available.";
+        assert analyzer.isCpg() : "CPG Analyzer is not available for getMethodSourcesData.";
         if (methodNames == null || methodNames.isEmpty()) {
             return Map.of();
         }
@@ -227,7 +231,7 @@ public class AnalyzerUtil {
      * @return A map of class name to its formatted source code string (with header). Returns an empty map if no sources are found.
      */
     public static Map<String, String> getClassSourcesData(IAnalyzer analyzer, List<String> classNames) {
-         assert !analyzer.isEmpty() : "Analyzer is not available.";
+        assert analyzer.isCpg() : "CPG Analyzer is not available for getClassSourcesData.";
         if (classNames == null || classNames.isEmpty()) {
             return Map.of();
         }

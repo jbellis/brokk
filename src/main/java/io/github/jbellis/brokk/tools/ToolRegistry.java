@@ -5,7 +5,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.*;
 import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessageType;
 import io.github.jbellis.brokk.ContextManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -51,8 +50,8 @@ public class ToolRegistry {
     or break problems into smaller pieces. Call it concurrently with other tools.
     """)
     public String think(@P("The step-by-step reasoning to work through") String reasoning) {
-        contextManager.getIo().llmOutput("\n" + reasoning, ChatMessageType.AI);
-        return "Good thinking";
+        // Llm special-cases this tool, but we need to return a value so the execution request is happy
+        return "Good thinking.";
     }
 
     /**
@@ -84,9 +83,14 @@ public class ToolRegistry {
      * @return A list of ToolSpecification objects. Returns an empty list if a name is not found.
      */
     public List<ToolSpecification> getRegisteredTools(List<String> toolNames) {
+        var missingTools = toolNames.stream()
+                .filter(tool -> !toolMap.containsKey(tool))
+                .toList();
+        if (!missingTools.isEmpty()) {
+            logger.error("Missing tools: '{}'", missingTools); // let it throw NPE below
+        }
         return toolNames.stream()
                 .map(toolMap::get)
-                .filter(Objects::nonNull)
                 .map(target -> ToolSpecifications.toolSpecificationFrom(target.method()))
                 .collect(Collectors.toList());
     }

@@ -1,6 +1,7 @@
 package io.github.jbellis.brokk.gui;
 
 import io.github.jbellis.brokk.analyzer.ProjectFile;
+import io.github.jbellis.brokk.gui.mop.ThemeColors;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -102,11 +103,6 @@ public class TableUtils {
         private final List<FileReferenceData> fileReferences = new ArrayList<>();
         private boolean selected = false;
 
-        private static final Color BADGE_BORDER = new Color(66, 139, 202);
-        private static final Color BADGE_FOREGROUND = new Color(66, 139, 202);
-        private static final Color BADGE_HOVER_BORDER = new Color(51, 122, 183);
-        private static final Color SELECTED_BADGE_BORDER = Color.BLACK;  // for better contrast
-        private static final Color SELECTED_BADGE_FOREGROUND = Color.BLACK;  // for better contrast
         private static final int BADGE_ARC_WIDTH = 10;
         private static final float BORDER_THICKNESS = 1.5f;
 
@@ -188,13 +184,20 @@ public class TableUtils {
 
                     // Determine if hovering
                     boolean isHovered = getMousePosition() != null;
+                    // Get theme state
+                    boolean isDarkTheme = UIManager.getBoolean("laf.dark");
+
+                    // Get colors from ThemeColors
+                    Color badgeBorder = ThemeColors.getColor(isDarkTheme, "badge_border");
+                    Color badgeHoverBorder = ThemeColors.getColor(isDarkTheme, "badge_hover_border");
+                    Color selectedBadgeBorder = ThemeColors.getColor(isDarkTheme, "selected_badge_border");
 
                     // Set border color based on selection state and hover state
                     Color borderColor;
                     if (selected) {
-                        borderColor = isHovered ? SELECTED_BADGE_BORDER.brighter() : SELECTED_BADGE_BORDER;
+                        borderColor = isHovered ? selectedBadgeBorder.brighter() : selectedBadgeBorder;
                     } else {
-                        borderColor = isHovered ? BADGE_HOVER_BORDER : BADGE_BORDER;
+                        borderColor = isHovered ? badgeHoverBorder : badgeBorder;
                     }
                     g2d.setColor(borderColor);
 
@@ -216,8 +219,13 @@ public class TableUtils {
             // Style the badge - use a smaller font for table cell
             float fontSize = label.getFont().getSize() * 0.85f;
             label.setFont(label.getFont().deriveFont(Font.PLAIN, fontSize));
+
+            boolean isDarkTheme = UIManager.getBoolean("laf.dark");
+            Color badgeForeground = ThemeColors.getColor(isDarkTheme, "badge_foreground");
+            Color selectedBadgeForeground = ThemeColors.getColor(isDarkTheme, "selected_badge_foreground");
+
             // Set foreground color based on selection state
-            label.setForeground(selected ? SELECTED_BADGE_FOREGROUND : BADGE_FOREGROUND);
+            label.setForeground(selected ? selectedBadgeForeground : badgeForeground);
             label.setBorder(new EmptyBorder(1, 6, 1, 6));
 
             return label;

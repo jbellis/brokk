@@ -255,14 +255,12 @@ public class Llm {
     {
         Throwable lastError = null;
         int attempt = 0;
-        // Get model name once using instance field
-        String modelName = Models.nameOf(model);
         var messages = Messages.forLlm(rawMessages);
 
         while (attempt++ < maxAttempts) {
             String description = Messages.getText(messages.getLast());
             logger.debug("Sending request to {} attempt {}: {}",
-                         modelName, attempt, LogDescription.getShortDescription(description, 12));
+                         contextManager.getModels().nameOf(model), attempt, LogDescription.getShortDescription(description, 12));
 
             if (echo) {
                 io.showOutputSpinner("Thinking...");
@@ -420,6 +418,11 @@ public class Llm {
                 {
                     // REQUIRED but none produced – force retry
                     throw new IllegalArgumentException("No 'tool_calls' found in JSON");
+                }
+
+                if (echo) {
+                    // output the thinking tool's contents
+                    contextManager.getIo().llmOutput(parseResult.chatResponse.aiMessage().text(), ChatMessageType.AI);
                 }
 
                 // we got tool calls, or they're optional -- we're done
@@ -745,12 +748,14 @@ public class Llm {
             throw new IllegalArgumentException("Response does not contain a 'tool_calls' array");
         }
 
-        // Transform json into list of tool execution requests
+        // Transform json into tool execution requests, special-casing "think" calls
         var toolExecutionRequests = new ArrayList<ToolExecutionRequest>();
+        var thinkReasoning = new ArrayList<String>();
+
         for (int i = 0; i < toolCallsNode.size(); i++) {
             JsonNode toolCall = toolCallsNode.get(i);
             if (!toolCall.has("name") || !toolCall.has("arguments")) {
-                throw new IllegalArgumentException("Tool call object is missing 'name' or 'arguments' field");
+                throw new IllegalArgumentException("Tool call object is missing 'name' or 'arguments' field at index " + i);
             }
 
             String toolName = toolCall.get("name").asText();
@@ -759,21 +764,38 @@ public class Llm {
             if (!arguments.isObject()) {
                 throw new IllegalArgumentException("tool_calls[" + i + "] provided non-object arguments " + arguments);
             }
-            String argsStr = arguments.toString();
+            String argsStr = arguments.toString(); // Preserve raw JSON for execution
+
+            if ("think".equals(toolName)) {
+                // Extract reasoning from the "think" tool
+                if (!arguments.has("reasoning") || !arguments.get("reasoning").isTextual()) {
+                    throw new IllegalArgumentException("Found 'think' tool call without a textual 'reasoning' argument at index " + i);
+                }
+                thinkReasoning.add(arguments.get("reasoning").asText());
+            }
             var toolExecutionRequest = ToolExecutionRequest.builder()
                     .id(String.valueOf(i))
                     .name(toolName)
                     .arguments(argsStr)
                     .build();
-
             toolExecutionRequests.add(toolExecutionRequest);
         }
-
         logger.trace("Generated tool execution requests: {}", toolExecutionRequests);
 
-        // Create a properly formatted AiMessage with tool execution requests
-        var aiMessage = new AiMessage(Messages.EMULATED_TOOL_CALLS, toolExecutionRequests);
+        String aiMessageText;
+        if (thinkReasoning.isEmpty()) {
+            aiMessageText = "";
+        } else {
+            aiMessageText = String.join("\n\n", thinkReasoning); // Merged reasoning becomes the message text
+        }
+
+        // Create a properly formatted AiMessage
+        var aiMessage = toolExecutionRequests.isEmpty()
+                ? AiMessage.from(aiMessageText)
+                : new AiMessage(aiMessageText, toolExecutionRequests);
+
         var cr = ChatResponse.builder().aiMessage(aiMessage).build();
+        // Pass the original raw response alongside the parsed one
         return new StreamingResult(cr, result.originalResponse, null);
     }
 
@@ -874,12 +896,12 @@ public class Llm {
 
         // Add the think tool only if the model is not a reasoning model
         if (!contextManager.getModels().isReasoning(this.model)) {
-            logger.debug("Adding 'think' tool for non-reasoning model {}", Models.nameOf(this.model));
+            logger.debug("Adding 'think' tool for non-reasoning model {}", contextManager.getModels().nameOf(this.model));
             var enhancedTools = new ArrayList<>(originalTools);
             enhancedTools.addAll(contextManager.getToolRegistry().getRegisteredTools(List.of("think")));
             return enhancedTools;
         }
-        logger.debug("Skipping 'think' tool for reasoning model {}", Models.nameOf(this.model));
+        logger.debug("Skipping 'think' tool for reasoning model {}", contextManager.getModels().nameOf(this.model));
         return originalTools;
     }
 
@@ -894,7 +916,7 @@ public class Llm {
         try {
             var timestamp = LocalDateTime.now(); // timestamp finished, not started
 
-            var formattedRequest = "# Request to %s:\n\n%s\n".formatted(Models.nameOf(model),
+            var formattedRequest = "# Request to %s:\n\n%s\n".formatted(contextManager.getModels().nameOf(model),
                                                                         TaskEntry.formatMessages(request.messages()));
             var formattedTools = request.toolSpecifications() == null ? "" : "# Tools:\n\n" + request.toolSpecifications().stream().map(ToolSpecification::name).collect(Collectors.joining("\n"));
             var formattedResponse = "# Response:\n\n%s".formatted(result.formatted());

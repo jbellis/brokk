@@ -3,6 +3,7 @@ package io.github.jbellis.brokk.tools;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import io.github.jbellis.brokk.AnalyzerUtil;
+import io.github.jbellis.brokk.Completions;
 import io.github.jbellis.brokk.IContextManager;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
@@ -13,13 +14,7 @@ import scala.Option;
 import scala.Tuple2;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -129,6 +124,60 @@ public class SearchTools {
                 .formatted(label, commonPrefix, compressedSymbols.stream().sorted().collect(Collectors.joining(", ")));
     }
 
+    @Tool(value = """
+    Retrieves summaries (fields and method signatures) for all classes defined within specified project files.
+    Supports glob patterns: '*' matches files in a single directory, '**' matches files recursively.
+    This is a fast and efficient way to read multiple related files at once.
+    (But if you don't know where what you want is located, you should use searchSymbols instead.)
+    """)
+    public String getFileSummaries(
+            @P("List of file paths relative to the project root. Supports glob patterns (* for single directory, ** for recursive). E.g., ['src/main/java/com/example/util/*.java', 'tests/foo/**.py']")
+            List<String> filePaths
+    ) {
+        assert getAnalyzer().isCpg() : "Cannot get summaries: Code analyzer is not available.";
+        if (filePaths == null || filePaths.isEmpty()) {
+            return "Cannot get summaries: file paths list is empty";
+        }
+
+        var analyzer = getAnalyzer();
+        var project = contextManager.getProject();
+        List<ProjectFile> projectFiles = filePaths.stream()
+                .flatMap(pattern -> Completions.expandPath(project, pattern).stream())
+                .filter(ProjectFile.class::isInstance)
+                .map(ProjectFile.class::cast)
+                .distinct()
+                .sorted() // Sort for deterministic output order
+                .toList();
+
+        if (projectFiles.isEmpty()) {
+            return "No project files found matching the provided patterns: " + String.join(", ", filePaths);
+        }
+
+        List<String> allSkeletons = new ArrayList<>();
+        List<String> filesProcessed = new ArrayList<>(); // Still useful for the "not found" message
+        for (var file : projectFiles) {
+            var skeletonsInFile = analyzer.getSkeletons(file);
+            if (!skeletonsInFile.isEmpty()) {
+                // Add all skeleton strings from this file to the list
+                skeletonsInFile.values().forEach(allSkeletons::add);
+                filesProcessed.add(file.toString());
+            } else {
+                logger.debug("No skeletons found in file: {}", file);
+            }
+        }
+
+        if (allSkeletons.isEmpty()) {
+            // filesProcessed will be empty if no skeletons were found in any matched file
+            var processedFilesString = filesProcessed.isEmpty()
+                    ? projectFiles.stream().map(ProjectFile::toString).collect(Collectors.joining(", "))
+                    : String.join(", ", filesProcessed);
+            return "No class summaries found in the matched files: " + processedFilesString;
+        }
+
+        // Return the combined skeleton strings directly, joined by newlines
+        return String.join("\n\n", allSkeletons);
+    }
+
     // --- Tool Methods requiring analyzer
 
     @Tool(value = """
@@ -141,7 +190,7 @@ public class SearchTools {
             @P("Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
             String reasoning
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot search definitions: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot search definitions: CPG analyzer is not available.";
         if (patterns.isEmpty()) {
             throw new IllegalArgumentException("Cannot search definitions: patterns list is empty");
         }
@@ -180,7 +229,7 @@ public class SearchTools {
             @P("Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
             String reasoning
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot search usages: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot search usages: CPG analyzer is not available.";
         if (symbols.isEmpty()) {
             throw new IllegalArgumentException("Cannot search usages: symbols list is empty");
         }
@@ -211,7 +260,7 @@ public class SearchTools {
             @P("List of fully qualified class names to use as seeds for finding related classes.")
             List<String> classNames
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot find related classes: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot find related classes: CPG analyzer is not available.";
         if (classNames.isEmpty()) {
             throw new IllegalArgumentException("Cannot search pagerank: classNames is empty");
         }
@@ -252,7 +301,7 @@ public class SearchTools {
             @P("Fully qualified class names to get the skeleton structures for")
             List<String> classNames
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot get skeletons: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot get skeletons: Code analyzer is not available.";
         if (classNames.isEmpty()) {
             throw new IllegalArgumentException("Cannot get skeletons: class names list is empty");
         }
@@ -280,7 +329,7 @@ public class SearchTools {
             @P("Explanation of what you're looking for in this request so the summarizer can accurately capture it.")
             String reasoning
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot get class sources: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot get class sources: CPG analyzer is not available.";
         if (classNames.isEmpty()) {
             throw new IllegalArgumentException("Cannot get class sources: class names list is empty");
         }
@@ -323,7 +372,7 @@ public class SearchTools {
             @P("Fully qualified method names (package name, class name, method name) to retrieve sources for")
             List<String> methodNames
     ) {
-         assert !getAnalyzer().isEmpty() : "Cannot get method sources: Code analyzer is not available.";
+         assert getAnalyzer().isCpg() : "Cannot get method sources: CPG analyzer is not available.";
         if (methodNames.isEmpty()) {
             throw new IllegalArgumentException("Cannot get method sources: method names list is empty");
         }
@@ -363,7 +412,7 @@ public class SearchTools {
             @P("Fully qualified method name (package name, class name, method name) to find callers for")
             String methodName
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot get call graph: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot get call graph: CPG analyzer is not available.";
         if (methodName.isBlank()) {
             throw new IllegalArgumentException("Cannot get call graph: method name is empty");
         }
@@ -384,7 +433,7 @@ public class SearchTools {
             @P("Fully qualified method name (package name, class name, method name) to find callees for")
             String methodName
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot get call graph: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot get call graph: CPG analyzer is not available.";
         if (methodName.isBlank()) {
             throw new IllegalArgumentException("Cannot get call graph: method name is empty");
         }

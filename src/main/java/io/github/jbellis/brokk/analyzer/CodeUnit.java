@@ -3,6 +3,7 @@ package io.github.jbellis.brokk.analyzer;
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -70,14 +71,14 @@ public record CodeUnit(ProjectFile source, CodeUnitType kind, String fqName)
                 .collect(Collectors.joining("."));
     }
 
-    public CodeUnit classUnit() {
+    public Optional<CodeUnit> classUnit() {
         return switch (kind) {
-            case CLASS -> this;
+            case CLASS -> Optional.of(this);
             default -> {
                 var lastDotIndex = fqName.lastIndexOf('.');
                 assert lastDotIndex > 0;
                 var fqcn = fqName.substring(0, lastDotIndex);
-                yield cls(source, fqcn);
+                yield Optional.of(cls(source, fqcn));
             }
         };
     }

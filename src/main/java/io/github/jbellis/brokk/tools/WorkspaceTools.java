@@ -3,6 +3,7 @@ package io.github.jbellis.brokk.tools;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import io.github.jbellis.brokk.AnalyzerUtil;
+import io.github.jbellis.brokk.Completions;
 import io.github.jbellis.brokk.ContextFragment;
 import io.github.jbellis.brokk.ContextManager;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
@@ -19,6 +20,7 @@ import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -48,7 +50,7 @@ public class WorkspaceTools {
             List<String> relativePaths
     ) {
         if (relativePaths == null || relativePaths.isEmpty()) {
-            throw new IllegalArgumentException("File paths list cannot be empty.");
+            return "File paths list cannot be empty.";
         }
 
         List<ProjectFile> projectFiles = new ArrayList<>();
@@ -81,7 +83,7 @@ public class WorkspaceTools {
             List<String> classNames
     ) {
         if (classNames == null || classNames.isEmpty()) {
-            throw new IllegalArgumentException("Class names list cannot be empty.");
+            return "Class names list cannot be empty.";
         }
 
         List<ProjectFile> filesToAdd = new ArrayList<>();
@@ -103,7 +105,7 @@ public class WorkspaceTools {
         }
 
         if (filesToAdd.isEmpty()) {
-            throw new IllegalArgumentException("Could not find files for any of the provided class names: " + classNames);
+            return "Could not find files for any of the provided class names: " + classNames;
         }
 
         // Remove duplicates before adding
@@ -126,7 +128,7 @@ public class WorkspaceTools {
             String urlString
     ) {
         if (urlString == null || urlString.isBlank()) {
-            throw new IllegalArgumentException("URL cannot be empty.");
+            return "URL cannot be empty.";
         }
 
         String content;
@@ -140,7 +142,7 @@ public class WorkspaceTools {
             content = HtmlToMarkdown.maybeConvertToMarkdown(content);
             logger.debug("Content length after potential markdown conversion: {}", content.length());
         } catch (URISyntaxException e) {
-            throw new IllegalArgumentException("Invalid URL format: " + urlString, e);
+            return "Invalid URL format: " + urlString;
         } catch (IOException e) {
             logger.error("Failed to fetch or process URL content: {}", urlString, e);
             throw new RuntimeException("Failed to fetch URL content for " + urlString + ": " + e.getMessage(), e);
@@ -150,7 +152,7 @@ public class WorkspaceTools {
         }
 
         if (content.isBlank()) {
-            throw new IllegalStateException("Fetched content from URL is empty: " + urlString);
+            return "Fetched content from URL is empty: " + urlString;
         }
 
         // Use the ContextManager's method to add the string fragment
@@ -170,10 +172,10 @@ public class WorkspaceTools {
             String description
     ) {
         if (content == null || content.isBlank()) {
-            throw new IllegalArgumentException("Content cannot be empty.");
+            return "Content cannot be empty.";
         }
         if (description == null || description.isBlank()) {
-            throw new IllegalArgumentException("Description cannot be empty.");
+            return "Description cannot be empty.";
         }
 
         // Use the ContextManager's method to add the string fragment
@@ -189,7 +191,7 @@ public class WorkspaceTools {
             List<Integer> fragmentIds
     ) {
         if (fragmentIds == null || fragmentIds.isEmpty()) {
-            throw new IllegalArgumentException("Fragment IDs list cannot be empty.");
+            return "Fragment IDs list cannot be empty.";
         }
 
         var currentContext = contextManager.topContext();
@@ -198,16 +200,11 @@ public class WorkspaceTools {
         var virtualToRemove = new ArrayList<ContextFragment.VirtualFragment>();
         var idsToDropSet = new HashSet<>(fragmentIds);
         List<Integer> foundIds = new ArrayList<>();
-        boolean autoContextDropped = false;
 
         for (var frag : allFragments) {
             if (idsToDropSet.contains(frag.id())) {
                 foundIds.add(frag.id());
-                if (frag instanceof ContextFragment.AutoContext) {
-                    // Special handling for AutoContext: disable it via ContextManager
-                    contextManager.setAutoContextFiles(0);
-                    autoContextDropped = true;
-                } else if (frag instanceof ContextFragment.PathFragment pf) {
+                if (frag instanceof ContextFragment.PathFragment pf) {
                     pathFragsToRemove.add(pf);
                 } else if (frag instanceof ContextFragment.VirtualFragment vf) {
                     virtualToRemove.add(vf);
@@ -223,7 +220,7 @@ public class WorkspaceTools {
 
         if (!notFoundIds.isEmpty()) {
              // Throw error if *any* requested ID wasn't found? Or just log? Let's throw.
-            throw new IllegalArgumentException("Fragment IDs not found in current workspace: " + notFoundIds);
+            return "Fragment IDs not found in current workspace: " + notFoundIds;
         }
 
         // Perform the drop operation if there's anything other than AutoContext to drop
@@ -231,10 +228,10 @@ public class WorkspaceTools {
             contextManager.drop(pathFragsToRemove, virtualToRemove);
         }
 
-        int droppedCount = pathFragsToRemove.size() + virtualToRemove.size() + (autoContextDropped ? 1 : 0);
+        int droppedCount = pathFragsToRemove.size() + virtualToRemove.size();
         if (droppedCount == 0) {
             // This can happen if only invalid IDs were provided, or only AutoContext was requested but failed to drop
-             throw new IllegalStateException("No valid fragments found to drop for the given IDs: " + fragmentIds);
+             return "No valid fragments found to drop for the given IDs: " + fragmentIds;
         }
 
         return "Dropped %d fragment(s) with IDs: [%s]".formatted(droppedCount, foundIds.stream().map(String::valueOf).collect(Collectors.joining(", ")));
@@ -247,9 +244,9 @@ public class WorkspaceTools {
             @P("Fully qualified symbol name (e.g., 'com.example.MyClass', 'com.example.MyClass.myMethod', 'com.example.MyClass.myField') to find usages for.")
             String symbol
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot add usages: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot add usages: Code analyzer is not available.";
         if (symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("Cannot add usages: symbol cannot be empty");
+            return "Cannot add usages: symbol cannot be empty";
         }
 
         List<CodeUnit> uses = getAnalyzer().getUses(symbol);
@@ -258,7 +255,7 @@ public class WorkspaceTools {
             return "No relevant usages found for symbol: " + symbol;
         }
 
-        var fragment = new ContextFragment.UsageFragment("Uses", symbol, result.sources(), result.code());
+        var fragment = new ContextFragment.UsageFragment(symbol, result.sources(), result.code());
         contextManager.addVirtualFragment(fragment);
 
         return "Added usages for symbol '%s'.".formatted(symbol);
@@ -272,14 +269,14 @@ public class WorkspaceTools {
             @P("List of fully qualified class names (e.g., ['com.example.ClassA', 'org.another.ClassB']) to get summaries for.")
             List<String> classNames
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot add summary: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot add summary: Code analyzer is not available.";
         if (classNames == null || classNames.isEmpty()) {
-            throw new IllegalArgumentException("Cannot add summary: class names list is empty");
+            return "Cannot add summary: class names list is empty";
         }
 
         var skeletonsData = AnalyzerUtil.getClassSkeletonsData(getAnalyzer(), classNames);
         if (skeletonsData.isEmpty()) {
-            throw new IllegalStateException("No summaries found for classes: " + String.join(", ", classNames));
+            return "No summaries found for classes: " + String.join(", ", classNames);
         }
 
         // We need to filter CodeUnits potentially added by the Util method if they are inner classes whose parent is also present
@@ -303,7 +300,7 @@ public class WorkspaceTools {
 
         if (coalescedSkeletons.isEmpty()) {
              // This could happen if only inner classes were requested and their parents were also found
-             throw new IllegalStateException("No primary summaries found after coalescing for classes: " + String.join(", ", classNames));
+             return "No primary summaries found after coalescing for classes: " + String.join(", ", classNames);
         }
 
         var fragment = new ContextFragment.SkeletonFragment(coalescedSkeletons);
@@ -313,6 +310,56 @@ public class WorkspaceTools {
         return "Added summaries for %d class(es): [%s]".formatted(coalescedSkeletons.size(), addedClasses);
     }
 
+    @Tool(value = """
+    Retrieves summaries (fields and method signatures) for all classes defined within specified project files and adds them to the Workspace.
+    Supports glob patterns: '*' matches files in a single directory, '**' matches files recursively.
+    Faster and more efficient than reading entire files when you just need the API definitions.
+    (But if you don't know where what you want is located, you should use Search Agent instead.)
+    """)
+    public String addFileSummariesToWorkspace(
+            @P("List of file paths relative to the project root. Supports glob patterns (* for single directory, ** for recursive). E.g., ['src/main/java/com/example/util/*.java', 'tests/foo/**.py']")
+            List<String> filePaths
+    ) {
+        assert getAnalyzer().isCpg() : "Cannot add summaries: Code analyzer is not available.";
+        if (filePaths == null || filePaths.isEmpty()) {
+            return "Cannot add summaries: file paths list is empty";
+        }
+
+        var analyzer = getAnalyzer();
+        var project = contextManager.getProject();
+        List<ProjectFile> projectFiles = filePaths.stream()
+                .flatMap(pattern -> Completions.expandPath(project, pattern).stream())
+                .filter(ProjectFile.class::isInstance)
+                .map(ProjectFile.class::cast)
+                .distinct()
+                .toList();
+
+        if (projectFiles.isEmpty()) {
+            return "No project files found matching the provided patterns: " + String.join(", ", filePaths);
+        }
+
+        Map<CodeUnit, String> allSkeletons = new HashMap<>();
+        List<String> filesProcessed = new ArrayList<>();
+        for (var file : projectFiles) {
+            var skeletonsInFile = analyzer.getSkeletons(file);
+            if (!skeletonsInFile.isEmpty()) {
+                allSkeletons.putAll(skeletonsInFile);
+                filesProcessed.add(file.toString());
+            } else {
+                logger.debug("No skeletons found in file: {}", file);
+            }
+        }
+
+        if (allSkeletons.isEmpty()) {
+            return "No class summaries found in the matched files: " + String.join(", ", filesProcessed.stream().sorted().toList());
+        }
+
+        var fragment = new ContextFragment.SkeletonFragment(allSkeletons);
+        contextManager.addVirtualFragment(fragment);
+
+        String addedClasses = allSkeletons.keySet().stream().map(CodeUnit::identifier).sorted().collect(Collectors.joining(", "));
+        return "Added summaries for " + addedClasses;
+    }
 
     @Tool(value = """
     Retrieves the full source code of specific methods and adds to the Workspace each as a separate read-only text fragment.
@@ -322,9 +369,9 @@ public class WorkspaceTools {
             @P("List of fully qualified method names (e.g., ['com.example.ClassA.method1', 'org.another.ClassB.processData']) to retrieve sources for")
             List<String> methodNames
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot add method sources: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot add method sources: Code analyzer is not available.";
         if (methodNames == null || methodNames.isEmpty()) {
-            throw new IllegalArgumentException("Cannot add method sources: method names list is empty");
+            return "Cannot add method sources: method names list is empty";
         }
 
         var sourcesData = AnalyzerUtil.getMethodSourcesData(getAnalyzer(), methodNames);
@@ -352,9 +399,9 @@ public class WorkspaceTools {
             @P("List of fully qualified class names (e.g., ['com.example.MyClass', 'org.another.Util'])")
             List<String> classNames
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot get files: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot get files: Code analyzer is not available.";
         if (classNames == null || classNames.isEmpty()) {
-            throw new IllegalArgumentException("Class names list cannot be empty.");
+            return "Class names list cannot be empty.";
         }
 
         List<String> foundFiles = new ArrayList<>();
@@ -397,15 +444,15 @@ public class WorkspaceTools {
 //            @P("List of fully qualified class names (e.g., ['com.example.ClassA', 'org.another.ClassB']) to retrieve the full source code for.")
 //            List<String> classNames
 //    ) {
-//        assert !getAnalyzer().isEmpty() : "Cannot add class sources: Code analyzer is not available.";
+//        assert getAnalyzer().isCpg() : "Cannot add class sources: Code analyzer is not available.";
 //        if (classNames == null || classNames.isEmpty()) {
-//            throw new IllegalArgumentException("Cannot add class sources: class names list is empty");
+//            return "Cannot add class sources: class names list is empty";
 //        }
 //        // Removed reasoning check
 //
 //        var sourcesData = AnalyzerUtil.getClassSourcesData(getAnalyzer(), classNames);
 //        if (sourcesData.isEmpty()) {
-//            throw new IllegalStateException("No sources found for classes: " + String.join(", ", classNames));
+//            return "No sources found for classes: " + String.join(", ", classNames);
 //        }
 //
 //        // Add each class source as a separate StringFragment
@@ -433,23 +480,23 @@ public class WorkspaceTools {
             @P("Maximum depth of the call graph to retrieve (e.g., 3 or 5). Higher depths can be large.")
             int depth // Added depth parameter
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot add call graph: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot add call graph: CPG analyzer is not available.";
         if (methodName == null || methodName.isBlank()) {
-            throw new IllegalArgumentException("Cannot add call graph: method name is empty");
+            return "Cannot add call graph: method name is empty";
         }
         if (depth <= 0) {
-             throw new IllegalArgumentException("Cannot add call graph: depth must be positive");
+             return "Cannot add call graph: depth must be positive";
         }
 
         var graphData = getAnalyzer().getCallgraphTo(methodName, depth);
         if (graphData.isEmpty()) {
-            throw new IllegalStateException("No call graph available (callers) for method: " + methodName);
+            return "No call graph available (callers) for method: " + methodName;
         }
 
         String formattedGraph = AnalyzerUtil.formatCallGraph(graphData, methodName, false); // false = callers (arrows point TO method)
         if (formattedGraph.isEmpty()) {
             // Should not happen if graphData is not empty, but check defensively
-             throw new IllegalStateException("Failed to format non-empty call graph (callers) for method: " + methodName);
+             return "Failed to format non-empty call graph (callers) for method: " + methodName;
         }
 
         // Extract the class from the method name for sources
@@ -460,7 +507,7 @@ public class WorkspaceTools {
 
         // Use UsageFragment to represent the call graph
         String type = "Callers (depth " + depth + ")";
-        var fragment = new ContextFragment.UsageFragment(type, methodName, sources, formattedGraph);
+        var fragment = new ContextFragment.CallGraphFragment(type, methodName, sources, formattedGraph);
         contextManager.addVirtualFragment(fragment);
 
         int totalCallSites = graphData.values().stream().mapToInt(List::size).sum();
@@ -477,23 +524,23 @@ public class WorkspaceTools {
             @P("Maximum depth of the call graph to retrieve (e.g., 3 or 5). Higher depths can be large.")
             int depth // Added depth parameter
     ) {
-        assert !getAnalyzer().isEmpty() : "Cannot add call graph: Code analyzer is not available.";
+        assert getAnalyzer().isCpg() : "Cannot add call graph: CPG analyzer is not available.";
         if (methodName == null || methodName.isBlank()) {
-            throw new IllegalArgumentException("Cannot add call graph: method name is empty");
+            return "Cannot add call graph: method name is empty";
         }
          if (depth <= 0) {
-             throw new IllegalArgumentException("Cannot add call graph: depth must be positive");
+             return "Cannot add call graph: depth must be positive";
         }
 
          var graphData = getAnalyzer().getCallgraphFrom(methodName, depth);
         if (graphData.isEmpty()) {
-            throw new IllegalStateException("No call graph available (callees) for method: " + methodName);
+            return "No call graph available (callees) for method: " + methodName;
         }
 
         String formattedGraph = AnalyzerUtil.formatCallGraph(graphData, methodName, true); // true = callees (arrows point FROM method)
         if (formattedGraph.isEmpty()) {
              // Should not happen if graphData is not empty, but check defensively
-             throw new IllegalStateException("Failed to format non-empty call graph (callees) for method: " + methodName);
+             return "Failed to format non-empty call graph (callees) for method: " + methodName;
         }
 
         // Extract the class from the method name for sources
@@ -504,7 +551,7 @@ public class WorkspaceTools {
 
         // Use UsageFragment to represent the call graph
         String type = "Callees (depth " + depth + ")";
-        var fragment = new ContextFragment.UsageFragment(type, methodName, sources, formattedGraph);
+        var fragment = new ContextFragment.CallGraphFragment(type, methodName, sources, formattedGraph);
         contextManager.addVirtualFragment(fragment);
 
         int totalCallSites = graphData.values().stream().mapToInt(List::size).sum();

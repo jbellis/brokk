@@ -424,7 +424,7 @@ public class HistoryOutputPanel extends JPanel {
         openWindowButton.setMnemonic(KeyEvent.VK_W);
         openWindowButton.setToolTipText("Open the output in a new window");
         openWindowButton.addActionListener(e -> {
-            var output = contextManager.topContext().getParsedOutput();
+            var output = contextManager.selectedContext().getParsedOutput();
             if (output != null) {
                 new OutputWindow(this, output, chrome.themeManager != null && chrome.themeManager.isDarkTheme());
             }

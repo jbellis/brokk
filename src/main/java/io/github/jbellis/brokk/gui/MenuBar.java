@@ -3,10 +3,8 @@ package io.github.jbellis.brokk.gui;
 import io.github.jbellis.brokk.Brokk;
 import io.github.jbellis.brokk.gui.dialogs.FileSelectionDialog;
 import io.github.jbellis.brokk.gui.dialogs.PreviewImagePanel;
-import io.github.jbellis.brokk.gui.dialogs.PreviewTextPanel;
 import io.github.jbellis.brokk.gui.dialogs.SettingsDialog;
 import io.github.jbellis.brokk.util.Decompiler;
-import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 
 import javax.swing.*;
 import java.awt.*;
@@ -30,18 +28,6 @@ public class MenuBar {
 
         // File menu
         var fileMenu = new JMenu("File");
-
-        var refreshItem = new JMenuItem("Refresh Code Intelligence");
-        refreshItem.addActionListener(e -> {
-            // Fixme ensure the menu item is disabled if no project is open
-            assert chrome.getContextManager() != null;
-            chrome.contextManager.requestRebuild();
-            chrome.systemOutput("Code intelligence will refresh in the background");
-        });
-        refreshItem.setEnabled(hasProject);
-        fileMenu.add(refreshItem);
-
-        fileMenu.addSeparator();
 
         var openProjectItem = new JMenuItem("Open Project...");
         openProjectItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
@@ -161,6 +147,18 @@ public class MenuBar {
         // Context menu
         var contextMenu = new JMenu("Context");
 
+        var refreshItem = new JMenuItem("Refresh Code Intelligence");
+        refreshItem.addActionListener(e -> {
+            // Fixme ensure the menu item is disabled if no project is open
+            assert chrome.getContextManager() != null;
+            chrome.contextManager.requestRebuild();
+            chrome.systemOutput("Code intelligence will refresh in the background");
+        });
+        refreshItem.setEnabled(hasProject);
+        contextMenu.add(refreshItem);
+
+        contextMenu.addSeparator();
+
         var editFilesItem = new JMenuItem("Edit Files");
         editFilesItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_E, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
         editFilesItem.addActionListener(e -> {
@@ -178,19 +176,10 @@ public class MenuBar {
         });
         readFilesItem.setEnabled(hasProject);
         contextMenu.add(readFilesItem);
-
-        var summarizeFilesItem = new JMenuItem("Summarize Files");
-        summarizeFilesItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_M, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
-        summarizeFilesItem.addActionListener(e -> {
-            chrome.getContextPanel().performContextActionAsync(
-                    ContextPanel.ContextAction.SUMMARIZE, List.of());
-        });
-        summarizeFilesItem.setEnabled(hasProject);
-        contextMenu.add(summarizeFilesItem);
-
-        var viewFileItem = new JMenuItem("View File");
-        viewFileItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_N, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
-        viewFileItem.addActionListener(e -> {
+    
+    var viewFileItem = new JMenuItem("View File");
+    viewFileItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_N, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
+    viewFileItem.addActionListener(e -> {
             assert chrome.getContextManager() != null;
             assert chrome.getProject() != null;
             var cm = chrome.getContextManager();
@@ -217,23 +206,29 @@ public class MenuBar {
 
                 if (dialog.isConfirmed() && dialog.getSelectedFile() != null) {
                     var selectedBrokkFile = dialog.getSelectedFile();
-                        if (selectedBrokkFile.isText()) {
-                            if (selectedBrokkFile instanceof io.github.jbellis.brokk.analyzer.ProjectFile selectedFile) {
-                                PreviewTextPanel.showInFrame(chrome.getFrame(), cm, selectedFile, SyntaxConstants.SYNTAX_STYLE_JAVA, chrome.themeManager);
-                            } else {
-                                // Handle case where selected file is not a ProjectFile (e.g., external file if allowExternalFiles was true)
-                                chrome.toolErrorRaw("Cannot view non-project files this way.");
-                            }
-                        } else {
-                             PreviewImagePanel.showInFrame(chrome.getFrame(), cm, selectedBrokkFile, chrome.themeManager);
-                        }
+                    if (selectedBrokkFile instanceof io.github.jbellis.brokk.analyzer.ProjectFile selectedFile) {
+                        chrome.previewFile(selectedFile);
+                    } else if (!selectedBrokkFile.isText()) {
+                        PreviewImagePanel.showInFrame(chrome.getFrame(), cm, selectedBrokkFile, chrome.themeManager);
+                    } else {
+                        chrome.toolErrorRaw("Cannot view this type of file: " + selectedBrokkFile.getClass().getSimpleName());
                     }
-                });
+                }
+            });
         });
         viewFileItem.setEnabled(hasProject);
         contextMenu.add(viewFileItem);
 
-        contextMenu.addSeparator(); // Add separator before Symbol Usage
+        contextMenu.addSeparator(); // Add separator before Summarize / Symbol Usage
+
+        var summarizeItem = new JMenuItem("Summarize");
+        summarizeItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_M, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
+        summarizeItem.addActionListener(e -> {
+            chrome.getContextPanel().performContextActionAsync(
+                    ContextPanel.ContextAction.SUMMARIZE, List.of());
+        });
+        summarizeItem.setEnabled(hasProject);
+        contextMenu.add(summarizeItem);
 
         var symbolUsageItem = new JMenuItem("Symbol Usage");
             symbolUsageItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_Y, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
@@ -256,12 +251,14 @@ public class MenuBar {
             calleesItem.addActionListener(e -> {
                 chrome.getContextPanel().findMethodCalleesAsync(); // Call via ContextPanel
             });
-            calleesItem.setEnabled(hasProject);
-            contextMenu.add(calleesItem);
+    calleesItem.setEnabled(hasProject);
+    contextMenu.add(calleesItem);
 
-        var dropAllItem = new JMenuItem("Drop All");
-        dropAllItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_P, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
-        dropAllItem.addActionListener(e -> {
+    contextMenu.addSeparator(); // Add separator before Drop All
+
+    var dropAllItem = new JMenuItem("Drop All");
+    dropAllItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_P, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
+    dropAllItem.addActionListener(e -> {
             chrome.getContextPanel().performContextActionAsync(
                     ContextPanel.ContextAction.DROP, List.of());
         });

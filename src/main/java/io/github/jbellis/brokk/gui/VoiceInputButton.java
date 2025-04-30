@@ -46,17 +46,17 @@ public class VoiceInputButton extends JButton {
     /**
      * Creates a new voice input button.
      *
-     * @param targetTextArea the text area where transcribed text will be placed
-     * @param contextManager the context manager for speech-to-text processing
-     * @param onRecordingStart callback when recording starts
-     * @param onError callback for error handling
+     * @param targetTextArea      the text area where transcribed text will be placed
+     * @param contextManager      the context manager for speech-to-text processing
+     * @param onRecordingStart    callback when recording starts
      * @param customSymbolsFuture Optional Future providing a set of symbols to prioritize for transcription hints. Can be null.
+     * @param onError             callback for error handling
      */
     public VoiceInputButton(JTextArea targetTextArea,
                             ContextManager contextManager,
-                                Runnable onRecordingStart,
-                                Consumer<String> onError,
-                                Future<Set<String>> customSymbolsFuture)
+                            Runnable onRecordingStart,
+                            Future<Set<String>> customSymbolsFuture,
+                            Consumer<String> onError)
     {
         assert targetTextArea != null;
         assert onRecordingStart != null;
@@ -128,7 +128,7 @@ public class VoiceInputButton extends JButton {
                              Runnable onRecordingStart,
                              Consumer<String> onError)
       {
-          this(targetTextArea, contextManager, onRecordingStart, onError, null);
+          this(targetTextArea, contextManager, onRecordingStart, null, onError);
       }
 
     /**

@@ -46,13 +46,4 @@ public interface IConsoleIO {
     }
 
     void blockLlmOutput(boolean blocked);
-
-    /**
-     * Prompt the user to select which of the proposed context fragments to add.
-     * @param proposals the fragments returned by ContextAgent
-     * @return the list of fragments the user chose (empty if none)
-     */
-    default List<ContextFragment> selectContextProposals(List<ContextFragment> proposals) {
-        throw new UnsupportedOperationException();
-    }
 }

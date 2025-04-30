@@ -267,10 +267,9 @@ public class Project implements IProject, AutoCloseable {
 
     /**
      * Gets the configured model name for architect/agent tasks.
-     * Falls back to the default architect model if not set.
      */
     public String getArchitectModelName() {
-        return workspaceProps.getProperty(ARCHITECT_MODEL_KEY, Models.O3);
+        return workspaceProps.getProperty(ARCHITECT_MODEL_KEY);
     }
 
     /**
@@ -283,11 +282,10 @@ public class Project implements IProject, AutoCloseable {
 
     /**
      * Gets the configured model name for code generation tasks.
-     * Falls back to the default code model if not set.
      */
     public String getCodeModelName() {
         // Default to gemini-2.5-pro-preview
-        return workspaceProps.getProperty(CODE_MODEL_KEY, Models.GEMINI_2_5_PRO_PREVIEW);
+        return workspaceProps.getProperty(CODE_MODEL_KEY);
     }
 
     /**
@@ -300,10 +298,9 @@ public class Project implements IProject, AutoCloseable {
 
     /**
      * Gets the configured model name for ask tasks.
-     * Falls back to the default ask model if not set.
      */
     public String getAskModelName() {
-        return workspaceProps.getProperty(ASK_MODEL_KEY, Models.GEMINI_2_5_PRO_PREVIEW);
+        return workspaceProps.getProperty(ASK_MODEL_KEY);
     }
 
     /**
@@ -317,10 +314,9 @@ public class Project implements IProject, AutoCloseable {
 
     /**
      * Gets the configured model name for edit tasks.
-     * Falls back to the default edit model if not set.
      */
     public String getEditModelName() {
-        return workspaceProps.getProperty(EDIT_MODEL_KEY, Models.GEMINI_2_5_PRO_PREVIEW);
+        return workspaceProps.getProperty(EDIT_MODEL_KEY);
     }
 
     /**
@@ -426,12 +422,12 @@ public class Project implements IProject, AutoCloseable {
     public Language getAnalyzerLanguage() {
         String lang = projectProps.getProperty("code_intelligence_language");
         if (lang == null || lang.isBlank()) {
-            return Language.Java;
+            return Language.JAVA;
         }
         try {
             return Language.valueOf(lang.toUpperCase());
         } catch (IllegalArgumentException e) {
-            return Language.None;
+            return Language.NONE;
         }
     }
 
@@ -536,6 +532,7 @@ public class Project implements IProject, AutoCloseable {
 
     public enum CpgRefresh {
         AUTO,
+        ON_RESTART,
         MANUAL,
         UNSET
     }
@@ -1005,6 +1002,59 @@ public class Project implements IProject, AutoCloseable {
 
     public void rebuildAnalyzer() {
         analyzerWrapper.requestRebuild();
+    }
+
+    /**
+     * Checks configured models against available ones and temporarily overrides missing ones in memory.
+     * Does NOT save the changes to disk.
+     *
+     * @param availableModels     Set of display names of models currently available.
+     * @param genericDefaultModel The model name to use as a final fallback if a configured or preferred default is missing.
+     * @return A list of warning messages describing the overrides performed.
+     */
+    public List<String> overrideMissingModels(Set<String> availableModels, String genericDefaultModel) {
+        var warnings = new ArrayList<String>();
+
+        // Define preferred defaults for each model type
+        var preferredDefaults = Map.of(ARCHITECT_MODEL_KEY, Models.O3,
+                                       CODE_MODEL_KEY, Models.GEMINI_2_5_PRO_PREVIEW,
+                                       ASK_MODEL_KEY, Models.GEMINI_2_5_PRO_PREVIEW,
+                                       EDIT_MODEL_KEY, Models.GEMINI_2_5_PRO_PREVIEW,
+                                       SEARCH_MODEL_KEY, Models.GEMINI_2_5_PRO_PREVIEW);
+
+        for (var e : preferredDefaults.entrySet()) {
+            var key = e.getKey();
+            var preferredDefault = e.getValue();
+            var configuredModel = workspaceProps.getProperty(key);
+            String modelToUse;
+            String reason;
+
+            if (configuredModel != null && !configuredModel.isBlank() && availableModels.contains(configuredModel)) {
+                // Use configured and available model
+                modelToUse = configuredModel;
+                reason = "Using configured model";
+            } else {
+                // Configured model is unavailable, check preferred default
+                if (availableModels.contains(preferredDefault)) {
+                    modelToUse = preferredDefault;
+                    warnings.add(String.format("Configured %s model '%s' is not available. Temporarily using preferred default '%s'.",
+                                               key, configuredModel, modelToUse));
+                    reason = String.format("Overriding unavailable configured model '%s' with available preferred default '%s'", configuredModel, modelToUse);
+                } else {
+                    // Preferred default is also unavailable, use generic default
+                    modelToUse = genericDefaultModel;
+                    warnings.add(String.format("Configured %s model '%s' and preferred default '%s' are not available. Temporarily using generic default '%s'.",
+                                               key, configuredModel, preferredDefault, modelToUse));
+                    reason = String.format("Overriding unavailable configured model '%s' and unavailable preferred default '%s' with generic default '%s'", configuredModel, preferredDefault, modelToUse);
+                }
+            }
+
+            // Set the determined model in memory
+            assert modelToUse != null;
+            workspaceProps.setProperty(key, modelToUse);
+            logger.debug("{} model set to '{}' in memory. Reason: {}.", key, modelToUse, reason);
+        }
+        return warnings;
     }
 
     /**

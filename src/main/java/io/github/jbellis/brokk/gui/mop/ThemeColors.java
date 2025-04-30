@@ -57,8 +57,27 @@ public class ThemeColors {
         LIGHT_COLORS.put("border_color_hex", Color.decode("#dddddd"));
         LIGHT_COLORS.put("codeHighlight", new Color(125, 140, 111));
         LIGHT_COLORS.put("rsyntax_background", Color.WHITE);
+
+        // File reference badge colors (same for both themes for now)
+        Color badgeBorder = new Color(66, 139, 202);
+        Color badgeForeground = new Color(66, 139, 202);
+        Color badgeHoverBorder = new Color(51, 122, 183);
+        Color selectedBadgeBorder = Color.BLACK;
+        Color selectedBadgeForeground = Color.BLACK;
+
+        DARK_COLORS.put("badge_border", badgeBorder);
+        DARK_COLORS.put("badge_foreground", badgeForeground);
+        DARK_COLORS.put("badge_hover_border", badgeHoverBorder);
+        DARK_COLORS.put("selected_badge_border", selectedBadgeBorder);
+        DARK_COLORS.put("selected_badge_foreground", selectedBadgeForeground);
+
+        LIGHT_COLORS.put("badge_border", badgeBorder);
+        LIGHT_COLORS.put("badge_foreground", badgeForeground);
+        LIGHT_COLORS.put("badge_hover_border", badgeHoverBorder);
+        LIGHT_COLORS.put("selected_badge_border", selectedBadgeBorder);
+        LIGHT_COLORS.put("selected_badge_foreground", selectedBadgeForeground);
     }
-    
+
     /**
      * Gets a color for the specified theme and key.
      *

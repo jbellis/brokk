@@ -162,7 +162,8 @@ public class GitLogTab extends JPanel {
         commitsPanel.setBorder(BorderFactory.createTitledBorder("Commits"));
         commitsTableModel = new DefaultTableModel(
                 new Object[]{"Message", "Author", "Date", "ID", "Unpushed"}, 0
-        ) {
+        )
+        {
             @Override
             public Class<?> getColumnClass(int columnIndex) {
                 if (columnIndex == 4) return Boolean.class;  // unpushed
@@ -196,24 +197,24 @@ public class GitLogTab extends JPanel {
         commitsTable.getColumnModel().getColumn(4).setWidth(0);
 
         // Highlight unpushed rows
-            commitsTable.setDefaultRenderer(Object.class, new javax.swing.table.DefaultTableCellRenderer() {
-                @Override
-                public Component getTableCellRendererComponent(
-                        JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column)
-                {
-                    Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-                    if (!isSelected) {
-                        Boolean unpushed = (Boolean) table.getModel().getValueAt(row, 4);
-                        if (Boolean.TRUE.equals(unpushed)) {
-                            boolean isDark = chrome.themeManager != null && chrome.themeManager.isDarkTheme();
-                            c.setBackground(Colors.getChanged(isDark));
-                        } else {
-                            c.setBackground(table.getBackground());
-                        }
+        commitsTable.setDefaultRenderer(Object.class, new javax.swing.table.DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(
+                    JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column)
+            {
+                Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+                if (!isSelected) {
+                    Boolean unpushed = (Boolean) table.getModel().getValueAt(row, 4);
+                    if (Boolean.TRUE.equals(unpushed)) {
+                        boolean isDark = chrome.themeManager != null && chrome.themeManager.isDarkTheme();
+                        c.setBackground(Colors.getChanged(isDark));
+                    } else {
+                        c.setBackground(table.getBackground());
                     }
-                    return c;
                 }
-            });
+                return c;
+            }
+        });
 
         // Commit selection => show changed files
         commitsTable.getSelectionModel().addListSelectionListener(e -> {
@@ -236,11 +237,11 @@ public class GitLogTab extends JPanel {
                 }
             });
         }
-        JMenuItem addToContextItem    = new JMenuItem("Capture Diff");
-        JMenuItem softResetItem       = new JMenuItem("Soft Reset to Here");
-        JMenuItem revertCommitItem    = new JMenuItem("Revert Commit");
-        JMenuItem popStashCommitItem  = new JMenuItem("Pop Stash");
-        JMenuItem applyStashCommitItem= new JMenuItem("Apply Stash");
+        JMenuItem addToContextItem = new JMenuItem("Capture Diff");
+        JMenuItem softResetItem = new JMenuItem("Soft Reset to Here");
+        JMenuItem revertCommitItem = new JMenuItem("Revert Commit");
+        JMenuItem popStashCommitItem = new JMenuItem("Pop Stash");
+        JMenuItem applyStashCommitItem = new JMenuItem("Apply Stash");
         JMenuItem dropStashCommitItem = new JMenuItem("Drop Stash");
 
         commitsContextMenu.add(addToContextItem);
@@ -255,10 +256,12 @@ public class GitLogTab extends JPanel {
             public void mousePressed(MouseEvent e) {
                 handleCommitsPopup(e);
             }
+
             @Override
             public void mouseReleased(MouseEvent e) {
                 handleCommitsPopup(e);
             }
+
             private void handleCommitsPopup(MouseEvent e) {
                 if (e.isPopupTrigger()) {
                     int row = commitsTable.rowAtPoint(e.getPoint());
@@ -276,6 +279,7 @@ public class GitLogTab extends JPanel {
                     );
                 }
             }
+
             private void updateCommitContextMenu() {
                 int row = commitsTable.getSelectedRow();
                 if (row < 0) {
@@ -316,11 +320,11 @@ public class GitLogTab extends JPanel {
         softResetItem.addActionListener(e -> {
             int row = commitsTable.getSelectedRow();
             if (row != -1) {
-                String commitId     = (String) commitsTableModel.getValueAt(row, 3);
-                String commitMessage= (String) commitsTableModel.getValueAt(row, 0);
-                String firstLine    = commitMessage.contains("\n")
-                        ? commitMessage.substring(0, commitMessage.indexOf('\n'))
-                        : commitMessage;
+                String commitId = (String) commitsTableModel.getValueAt(row, 3);
+                String commitMessage = (String) commitsTableModel.getValueAt(row, 0);
+                String firstLine = commitMessage.contains("\n")
+                                   ? commitMessage.substring(0, commitMessage.indexOf('\n'))
+                                   : commitMessage;
                 softResetToCommit(commitId, firstLine);
             }
         });
@@ -337,7 +341,7 @@ public class GitLogTab extends JPanel {
                 String message = (String) commitsTableModel.getValueAt(row, 0);
                 if (message.contains("stash@{")) {
                     int start = message.indexOf("stash@{") + 7;
-                    int end   = message.indexOf("}", start);
+                    int end = message.indexOf("}", start);
                     if (end > start) {
                         try {
                             int stashIndex = Integer.parseInt(message.substring(start, end));
@@ -355,7 +359,7 @@ public class GitLogTab extends JPanel {
                 String message = (String) commitsTableModel.getValueAt(row, 0);
                 if (message.contains("stash@{")) {
                     int start = message.indexOf("stash@{") + 7;
-                    int end   = message.indexOf("}", start);
+                    int end = message.indexOf("}", start);
                     if (end > start) {
                         try {
                             int stashIndex = Integer.parseInt(message.substring(start, end));
@@ -373,7 +377,7 @@ public class GitLogTab extends JPanel {
                 String message = (String) commitsTableModel.getValueAt(row, 0);
                 if (message.contains("stash@{")) {
                     int start = message.indexOf("stash@{") + 7;
-                    int end   = message.indexOf("}", start);
+                    int end = message.indexOf("}", start);
                     if (end > start) {
                         try {
                             int stashIndex = Integer.parseInt(message.substring(start, end));
@@ -418,12 +422,12 @@ public class GitLogTab extends JPanel {
                 }
             });
         }
-        JMenuItem addFileToContextItem    = new JMenuItem("Capture Diff");
-        JMenuItem compareFileWithLocalItem= new JMenuItem("Compare with Local");
-        JMenuItem viewDiffItem            = new JMenuItem("View Diff");
-        JMenuItem viewHistoryItem         = new JMenuItem("View History");
-        JMenuItem editFileItem            = new JMenuItem("Edit File(s)");
-        JMenuItem comparePrevWithLocalItem= new JMenuItem("Compare Previous with Local");
+        JMenuItem addFileToContextItem = new JMenuItem("Capture Diff");
+        JMenuItem compareFileWithLocalItem = new JMenuItem("Compare with Local");
+        JMenuItem viewDiffItem = new JMenuItem("View Diff");
+        JMenuItem viewHistoryItem = new JMenuItem("View History");
+        JMenuItem editFileItem = new JMenuItem("Edit File(s)");
+        JMenuItem comparePrevWithLocalItem = new JMenuItem("Compare Previous with Local");
 
         changesContextMenu.add(addFileToContextItem);
         changesContextMenu.add(editFileItem);
@@ -439,10 +443,12 @@ public class GitLogTab extends JPanel {
             public void mousePressed(MouseEvent e) {
                 handleChangesPopup(e);
             }
+
             @Override
             public void mouseReleased(MouseEvent e) {
                 handleChangesPopup(e);
             }
+
             private void handleChangesPopup(MouseEvent e) {
                 if (e.isPopupTrigger()) {
                     int row = changesTree.getRowForLocation(e.getX(), e.getY());
@@ -654,11 +660,11 @@ public class GitLogTab extends JPanel {
                 }
             });
         }
-        JMenuItem checkoutItem    = new JMenuItem("Checkout");
-        JMenuItem newBranchItem   = new JMenuItem("New Branch From This");
-        JMenuItem mergeItem       = new JMenuItem("Merge into HEAD");
-        JMenuItem renameItem      = new JMenuItem("Rename");
-        JMenuItem deleteItem      = new JMenuItem("Delete");
+        JMenuItem checkoutItem = new JMenuItem("Checkout");
+        JMenuItem newBranchItem = new JMenuItem("New Branch From This");
+        JMenuItem mergeItem = new JMenuItem("Merge into HEAD");
+        JMenuItem renameItem = new JMenuItem("Rename");
+        JMenuItem deleteItem = new JMenuItem("Delete");
         branchContextMenu.add(checkoutItem);
         branchContextMenu.add(newBranchItem);
         branchContextMenu.add(mergeItem);
@@ -670,10 +676,12 @@ public class GitLogTab extends JPanel {
             public void mousePressed(MouseEvent e) {
                 handleBranchPopup(e);
             }
+
             @Override
             public void mouseReleased(MouseEvent e) {
                 handleBranchPopup(e);
             }
+
             private void handleBranchPopup(MouseEvent e) {
                 if (e.isPopupTrigger()) {
                     int row = branchTable.rowAtPoint(e.getPoint());
@@ -782,40 +790,54 @@ public class GitLogTab extends JPanel {
                 List<String> localBranches = getRepo().listLocalBranches();
                 List<String> remoteBranches = getRepo().listRemoteBranches();
 
+                // Prepare data rows off the EDT
+                List<Object[]> localBranchRows = new ArrayList<>();
+                int currentBranchIndex = -1;
+                for (int i = 0; i < localBranches.size(); i++) {
+                    String branch = localBranches.get(i);
+                    String checkmark = branch.equals(currentBranch) ? "✓" : "";
+                    localBranchRows.add(new Object[]{checkmark, branch});
+                    if (branch.equals(currentBranch)) {
+                        currentBranchIndex = i;
+                    }
+                }
+
+                // Add virtual "stashes" branch if needed
+                boolean hasStashes = false;
+                try {
+                    List<GitRepo.StashInfo> stashes = getRepo().listStashes();
+                    hasStashes = !stashes.isEmpty();
+                    if (hasStashes) {
+                        localBranchRows.add(new Object[]{"", "stashes"});
+                        if ("stashes".equals(currentBranch)) {
+                            currentBranchIndex = localBranchRows.size() - 1;
+                        }
+                    }
+                } catch (GitAPIException e) {
+                    logger.warn("Could not check for stashes", e);
+                }
+
+                List<Object[]> remoteBranchRows = remoteBranches.stream()
+                        .map(branch -> new Object[]{branch})
+                        .toList();
+
+                final int finalCurrentBranchIndex = currentBranchIndex;
+
                 SwingUtilities.invokeLater(() -> {
                     branchTableModel.setRowCount(0);
                     remoteBranchTableModel.setRowCount(0);
-                    int currentBranchRow = -1;
 
-                    // Add normal branches
-                    for (String branch : localBranches) {
-                        String checkmark = branch.equals(currentBranch) ? "✓" : "";
-                        branchTableModel.addRow(new Object[]{checkmark, branch});
-                        if (branch.equals(currentBranch)) {
-                            currentBranchRow = branchTableModel.getRowCount() - 1;
-                        }
+                    for (var rowData : localBranchRows) {
+                        branchTableModel.addRow(rowData);
+                    }
+                    for (var rowData : remoteBranchRows) {
+                        remoteBranchTableModel.addRow(rowData);
                     }
 
-                    // Add virtual "stashes" branch if there are stashes
-                    try {
-                        List<GitRepo.StashInfo> stashes = getRepo().listStashes();
-                        if (!stashes.isEmpty()) {
-                            branchTableModel.addRow(new Object[]{"", "stashes"});
-                            if ("stashes".equals(currentBranch)) {
-                                currentBranchRow = branchTableModel.getRowCount() - 1;
-                            }
-                            }
-                        } catch (GitAPIException e) {
-                            logger.warn("Could not fetch stashes", e);
-                        }
-                        for (String branch : remoteBranches) {
-                        remoteBranchTableModel.addRow(new Object[]{branch});
-                    }
-
-                    if (currentBranchRow >= 0) {
-                        branchTable.setRowSelectionInterval(currentBranchRow, currentBranchRow);
+                    if (finalCurrentBranchIndex >= 0) {
+                        branchTable.setRowSelectionInterval(finalCurrentBranchIndex, finalCurrentBranchIndex);
                         // Ensure active branch is visible by scrolling to it
-                        branchTable.scrollRectToVisible(branchTable.getCellRect(currentBranchRow, 0, true));
+                        branchTable.scrollRectToVisible(branchTable.getCellRect(finalCurrentBranchIndex, 0, true));
                         updateCommitsForBranch(currentBranch);
                     } else {
                         logger.error("Current branch {} disappeared from branch list", currentBranch);
@@ -847,13 +869,13 @@ public class GitLogTab extends JPanel {
                 boolean canPush = false;
 
                 // Special handling for stashes virtual branch
-                     if ("stashes".equals(branchName)) {
-                         try {
-                             commits = getStashesAsCommits();
-                         } catch (GitAPIException e) {
-                             logger.error("Error fetching stashes", e);
-                             commits = List.of();
-                         }
+                if ("stashes".equals(branchName)) {
+                    try {
+                        commits = getStashesAsCommits();
+                    } catch (GitAPIException e) {
+                        logger.error("Error fetching stashes", e);
+                        commits = List.of();
+                    }
                 } else {
                     // Normal branch handling
                     commits = getRepo().listCommitsDetailed(branchName);
@@ -870,7 +892,25 @@ public class GitLogTab extends JPanel {
 
                 boolean finalCanPush = canPush;
                 int unpushedCount = unpushedCommitIds.size();
-                List<CommitInfo> finalCommits = commits;
+                List<CommitInfo> finalCommits = commits; // Keep final reference
+
+                // Prepare commit rows off EDT
+                List<Object[]> commitRows = new ArrayList<>();
+                if (!finalCommits.isEmpty()) {
+                    java.time.LocalDate today = java.time.LocalDate.now();
+                    for (CommitInfo commit : finalCommits) {
+                        String formattedDate = formatCommitDate(commit.date(), today);
+                        boolean isUnpushed = unpushedCommitIds.contains(commit.id());
+                        commitRows.add(new Object[]{
+                                commit.message(),
+                                commit.author(),
+                                formattedDate,
+                                commit.id(),
+                                isUnpushed
+                        });
+                    }
+                }
+
                 SwingUtilities.invokeLater(() -> {
                     commitsTableModel.setRowCount(0);
                     changesRootNode.removeAllChildren();
@@ -878,25 +918,16 @@ public class GitLogTab extends JPanel {
 
                     pushButton.setEnabled(finalCanPush);
                     pushButton.setToolTipText(finalCanPush
-                                                      ? "Push " + unpushedCount + " commit(s) to remote"
-                                                      : "No unpushed commits or no upstream branch configured");
+                                              ? "Push " + unpushedCount + " commit(s) to remote"
+                                              : "No unpushed commits or no upstream branch configured");
                     pushButton.setVisible(!branchName.equals("stashes")); // Hide push button for stashes
 
-                    if (finalCommits.isEmpty()) {
+                    if (commitRows.isEmpty()) {
                         return;
                     }
 
-                    java.time.LocalDate today = java.time.LocalDate.now();
-                    for (CommitInfo commit : finalCommits) {
-                        String formattedDate = formatCommitDate(commit.date(), today);
-                        boolean isUnpushed = unpushedCommitIds.contains(commit.id());
-                        commitsTableModel.addRow(new Object[]{
-                                commit.message(),
-                                commit.author(),
-                                formattedDate,
-                                commit.id(),
-                                isUnpushed
-                        });
+                    for (Object[] rowData : commitRows) {
+                        commitsTableModel.addRow(rowData);
                     }
 
                     // Fit column widths for author and date
@@ -1002,12 +1033,12 @@ public class GitLogTab extends JPanel {
                     if (branchRow != -1) {
                         String branchDisplay = (String) branchTableModel.getValueAt(branchRow, 1);
                         updateCommitsForBranch(branchDisplay);
-                        }
-                    });
-                } catch (GitAPIException e) {
-                    logger.error("Error performing soft reset to commit: {}", commitId, e);
-                    SwingUtilities.invokeLater(() ->
-                                                       chrome.toolErrorRaw("Error performing soft reset: " + e.getMessage()));
+                    }
+                });
+            } catch (GitAPIException e) {
+                logger.error("Error performing soft reset to commit: {}", commitId, e);
+                SwingUtilities.invokeLater(() ->
+                                                   chrome.toolErrorRaw("Error performing soft reset: " + e.getMessage()));
             }
         });
     }
@@ -1024,12 +1055,12 @@ public class GitLogTab extends JPanel {
                 int branchRow = branchTable.getSelectedRow();
                 if (branchRow != -1) {
                     String branchDisplay = (String) branchTableModel.getValueAt(branchRow, 1);
-                         updateCommitsForBranch(branchDisplay);
-                     }
-                 } catch (GitAPIException e) {
-                     logger.error("Error reverting commit: {}", commitId, e);
-                     chrome.toolErrorRaw("Error reverting commit: " + e.getMessage());
-                 }
+                    updateCommitsForBranch(branchDisplay);
+                }
+            } catch (GitAPIException e) {
+                logger.error("Error reverting commit: {}", commitId, e);
+                chrome.toolErrorRaw("Error reverting commit: " + e.getMessage());
+            }
         });
     }
 
@@ -1046,12 +1077,12 @@ public class GitLogTab extends JPanel {
                 getRepo().push();
                 SwingUtilities.invokeLater(() -> {
                     chrome.systemOutput("Successfully pushed " + branchDisplay + " to remote");
-                         updateCommitsForBranch(branchDisplay);
-                     });
-                 } catch (GitAPIException e) {
-                     logger.error("Error pushing branch: {}", branchDisplay, e);
-                     SwingUtilities.invokeLater(() -> chrome.toolErrorRaw(e.getMessage()));
-                 }
+                    updateCommitsForBranch(branchDisplay);
+                });
+            } catch (GitAPIException e) {
+                logger.error("Error pushing branch: {}", branchDisplay, e);
+                SwingUtilities.invokeLater(() -> chrome.toolErrorRaw(e.getMessage()));
+            }
             return null;
         });
     }
@@ -1067,12 +1098,12 @@ public class GitLogTab extends JPanel {
                     chrome.systemOutput("Created local tracking branch for " + branchName);
                 } else {
                     getRepo().checkout(branchName);
-                     }
-                     update();
-                 } catch (GitAPIException e) {
-                     logger.error("Error checking out branch: {}", branchName, e);
-                     chrome.toolErrorRaw(e.getMessage());
-                 }
+                }
+                update();
+            } catch (GitAPIException e) {
+                logger.error("Error checking out branch: {}", branchName, e);
+                chrome.toolErrorRaw(e.getMessage());
+            }
         });
     }
 
@@ -1083,12 +1114,12 @@ public class GitLogTab extends JPanel {
         contextManager.submitUserTask("Merging branch: " + branchName, () -> {
             try {
                 getRepo().mergeIntoHead(branchName);
-                     chrome.systemOutput("Branch '" + branchName + "' was successfully merged into HEAD.");
-                     update();
-                 } catch (GitAPIException e) {
-                     logger.error("Error merging branch: {}", branchName, e);
-                     chrome.toolErrorRaw(e.getMessage());
-                 }
+                chrome.systemOutput("Branch '" + branchName + "' was successfully merged into HEAD.");
+                update();
+            } catch (GitAPIException e) {
+                logger.error("Error merging branch: {}", branchName, e);
+                chrome.toolErrorRaw(e.getMessage());
+            }
         });
     }
 
@@ -1107,11 +1138,11 @@ public class GitLogTab extends JPanel {
                 try {
                     getRepo().createAndCheckoutBranch(newName, sourceBranch);
                     update();
-                         chrome.systemOutput("Created and checked out new branch '" + newName + "' from '" + sourceBranch + "'");
-                     } catch (GitAPIException e) {
-                         logger.error("Error creating new branch from {}: {}", sourceBranch, e);
-                         chrome.toolErrorRaw("Error creating new branch: " + e.getMessage());
-                     }
+                    chrome.systemOutput("Created and checked out new branch '" + newName + "' from '" + sourceBranch + "'");
+                } catch (GitAPIException e) {
+                    logger.error("Error creating new branch from {}: {}", sourceBranch, e);
+                    chrome.toolErrorRaw("Error creating new branch: " + e.getMessage());
+                }
             });
         }
     }
@@ -1131,11 +1162,11 @@ public class GitLogTab extends JPanel {
                 try {
                     getRepo().renameBranch(branchName, newName);
                     SwingUtilities.invokeLater(this::update);
-                         chrome.systemOutput("Branch '" + branchName + "' renamed to '" + newName + "' successfully.");
-                     } catch (GitAPIException e) {
-                         logger.error("Error renaming branch: {}", branchName, e);
-                         chrome.toolErrorRaw("Error renaming branch: " + e.getMessage());
-                     }
+                    chrome.systemOutput("Branch '" + branchName + "' renamed to '" + newName + "' successfully.");
+                } catch (GitAPIException e) {
+                    logger.error("Error renaming branch: {}", branchName, e);
+                    chrome.toolErrorRaw("Error renaming branch: " + e.getMessage());
+                }
             });
         }
     }
@@ -1176,12 +1207,12 @@ public class GitLogTab extends JPanel {
                         if (result == 0) { // Force Delete
                             performBranchDeletion(branchName, true);
                         }
-                         }
-                     });
-                 } catch (GitAPIException e) {
-                     logger.error("Error checking branch merge status: {}", branchName, e);
-                     chrome.toolErrorRaw("Error checking branch status: " + e.getMessage());
-                 }
+                    }
+                });
+            } catch (GitAPIException e) {
+                logger.error("Error checking branch merge status: {}", branchName, e);
+                chrome.toolErrorRaw("Error checking branch status: " + e.getMessage());
+            }
         });
     }
 
@@ -1217,12 +1248,12 @@ public class GitLogTab extends JPanel {
                 }
 
                 logger.debug("Branch '{}' deletion completed successfully", branchName);
-                     SwingUtilities.invokeLater(this::update);
-                     chrome.systemOutput("Branch '" + branchName + "' " + (force ? "force " : "") + "deleted successfully.");
-                 } catch (GitAPIException e) {
-                     logger.error("Error deleting branch '{}': {}", branchName, e.getMessage(), e);
-                     chrome.toolErrorRaw("Error deleting branch '" + branchName + "': " + e.getMessage());
-                 }
+                SwingUtilities.invokeLater(this::update);
+                chrome.systemOutput("Branch '" + branchName + "' " + (force ? "force " : "") + "deleted successfully.");
+            } catch (GitAPIException e) {
+                logger.error("Error deleting branch '{}': {}", branchName, e.getMessage(), e);
+                chrome.toolErrorRaw("Error deleting branch '" + branchName + "': " + e.getMessage());
+            }
         });
     }
 
@@ -1233,25 +1264,40 @@ public class GitLogTab extends JPanel {
         contextManager.submitUserTask("Searching commits for: " + query, () -> {
             try {
                 List<CommitInfo> searchResults = getRepo().searchCommits(query);
+
+                // Prepare rows off EDT
+                List<Object[]> commitRows = new ArrayList<>();
+                java.time.LocalDate today = java.time.LocalDate.now(); // needed for formatting
+                for (CommitInfo commit : searchResults) {
+                    String formattedDate = formatCommitDate(commit.date(), today);
+                    commitRows.add(new Object[]{
+                            commit.message(),
+                            commit.author(),
+                            formattedDate, // use formatted date
+                            commit.id(),
+                            false // Search results are never 'unpushed' in this context
+                    });
+                }
+
                 SwingUtilities.invokeLater(() -> {
                     commitsTableModel.setRowCount(0);
                     changesRootNode.removeAllChildren();
                     changesTreeModel.reload();
 
-                    if (searchResults.isEmpty()) {
+                    if (commitRows.isEmpty()) {
                         chrome.systemOutput("No commits found matching: " + query);
                         return;
                     }
-                    for (CommitInfo commit : searchResults) {
-                        commitsTableModel.addRow(new Object[]{
-                                commit.message(),
-                                commit.author(),
-                                commit.date(),
-                                commit.id()
-                        });
+
+                    for (Object[] rowData : commitRows) {
+                        commitsTableModel.addRow(rowData);
                     }
-                    chrome.systemOutput("Found " + searchResults.size() + " commits matching: " + query);
+
+                    chrome.systemOutput("Found " + commitRows.size() + " commits matching: " + query);
                     if (commitsTableModel.getRowCount() > 0) {
+                        // Fit column widths
+                        TableUtils.fitColumnWidth(commitsTable, 1); // Author
+                        TableUtils.fitColumnWidth(commitsTable, 2); // Date
                         commitsTable.setRowSelectionInterval(0, 0);
                         updateChangesForCommits(new int[]{0});
                     }
@@ -1326,12 +1372,12 @@ public class GitLogTab extends JPanel {
     /**
      * Represent each stash as a single logical commit, mirroring
      * `git stash list`.  We intentionally ignore the internal
-         * index/untracked helper commits so the log stays concise.
-         */
-        private List<CommitInfo> getStashesAsCommits() throws GitAPIException
-        {
-            List<GitRepo.StashInfo> stashes = getRepo().listStashes();
-            List<CommitInfo> result = new ArrayList<>();
+     * index/untracked helper commits so the log stays concise.
+     */
+    private List<CommitInfo> getStashesAsCommits() throws GitAPIException
+    {
+        List<GitRepo.StashInfo> stashes = getRepo().listStashes();
+        List<CommitInfo> result = new ArrayList<>();
 
         for (GitRepo.StashInfo s : stashes) {
             result.add(new CommitInfo(

@@ -56,7 +56,7 @@ public abstract class CodePrompts {
         messages.addAll(parser.exampleMessages());
         messages.addAll(cm.getHistoryMessages());
         messages.addAll(sessionMessages);
-        messages.addAll(cm.getWorkspaceContentsMessages(false));
+        messages.addAll(cm.getWorkspaceContentsMessages());
         messages.add(request);
 
         return messages;
@@ -67,7 +67,7 @@ public abstract class CodePrompts {
 
         messages.add(new SystemMessage(formatIntro(cm, "")));
         messages.addAll(cm.getHistoryMessages());
-        messages.addAll(cm.getWorkspaceContentsMessages(false));
+        messages.addAll(cm.getWorkspaceContentsMessages());
         messages.add(askRequest(input));
 
         return messages;
@@ -80,7 +80,7 @@ public abstract class CodePrompts {
      */
     public static String formatWorkspaceSummary(ContextManager cm, boolean includeAutocontext) {
         var editableContents = cm.getEditableSummary();
-        var readOnlyContents = cm.getReadOnlySummary(includeAutocontext);
+        var readOnlyContents = cm.getReadOnlySummary();
         var workspaceBuilder = new StringBuilder();
         if (!editableContents.isBlank()) {
             workspaceBuilder.append("\n- Editable files: ").append(editableContents);

@@ -37,6 +37,22 @@ import java.util.stream.Stream;
 
 public class ArchitectAgent {
     private static final Logger logger = LogManager.getLogger(ArchitectAgent.class);
+
+    /**
+     * Configuration options for the ArchitectAgent, determining which tools it can use.
+     */
+    public record ArchitectOptions(
+            boolean includeContextAgent,
+            boolean includeValidationAgent,
+            boolean includeAnalyzerTools,
+            boolean includeWorkspaceTools,
+            boolean includeCodeAgent,
+            boolean includeSearchAgent
+    ) {
+        /** Default options (all enabled). */
+        public static final ArchitectOptions DEFAULTS = new ArchitectOptions(true, true, true, true, true, true);
+    }
+
     private final IConsoleIO io;
 
     // Helper record to associate a SearchAgent task Future with its request
@@ -47,6 +63,7 @@ public class ArchitectAgent {
     private final StreamingChatLanguageModel model;
     private final ToolRegistry toolRegistry;
     private final String goal;
+    private final ArchitectOptions options; // Store the options
     // History of this agent's interactions
     private final List<ChatMessage> architectMessages = new ArrayList<>();
 
@@ -55,14 +72,15 @@ public class ArchitectAgent {
 
     /**
      * Constructs a BrokkAgent that can handle multi-step tasks and sub-tasks.
-     *
      * @param goal The initial user instruction or goal for the agent.
+     * @param options Configuration for which tools the agent can use.
      */
-    public ArchitectAgent(ContextManager contextManager, StreamingChatLanguageModel model, ToolRegistry toolRegistry, String goal) {
+    public ArchitectAgent(ContextManager contextManager, StreamingChatLanguageModel model, ToolRegistry toolRegistry, String goal, ArchitectOptions options) {
         this.contextManager = Objects.requireNonNull(contextManager, "contextManager cannot be null");
         this.model = Objects.requireNonNull(model, "model cannot be null");
         this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry cannot be null");
         this.goal = Objects.requireNonNull(goal, "goal cannot be null");
+        this.options = Objects.requireNonNull(options, "options cannot be null");
         this.io = contextManager.getIo();
     }
 
@@ -111,14 +129,17 @@ public class ArchitectAgent {
     {
         logger.debug("callCodeAgent invoked with instructions: {}", instructions);
 
-        logger.debug("Invoking ValidationAgent to find relevant tests..");
-        var testAgent = new ValidationAgent(contextManager);
-        var relevantTests = testAgent.execute(instructions);
-        if (!relevantTests.isEmpty()) {
-            logger.debug("Adding relevant test files found by ValidationAgent to workspace: {}", relevantTests);
-            contextManager.editFiles(relevantTests);
-        } else {
-            logger.debug("ValidationAgent found no relevant test files to add");
+        // Check if ValidationAgent is enabled in options before using it
+        if (options.includeValidationAgent()) {
+            logger.debug("Invoking ValidationAgent to find relevant tests..");
+            var testAgent = new ValidationAgent(contextManager);
+            var relevantTests = testAgent.execute(instructions);
+            if (!relevantTests.isEmpty()) {
+                logger.debug("Adding relevant test files found by ValidationAgent to workspace: {}", relevantTests);
+                contextManager.editFiles(relevantTests);
+            } else {
+                logger.debug("ValidationAgent found no relevant test files to add");
+            }
         }
 
         // TODO label this Architect
@@ -220,8 +241,11 @@ public class ArchitectAgent {
     public void execute() throws ExecutionException, InterruptedException {
         io.systemOutput("Architect Agent engaged: `%s...`".formatted(LogDescription.getShortDescription(goal)));
 
-        var contextAgent = new ContextAgent(contextManager, contextManager.getAskModel(), goal, true);
-        contextAgent.execute();
+        // Check if ContextAgent is enabled in options before using it
+        if (options.includeContextAgent()) {
+            var contextAgent = new ContextAgent(contextManager, contextManager.getAskModel(), goal, true);
+            contextAgent.execute();
+        }
 
         io.llmOutput("\nPlanning", ChatMessageType.AI);
         var llm = contextManager.getLlm(model, "Architect: " + goal);
@@ -239,15 +263,25 @@ public class ArchitectAgent {
                                         "addCallGraphInToWorkspace",
                                         "addCallGraphOutToWorkspace",
                                         "getFiles");
-            if (!contextManager.getAnalyzer().isEmpty()) {
+            // Check each option before adding the corresponding tools
+            if (options.includeAnalyzerTools()) {
                 toolSpecs.addAll(toolRegistry.getRegisteredTools(analyzerTools));
             }
-            var genericTools = List.of("addFilesToWorkspace",
-                                       "addUrlContentsToWorkspace",
-                                       "addTextToWorkspace",
-                                       "dropWorkspaceFragments");
-            toolSpecs.addAll(toolRegistry.getRegisteredTools(genericTools));
-            toolSpecs.addAll(toolRegistry.getTools(this, List.of("projectFinished", "abortProject", "callCodeAgent", "callSearchAgent")));
+            var workspaceTools = List.of("addFilesToWorkspace",
+                                         "addFileSummariesToWorkspace",
+                                         "addUrlContentsToWorkspace",
+                                         "addTextToWorkspace",
+                                         "dropWorkspaceFragments");
+            if (options.includeWorkspaceTools()) {
+                toolSpecs.addAll(toolRegistry.getRegisteredTools(workspaceTools));
+            }
+            if (options.includeCodeAgent()) {
+                toolSpecs.addAll(toolRegistry.getTools(this, List.of("callCodeAgent")));
+            }
+            if (options.includeSearchAgent()) {
+                toolSpecs.addAll(toolRegistry.getTools(this, List.of("callSearchAgent")));
+            }
+            toolSpecs.addAll(toolRegistry.getTools(this, List.of("projectFinished", "abortProject")));
 
             // 5) Ask the LLM for the next step with tools required
             Llm.StreamingResult result;
@@ -408,7 +442,7 @@ public class ArchitectAgent {
      * - A user message showing the current stack top, the entire stack,
      * the top-10 PageRank classes, and any relevant instructions.
      */
-    private List<ChatMessage> buildPrompt() {
+    private List<ChatMessage> buildPrompt() throws InterruptedException {
         // Concatenate system prompts (which should handle incorporating history) and the latest user message
         return Streams.concat(ArchitectPrompts.instance.collectMessages(contextManager, architectMessages).stream(),
                               Stream.of(new UserMessage(ArchitectPrompts.instance.getFinalInstructions(goal)))).toList();

@@ -25,8 +25,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import io.github.jbellis.brokk.prompts.EditBlockConflictsParser;
-import io.github.jbellis.brokk.prompts.EditBlockParser;
 
 public class ContextSerializationTest {
     @TempDir
@@ -43,14 +41,13 @@ public class ContextSerializationTest {
     @Test
     void testBasicContextSerialization() throws Exception {
         // Create a context with minimal state
-        Context context = new Context(mockContextManager, 5);
+        Context context = new Context(mockContextManager);
 
         // Serialize and deserialize
         byte[] serialized = Context.serialize(context);
         Context deserialized = Context.deserialize(serialized, "stub");
 
         // Verify non-transient fields were preserved
-        assertEquals(context.getAutoContextFileCount(), deserialized.getAutoContextFileCount());
         assertEquals(context.editableFiles.size(), deserialized.editableFiles.size());
         assertEquals(context.readonlyFiles.size(), deserialized.readonlyFiles.size());
         assertEquals(context.virtualFragments.size(), deserialized.virtualFragments.size());
@@ -60,9 +57,6 @@ public class ContextSerializationTest {
         assertNotNull(deserialized.parsedOutput); // Welcome SessionFragment
         assertNotNull(deserialized.originalContents); // Empty Map
         assertNotNull(deserialized.taskHistory); // Empty List (changed from historyMessages)
-
-        // AutoContext should have been preserved
-        assertNotNull(deserialized.getAutoContext());
 
         // We injected output via SessionFragment, check its formatted text
         var expectedOutputText = """
@@ -86,7 +80,7 @@ public class ContextSerializationTest {
         Files.writeString(externalFile.absPath(), "This is external content");
 
         // Create context with fragments
-        Context context = new Context(mockContextManager, 5)
+        Context context = new Context(mockContextManager)
                 .addEditableFiles(List.of(new ContextFragment.ProjectPathFragment(projectFile)))
                 .addReadonlyFiles(List.of(new ContextFragment.ExternalPathFragment(externalFile)))
                 .addVirtualFragment(new ContextFragment.StringFragment("virtual content", "Virtual Fragment", SyntaxConstants.SYNTAX_STYLE_NONE));
@@ -120,7 +114,7 @@ public class ContextSerializationTest {
 
     @Test
     void testAllVirtualFragmentTypes() throws Exception {
-        Context context = new Context(mockContextManager, 5);
+        Context context = new Context(mockContextManager);
 
         // Create mock RepoFile for CodeUnit construction
         ProjectFile mockFile = new ProjectFile(tempDir, "Mock.java");
@@ -145,7 +139,7 @@ public class ContextSerializationTest {
 
         // Add fragment with usage
         context = context.addVirtualFragment(
-                new ContextFragment.UsageFragment("Uses", "Test.method", Set.of(CodeUnit.cls(mockFile, "com.test.Test")), "Test.method()")
+                new ContextFragment.UsageFragment("Test.method", Set.of(CodeUnit.cls(mockFile, "com.test.Test")), "Test.method()")
         );
 
         // Add stacktrace fragment
@@ -196,22 +190,6 @@ public class ContextSerializationTest {
     }
 
     @Test
-    void testAutoContextSerialization() throws Exception {
-        // Create a context with auto-context
-        Context context = new Context(mockContextManager, 5)
-                .setAutoContextFiles(10);
-
-        // Serialize and deserialize
-        byte[] serialized = Context.serialize(context);
-        Context deserialized = Context.deserialize(serialized, "stub");
-
-        // Verify autoContextFileCount was preserved
-        assertEquals(10, deserialized.getAutoContextFileCount());
-        assertTrue(deserialized.isAutoContextEnabled());
-        assertNotNull(deserialized.getAutoContext());
-    }
-
-    @Test
     void testExternalPathFragmentSerialization() throws Exception {
         // Create an external file
         Path externalPath = tempDir.resolve("serialization-test.txt").toAbsolutePath();
@@ -222,7 +200,7 @@ public class ContextSerializationTest {
         ContextFragment.ExternalPathFragment fragment = new ContextFragment.ExternalPathFragment(externalFile);
 
         // Add to context
-        Context context = new Context(mockContextManager, 5)
+        Context context = new Context(mockContextManager)
                 .addReadonlyFiles(List.of(fragment));
 
         // Serialize and deserialize
@@ -269,7 +247,7 @@ public class ContextSerializationTest {
             virtualFragments.add(new ContextFragment.StringFragment("content " + i, "Fragment " + i, SyntaxConstants.SYNTAX_STYLE_NONE));
         }
 
-        Context context = new Context(mockContextManager, 50);
+        Context context = new Context(mockContextManager);
 
         // Add all fragments
         context = context.addEditableFiles(editableFiles);
@@ -295,7 +273,7 @@ public class ContextSerializationTest {
     @Test
     void testTaskHistorySerialization() throws Exception {
         // Create context
-        Context context = new Context(mockContextManager, 5);
+        Context context = new Context(mockContextManager);
 
         // Create sample chat messages for a full session (User + AI)
         List<ChatMessage> sessionMessages = List.of(

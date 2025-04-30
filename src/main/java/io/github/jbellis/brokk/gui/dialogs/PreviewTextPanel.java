@@ -11,7 +11,6 @@ import io.github.jbellis.brokk.IConsoleIO;
 import io.github.jbellis.brokk.SessionResult;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
-import io.github.jbellis.brokk.gui.Chrome;
 import io.github.jbellis.brokk.gui.GuiTheme;
 import io.github.jbellis.brokk.gui.VoiceInputButton;
 import io.github.jbellis.brokk.util.Messages;
@@ -75,7 +74,8 @@ public class PreviewTextPanel extends JPanel {
                             String content,
                             String syntaxStyle,
                             GuiTheme guiTheme,
-                            ContextFragment fragment) {
+                            ContextFragment fragment)
+    {
         super(new BorderLayout());
         assert contextManager != null;
         assert guiTheme != null;
@@ -267,55 +267,8 @@ public class PreviewTextPanel extends JPanel {
     }
 
     /**
-     * Displays a non-modal preview dialog for the given project file.
+     * Updates the theme of this panel. Called by Chrome when the theme changes.
      *
-     * @param parentFrame    The parent frame.
-     * @param contextManager The context manager.
-     * @param file           The project file to preview.
-     * @param syntaxStyle    The syntax style (e.g., SyntaxConstants.SYNTAX_STYLE_JAVA).
-     * @param guiTheme       The GUI theme manager.
-     */
-    public static void showInFrame(JFrame parentFrame, ContextManager contextManager, ProjectFile file, String syntaxStyle, GuiTheme guiTheme) {
-        try {
-            String content = file == null ? "" : file.read(); // Get content file
-            String title = file == null ? "Preview" : "View File: " + file;
-            PreviewTextPanel previewPanel = new PreviewTextPanel(contextManager, file, content, syntaxStyle, guiTheme, null);
-            showFrame(contextManager, title, previewPanel);
-        } catch (IOException ex) {
-            JOptionPane.showMessageDialog(parentFrame, "Error reading content: " + ex.getMessage(), "Read Error", JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
-    public static void showFrame(ContextManager contextManager, String title, PreviewTextPanel previewPanel) {
-        JFrame frame = Chrome.newFrame(title);
-            frame.setContentPane(previewPanel);
-            frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE); // Dispose frame on close
-
-        var project = contextManager.getProject();
-        assert project != null;
-        var storedBounds = project.getPreviewWindowBounds();
-        if (storedBounds != null) {
-            frame.setBounds(storedBounds);
-        }
-
-        // Add listener to save bounds
-        frame.addComponentListener(new java.awt.event.ComponentAdapter() {
-            @Override
-            public void componentMoved(java.awt.event.ComponentEvent e) {
-                project.savePreviewWindowBounds(frame); // Save JFrame bounds
-            }
-
-            @Override
-            public void componentResized(java.awt.event.ComponentEvent e) {
-                project.savePreviewWindowBounds(frame); // Save JFrame bounds
-            }
-        });
-
-        frame.setVisible(true);
-    }
-
-    /**
-     * Updates the theme of this panel
      * @param guiTheme The theme manager to use
      */
     public void updateTheme(GuiTheme guiTheme) {
@@ -481,8 +434,8 @@ public class PreviewTextPanel extends JPanel {
                 editArea,
                 contextManager,
                 () -> { /* no action on record start */ },
-                error -> { /* no special error handling */ },
-                symbolsFuture // Pass the Future<Set<String>>
+                symbolsFuture, error -> { /* no special error handling */ }
+                // Pass the Future<Set<String>>
         );
 
         // infoLabel at row=0
@@ -663,7 +616,8 @@ public class PreviewTextPanel extends JPanel {
             }
 
             @Override
-            public void blockLlmOutput(boolean blocked) {}
+            public void blockLlmOutput(boolean blocked) {
+            }
         }
         var resultsIo = new QuickResultsIo();
 
@@ -763,7 +717,8 @@ public class PreviewTextPanel extends JPanel {
      * @throws InterruptedException If future.get() is interrupted.
      */
     private QuickEditResult performQuickEdit(Future<SessionResult> future,
-                                             String selectedText) throws ExecutionException, InterruptedException {
+                                             String selectedText) throws ExecutionException, InterruptedException
+    {
         var sessionResult = future.get(); // might throw InterruptedException or ExecutionException
         var stopDetails = sessionResult.stopDetails();
         quickEditMessages = sessionResult.output().messages(); // Capture messages regardless of outcome
@@ -837,15 +792,44 @@ public class PreviewTextPanel extends JPanel {
         getActionMap().put("closePreview", new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                // Only close if search field doesn't have focus
+                // Only try to close if search field doesn't have focus
                 if (!searchField.hasFocus()) {
-                    Window window = SwingUtilities.getWindowAncestor(PreviewTextPanel.this);
-                    if (window != null) {
-                        window.dispose();
+                    if (confirmClose()) {
+                        Window window = SwingUtilities.getWindowAncestor(PreviewTextPanel.this);
+                        if (window != null) {
+                            window.dispose();
+                        }
                     }
                 }
             }
         });
+    }
+
+    /**
+     * Checks for unsaved changes and prompts the user to save, discard, or cancel closing.
+     *
+     * @return true if the window should close, false otherwise.
+     */
+    public boolean confirmClose() {
+        if (saveButton == null || !saveButton.isEnabled()) {
+            return true; // No unsaved changes, okay to close
+        }
+
+        int choice = JOptionPane.showConfirmDialog(
+                SwingUtilities.getWindowAncestor(this),
+                "You have unsaved changes. Do you want to save them before closing?",
+                "Unsaved Changes",
+                JOptionPane.YES_NO_CANCEL_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+
+        if (choice == JOptionPane.YES_OPTION) {
+            performSave(saveButton); // Save the changes
+            return true; // Close the window
+        } else if (choice == JOptionPane.NO_OPTION) {
+            return true; // Close without saving
+        } else {
+            return false; // Cancel closing (JOptionPane.CANCEL_OPTION or closed dialog)
+        }
     }
 
     /**
@@ -979,6 +963,7 @@ public class PreviewTextPanel extends JPanel {
 
     /**
      * Finds the next or previous match relative to the current caret position.
+     *
      * @param forward true = next match; false = previous match
      */
     private void findNext(boolean forward) {

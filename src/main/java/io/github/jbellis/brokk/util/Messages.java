@@ -13,7 +13,6 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 public class Messages {
-    public static final String EMULATED_TOOL_CALLS = "[!json]";
     private static final Logger logger = LogManager.getLogger(Messages.class);
 
     // Simple OpenAI tokenizer for approximate counting

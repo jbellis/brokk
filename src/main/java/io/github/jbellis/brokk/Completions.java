@@ -52,7 +52,7 @@ public class Completions {
     /**
      * Expand paths that may contain wildcards (*, ?), returning all matches.
      */
-    public static List<? extends BrokkFile> expandPath(IProject project, String pattern) {
+    public static List<BrokkFile> expandPath(IProject project, String pattern) {
         // First check if this is a single file
         var file = maybeExternalFile(project.getRoot(), pattern);
         if (file.exists()) {
@@ -82,6 +82,7 @@ public class Completions {
         var filename = Path.of(pattern).getFileName().toString();
         var matches = project.getAllFiles().stream()
                 .filter(p -> p.getFileName().equals(filename))
+                .map(f -> (BrokkFile) f)
                 .toList();
         if (matches.size() != 1) {
             return List.of();

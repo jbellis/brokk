@@ -5,7 +5,6 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import io.github.jbellis.brokk.ContextManager;
-import io.github.jbellis.brokk.analyzer.Language;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,17 +12,17 @@ import java.util.List;
 public abstract class ArchitectPrompts extends CodePrompts {
     public static final ArchitectPrompts instance = new ArchitectPrompts() {};
 
-    public List<ChatMessage> collectMessages(ContextManager cm, List<ChatMessage> sessionMessages) {
+    public List<ChatMessage> collectMessages(ContextManager cm, List<ChatMessage> sessionMessages) throws InterruptedException {
         var messages = new ArrayList<ChatMessage>();
         messages.add(new SystemMessage(formatIntro(cm, CodePrompts.ARCHITECT_REMINDER)));
-        messages.addAll(cm.getWorkspaceContentsMessages(true));
+        messages.addAll(cm.getWorkspaceContentsMessages());
         messages.addAll(cm.getHistoryMessages());
         messages.addAll(sessionMessages);
         // top 10 related classes
         String topClassesRaw = "";
-        // this check is mostly equivalent to analyzer.isEmpty() but doesn't block for analyzer creation (or throw InterruptedException)
-        if (cm.getProject().getAnalyzerLanguage() != Language.None) {
-            var ac = cm.topContext().setAutoContextFiles(10).buildAutoContext();
+        // Check if an analyzer language is configured (not null)
+        if (cm.getAnalyzer().isCpg()) {
+            var ac = cm.topContext().buildAutoContext(10);
             topClassesRaw = ac.text();
             if (!topClassesRaw.isBlank()) {
                 var topClassesText = topClassesRaw.isBlank() ? "" : """

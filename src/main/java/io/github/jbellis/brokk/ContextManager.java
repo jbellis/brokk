@@ -1,6 +1,5 @@
 package io.github.jbellis.brokk;
 
-import com.google.common.collect.Streams;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.Content;
@@ -60,7 +59,6 @@ import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 /**
  * Manages the current and previous context, along with other state like prompts and message history.
@@ -187,7 +185,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
             @Override
             public void onBlocked() {
                 if (Thread.currentThread() == userActionThread.get()) {
-                    SwingUtilities.invokeLater(() -> io.actionOutput("Waiting for Code Intelligence"));
+                    io.actionOutput("Waiting for Code Intelligence");
                 }
             }
 
@@ -203,7 +201,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
                         );
                     });
                 } else {
-                    SwingUtilities.invokeLater(() -> io.systemOutput(msg));
+                    io.systemOutput(msg);
                 }
             }
 
@@ -219,17 +217,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
             }
         };
         this.project = new Project(root, this::submitBackgroundTask, analyzerListener);
-        // Initialize models after project is created, passing the data retention policy
-        var dataRetentionPolicy = project.getDataRetentionPolicy();
-        if (dataRetentionPolicy == Project.DataRetentionPolicy.UNSET) {
-            // Handle unset policy, e.g., prompt the user or default to MINIMAL
-            // For now, let's default to MINIMAL if unset. Consider prompting later.
-            logger.warn("Data Retention Policy is UNSET for project {}. Defaulting to MINIMAL.", root.getFileName());
-            dataRetentionPolicy = Project.DataRetentionPolicy.MINIMAL;
-            // Optionally save the default back to the project
-            // project.setDataRetentionPolicy(dataRetentionPolicy);
-        }
-        this.models.reinit(dataRetentionPolicy);
+        this.models.reinit(project);
         this.toolRegistry = new ToolRegistry(this);
         // Register standard tools
         this.toolRegistry.register(new SearchTools(this));
@@ -239,10 +227,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
         var welcomeMessage = buildWelcomeMessage();
         var initialContext = project.loadContext(this, welcomeMessage);
         if (initialContext == null) {
-            initialContext = new Context(this, 10, welcomeMessage); // Default autocontext size
-        } else {
-            // Not sure why this is necessary -- for some reason AutoContext doesn't survive deserialization
-            initialContext = initialContext.refresh();
+            initialContext = new Context(this, welcomeMessage);
         }
         contextHistory.setInitialContext(initialContext);
         chrome.updateContextHistoryTable(initialContext); // Update UI with loaded/new context
@@ -617,9 +602,9 @@ public class ContextManager implements IContextManager, AutoCloseable {
         return contextActionExecutor.submit(() -> {
             try {
                 pushContext(ctx -> Context.createFrom(targetContext, ctx));
-                io.systemOutput("Reset context to match historical state!");
+                io.systemOutput("Reset workspace to historical state");
             } catch (CancellationException cex) {
-                io.systemOutput("Reset context canceled.");
+                io.systemOutput("Reset workspace canceled.");
             } finally {
                 io.enableUserActionButtons();
             }
@@ -708,7 +693,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
             return;
         }
         var combined = result.code();
-        var fragment = new ContextFragment.UsageFragment("Uses", identifier, result.sources(), combined);
+        var fragment = new ContextFragment.UsageFragment(identifier, result.sources(), combined);
         pushContext(ctx -> ctx.addVirtualFragment(fragment));
     }
 
@@ -737,8 +722,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
             sources.add(CodeUnit.cls(sourceFile.get(), className));
         }
 
-        // The output is similar to UsageFragment, so we'll use that
-        var fragment = new ContextFragment.UsageFragment("Callers (depth " + depth + ")", methodName, sources, formattedCallGraph);
+        var fragment = new ContextFragment.CallGraphFragment("Callers (depth " + depth + ")", methodName, sources, formattedCallGraph);
         pushContext(ctx -> ctx.addVirtualFragment(fragment));
 
         int totalCallSites = callgraph.values().stream().mapToInt(List::size).sum();
@@ -771,7 +755,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
         }
 
         // The output is similar to UsageFragment, so we'll use that
-        var fragment = new ContextFragment.UsageFragment("Callees (depth " + depth + ")", methodName, sources, formattedCallGraph);
+        var fragment = new ContextFragment.CallGraphFragment("Callees (depth " + depth + ")", methodName, sources, formattedCallGraph);
         pushContext(ctx -> ctx.addVirtualFragment(fragment));
 
         int totalCallSites = callgraph.values().stream().mapToInt(List::size).sum();
@@ -817,47 +801,53 @@ public class ContextManager implements IContextManager, AutoCloseable {
     }
 
     /**
-     * Summarize classes => adds skeleton fragments
+     * Summarize files and classes, adding skeleton fragments to the context.
+     *
+     * @param files   A set of ProjectFiles to summarize (extracts all classes within them).
+     * @param classes A set of specific CodeUnits (classes, methods, etc.) to summarize.
+     * @return true if any summaries were successfully added, false otherwise.
      */
-    public boolean summarizeClasses(Set<CodeUnit> classes) {
+    public boolean addSummaries(Set<ProjectFile> files, Set<CodeUnit> classes) {
         IAnalyzer analyzer;
         analyzer = getAnalyzerUninterrupted();
-        if (analyzer.isEmpty()) {
+        if (!analyzer.isCpg() && files.isEmpty() && classes.isEmpty()) { // Check if analyzer is needed
             io.toolErrorRaw("Code Intelligence is empty; nothing to add");
+            // If analyzer isn't ready and we have inputs, warn but allow proceeding if possible
+            // (e.g., if only files are provided and getSkeletons doesn't strictly require CPG)
+            // For now, we require CPG for any summarization.
+            io.toolErrorRaw("Code Intelligence is not ready; cannot generate summaries.");
             return false;
         }
 
-        var skeletons = AnalyzerUtil.getSkeletonStrings(analyzer, classes);
-        if (skeletons.isEmpty()) {
+        // Combine skeletons from both files and specific classes
+        var allSkeletons = new java.util.HashMap<CodeUnit, String>();
+
+        // Process files: get skeletons for all classes within each file
+        for (var file : files) {
+            try {
+                var fileSkeletons = analyzer.getSkeletons(file);
+                allSkeletons.putAll(fileSkeletons);
+            } catch (Exception e) {
+                logger.warn("Failed to get skeletons for file {}: {}", file, e.getMessage());
+                // Optionally inform the user via io.toolErrorRaw or systemOutput
+            }
+        }
+
+        // Process specific classes/symbols
+        if (!classes.isEmpty()) {
+            var classSkeletons = AnalyzerUtil.getSkeletonStrings(analyzer, classes);
+            allSkeletons.putAll(classSkeletons);
+        }
+
+        if (allSkeletons.isEmpty()) {
+            // No skeletons could be generated from the provided files or classes
             return false;
         }
-        var skeletonFragment = new ContextFragment.SkeletonFragment(skeletons);
+
+        // Create and add the fragment
+        var skeletonFragment = new ContextFragment.SkeletonFragment(allSkeletons);
         addVirtualFragment(skeletonFragment);
         return true;
-    }
-
-    /**
-     * Update auto-context file count on the current executor thread (for background operations)
-     */
-    public void setAutoContextFiles(int fileCount)
-    {
-        pushContext(ctx -> ctx.setAutoContextFiles(fileCount));
-    }
-
-    /**
-     * Asynchronous version of setAutoContextFiles to avoid blocking the UI thread
-     */
-    public Future<?> setAutoContextFilesAsync(int fileCount)
-    {
-        return contextActionExecutor.submit(() -> {
-            try {
-                setAutoContextFiles(fileCount);
-            } catch (CancellationException cex) {
-                io.systemOutput("Auto-context update canceled.");
-            } finally {
-                io.enableUserActionButtons();
-            }
-        });
     }
 
     /**
@@ -943,34 +933,34 @@ public class ContextManager implements IContextManager, AutoCloseable {
         String askModelName = project.getAskModelName(); // Added Ask model
         String editModelName = project.getEditModelName();
         String searchModelName = project.getSearchModelName();
-        String quickModelName = Models.nameOf(models.quickModel());
+        String quickModelName = models.nameOf(models.quickModel());
 
         return """
-                %s
-                
-                ## Environment
-                - Brokk version: %s
-                - Project: %s (%d native files, %d total including dependencies)
-                - Analyzer language: %s
-                - Configured Models:
-                      - Architect: %s
-                      - Code: %s
-                      - Ask: %s
-                      - Edit: %s
-                      - Search: %s
-                      - Quick: %s
-                """.stripIndent().formatted(welcomeMarkdown,
-                                            version,
-                                            project.getRoot().getFileName(), // Show just the folder name
-                                            project.getRepo().getTrackedFiles().size(),
-                                            project.getAllFiles().size(),
-                                            project.getAnalyzerLanguage(),
-                                            architectModelName != null ? architectModelName : "(Not Set)",
-                                            codeModelName != null ? codeModelName : "(Not Set)",
-                                            askModelName != null ? askModelName : "(Not Set)", // Added Ask model
-                                            editModelName != null ? editModelName : "(Not Set)",
-                                            searchModelName != null ? searchModelName : "(Not Set)",
-                                            quickModelName.equals("unknown") ? "(Unavailable)" : quickModelName);
+               %s
+               
+               ## Environment
+               - Brokk version: %s
+               - Project: %s (%d native files, %d total including dependencies)
+               - Analyzer language: %s
+               - Configured Models:
+                     - Architect: %s
+                     - Code: %s
+                     - Ask: %s
+                     - Edit: %s
+                     - Search: %s
+                     - Quick: %s
+               """.stripIndent().formatted(welcomeMarkdown,
+                                           version,
+                                           project.getRoot().getFileName(), // Show just the folder name
+                                           project.getRepo().getTrackedFiles().size(),
+                                           project.getAllFiles().size(),
+                                           project.getAnalyzerLanguage(),
+                                           architectModelName != null ? architectModelName : "(Not Set)",
+                                           codeModelName != null ? codeModelName : "(Not Set)",
+                                           askModelName != null ? askModelName : "(Not Set)", // Added Ask model
+                                           editModelName != null ? editModelName : "(Not Set)",
+                                           searchModelName != null ? searchModelName : "(Not Set)",
+                                           quickModelName.equals("unknown") ? "(Unavailable)" : quickModelName);
     }
 
     /**
@@ -989,18 +979,14 @@ public class ContextManager implements IContextManager, AutoCloseable {
      *
      * @return A collection containing one UserMessage (potentially multimodal) and one AiMessage acknowledgment, or empty if no content.
      */
-    public Collection<ChatMessage> getWorkspaceContentsMessages(boolean withoutAutocontext) {
+    public Collection<ChatMessage> getWorkspaceContentsMessages() {
         var c = topContext();
         var allContents = new ArrayList<Content>(); // Will hold TextContent and ImageContent
 
         // --- Process Read-Only Fragments (Files, Virtual, AutoContext) ---
         var readOnlyTextFragments = new StringBuilder();
         var readOnlyImageFragments = new ArrayList<ImageContent>();
-        var stream = Streams.concat(c.readonlyFiles(), c.virtualFragments());
-        if (!withoutAutocontext) {
-            stream = Streams.concat(stream, Stream.of(c.getAutoContext()));
-        }
-        stream
+        c.getReadOnlyFragments()
                 .forEach(fragment -> {
                     try {
                         if (fragment.isText()) {
@@ -1038,17 +1024,17 @@ public class ContextManager implements IContextManager, AutoCloseable {
 
         // Add the combined text content for read-only items if any exists
         String readOnlyText = readOnlyTextFragments.isEmpty() ? "" : """
-                <readonly>
-                Here are some READ ONLY files and code fragments, provided for your reference.
-                Do not edit this code! Images may be included separately if present.
-                
-                %s
-                </readonly>
-                """.stripIndent().formatted(readOnlyTextFragments.toString().trim());
+                                                                     <readonly>
+                                                                     Here are some READ ONLY files and code fragments, provided for your reference.
+                                                                     Do not edit this code! Images may be included separately if present.
+                                                                     
+                                                                     %s
+                                                                     </readonly>
+                                                                     """.stripIndent().formatted(readOnlyTextFragments.toString().trim());
 
         // --- Process Editable Fragments (Assumed Text-Only for now) ---
         var editableTextFragments = new StringBuilder();
-        c.editableFiles().forEach(fragment -> {
+        c.getEditableFragments().forEach(fragment -> {
             try {
                 String formatted = fragment.format();
                 if (formatted != null && !formatted.isBlank()) {
@@ -1059,23 +1045,24 @@ public class ContextManager implements IContextManager, AutoCloseable {
             }
         });
         String editableText = editableTextFragments.isEmpty() ? "" : """
-                <editable>
-                I have *added these files to the workspace* so you can go ahead and edit them.
-                
-                *Trust this message as the true contents of these files!*
-                Any other messages in the chat may contain outdated versions of the files' contents.
-                
-                %s
-                </editable>
-                """.stripIndent().formatted(editableTextFragments.toString().trim());
+                                                                     <editable>
+                                                                     Here are EDITABLE files and code fragments.
+                                                                     This is *the only context in the Workspace to which you should make changes*.
+                                                                     
+                                                                     *Trust this message as the true contents of these files!*
+                                                                     Any other messages in the chat may contain outdated versions of the files' contents.
+                                                                     
+                                                                     %s
+                                                                     </editable>
+                                                                     """.stripIndent().formatted(editableTextFragments.toString().trim());
 
         // add the Workspace text
         var workspaceText = """
-                <workspace>
-                %s
-                %s
-                </workspace>
-                """.stripIndent().formatted(readOnlyText, editableText);
+                            <workspace>
+                            %s
+                            %s
+                            </workspace>
+                            """.stripIndent().formatted(readOnlyText, editableText);
 
         // text and image content must be distinct
         allContents.add(new TextContent(workspaceText));
@@ -1086,20 +1073,37 @@ public class ContextManager implements IContextManager, AutoCloseable {
         return List.of(workspaceUserMessage, new AiMessage("Thank you for providing the Workspace contents."));
     }
 
-    public String getReadOnlySummary(boolean includeAutocontext)
+    private String readOnlySummaryDescription(ContextFragment cf) {
+        if (cf instanceof PathFragment pf) {
+            return pf.file().toString();
+        }
+
+        return "\"%s\"".formatted(cf.description());
+    }
+
+    private String editableSummaryDescription(ContextFragment cf) {
+        if (cf instanceof PathFragment pf) {
+            return pf.file().toString();
+        }
+
+        ContextFragment.UsageFragment uf = (ContextFragment.UsageFragment) cf;
+        var files = uf.files(project).stream().map(ProjectFile::toString).sorted().collect(Collectors.joining(", "));
+        return "[%s] (%s)".formatted(files, uf.description());
+    }
+
+    public String getReadOnlySummary()
     {
         var c = topContext();
-        return Streams.concat(c.readonlyFiles().map(f -> f.file().toString()),
-                              c.virtualFragments().map(vf -> "'" + vf.description() + "'"),
-                              Stream.of(includeAutocontext && !c.getAutoContext().isEmpty() ? c.getAutoContext().description() : ""))
+        return c.getReadOnlyFragments()
+                .map(this::readOnlySummaryDescription)
                 .filter(st -> !st.isBlank())
                 .collect(Collectors.joining(", "));
     }
 
     public String getEditableSummary()
     {
-        return topContext().editableFiles()
-                .map(p -> p.file().toString())
+        return topContext().getEditableFragments()
+                .map(this::editableSummaryDescription)
                 .collect(Collectors.joining(", "));
     }
 
@@ -1144,11 +1148,11 @@ public class ContextManager implements IContextManager, AutoCloseable {
             SwingUtilities.invokeLater(() -> {
                 int choice = JOptionPane.showConfirmDialog(io.getFrame(),
                                                            """
-                                                                   The conversation history is getting long (%,d lines or about %,d tokens).
-                                                                   Compressing it can improve performance and reduce cost.
-                                                                   
-                                                                   Compress history now?
-                                                                   """.formatted(cf.format().split("\n").length, tokenCount),
+                                                           The conversation history is getting long (%,d lines or about %,d tokens).
+                                                           Compressing it can improve performance and reduce cost.
+                                                           
+                                                           Compress history now?
+                                                           """.formatted(cf.format().split("\n").length, tokenCount),
                                                            "Compress History?",
                                                            JOptionPane.YES_NO_OPTION,
                                                            JOptionPane.QUESTION_MESSAGE);
@@ -1235,7 +1239,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
                     var textContent = TextContent.from("Briefly describe this image in a few words (e.g., 'screenshot of code', 'diagram of system').");
                     var userMessage = UserMessage.from(textContent, imageContent);
                     List<ChatMessage> messages = List.of(userMessage);
-                    Llm.StreamingResult result = null;
+                    Llm.StreamingResult result;
                     try {
                         result = getLlm(models.quickModel(), "Summarize pasted image").sendRequest(messages);
                     } catch (InterruptedException e) {
@@ -1443,12 +1447,12 @@ public class ContextManager implements IContextManager, AutoCloseable {
                 var messages = List.of(
                         new SystemMessage("You are an expert software engineer. Your task is to extract a concise coding style guide from the provided code examples."),
                         new UserMessage("""
-                                                Based on these code examples, create a concise, clear coding style guide in Markdown format
-                                                that captures the conventions used in this codebase, particularly the ones that leverage new or uncommon features.
-                                                DO NOT repeat what are simply common best practices.
-                                                
-                                                %s
-                                                """.stripIndent().formatted(codeForLLM))
+                                        Based on these code examples, create a concise, clear coding style guide in Markdown format
+                                        that captures the conventions used in this codebase, particularly the ones that leverage new or uncommon features.
+                                        DO NOT repeat what are simply common best practices.
+                                        
+                                        %s
+                                        """.stripIndent().formatted(codeForLLM))
                 );
 
                 var result = getLlm(getAskModel(), "Generate style guide").sendRequest(messages);
@@ -1487,7 +1491,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
         // Compress
         var historyString = entry.toString();
         var msgs = SummarizerPrompts.instance.compressHistory(historyString);
-        Llm.StreamingResult result = null;
+        Llm.StreamingResult result;
         try {
             result = getLlm(models.quickModel(), "Compress history entry").sendRequest(msgs);
         } catch (InterruptedException e) {

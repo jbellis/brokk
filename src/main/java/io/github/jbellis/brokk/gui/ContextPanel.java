@@ -245,48 +245,27 @@ public class ContextPanel extends JPanel {
                         contextMenu.add(showContentsItem);
                         contextMenu.addSeparator();
 
-                        // If this is the AutoContext row, show AutoContext items
-                        if (fragmentToShow instanceof ContextFragment.AutoContext) {
-                            JMenuItem setAutoContext5Item = new JMenuItem("Set AutoContext to 5");
-                            setAutoContext5Item.addActionListener(e1 -> chrome.contextManager.setAutoContextFilesAsync(5));
-
-                            JMenuItem setAutoContext10Item = new JMenuItem("Set AutoContext to 10");
-                            setAutoContext10Item.addActionListener(e1 -> chrome.contextManager.setAutoContextFilesAsync(10));
-
-                            JMenuItem setAutoContext20Item = new JMenuItem("Set AutoContext to 20");
-                            setAutoContext20Item.addActionListener(e1 -> chrome.contextManager.setAutoContextFilesAsync(20));
-
-                            JMenuItem setAutoContextCustomItem = new JMenuItem("Set AutoContext...");
-                            setAutoContextCustomItem.addActionListener(e1 -> chrome.showSetAutoContextSizeDialog());
-
-                            contextMenu.add(setAutoContext5Item);
-                            contextMenu.add(setAutoContext10Item);
-                            contextMenu.add(setAutoContext20Item);
-                            contextMenu.add(setAutoContextCustomItem);
-
-                        } else {
-                            // Otherwise, show "View History" only if it's a ProjectPathFragment and Git is available
-                            boolean hasGit = contextManager != null && contextManager.getProject() != null
-                                    && contextManager.getProject().hasGit();
-                            if (hasGit && fragmentToShow instanceof ContextFragment.ProjectPathFragment ppf) {
-                                JMenuItem viewHistoryItem = new JMenuItem("View History");
-                                viewHistoryItem.addActionListener(ev -> {
-                                    // Already know it's a ProjectPathFragment here, use ppf captured by the outer if
-                                    chrome.getGitPanel().addFileHistoryTab(ppf.file());
-                                });
-                                contextMenu.add(viewHistoryItem);
-                            } else if (fragmentToShow instanceof ContextFragment.HistoryFragment cf) {
-                                // Add Compress History option for conversation fragment
-                                JMenuItem compressHistoryItem = new JMenuItem("Compress History");
-                                compressHistoryItem.addActionListener(e1 -> {
-                                    // Call ContextManager to compress history
-                                    contextManager.compressHistoryAsync();
-                                });
-                                contextMenu.add(compressHistoryItem);
-                                // Only enable if uncompressed entries exist
-                                var uncompressedExists = cf.entries().stream().anyMatch(entry -> !entry.isCompressed());
-                                compressHistoryItem.setEnabled(uncompressedExists);
-                            }
+                        // show "View History" only if it's a ProjectPathFragment and Git is available
+                        boolean hasGit = contextManager != null && contextManager.getProject() != null
+                                && contextManager.getProject().hasGit();
+                        if (hasGit && fragmentToShow instanceof ContextFragment.ProjectPathFragment ppf) {
+                            JMenuItem viewHistoryItem = new JMenuItem("View History");
+                            viewHistoryItem.addActionListener(ev -> {
+                                // Already know it's a ProjectPathFragment here, use ppf captured by the outer if
+                                chrome.getGitPanel().addFileHistoryTab(ppf.file());
+                            });
+                            contextMenu.add(viewHistoryItem);
+                        } else if (fragmentToShow instanceof ContextFragment.HistoryFragment cf) {
+                            // Add Compress History option for conversation fragment
+                            JMenuItem compressHistoryItem = new JMenuItem("Compress History");
+                            compressHistoryItem.addActionListener(e1 -> {
+                                // Call ContextManager to compress history
+                                contextManager.compressHistoryAsync();
+                            });
+                            contextMenu.add(compressHistoryItem);
+                            // Only enable if uncompressed entries exist
+                            var uncompressedExists = cf.entries().stream().anyMatch(entry -> !entry.isCompressed());
+                            compressHistoryItem.setEnabled(uncompressedExists);
                         }
 
                         // If the user right-clicked on the references column, show reference options
@@ -349,14 +328,7 @@ public class ContextPanel extends JPanel {
                         });
                         contextMenu.add(dropSelectionItem);
 
-                        if (contextManager.selectedContext().equals(contextManager.topContext())) {
-                            if (contextTable.getSelectedRowCount() == 1 && fragmentToShow instanceof ContextFragment.AutoContext) {
-                                // Check if AutoContext is enabled using the fragmentToShow variable
-                                dropSelectionItem.setEnabled(contextManager.selectedContext().isAutoContextEnabled());
-                            }
-                        } else {
-                            dropSelectionItem.setEnabled(false);
-                        }
+                        dropSelectionItem.setEnabled(contextManager.selectedContext().equals(contextManager.topContext()));
                     } else {
                         // No row selected - show the popup with all options
                         tablePopupMenu.show(contextTable, e.getX(), e.getY());
@@ -746,26 +718,41 @@ public class ContextPanel extends JPanel {
     // ------------------------------------------------------------------
 
     /**
+     * Checks if analyzer is ready for operations, shows error message if not.
+     */
+    private boolean isAnalyzerReady() {
+        var analyzer = contextManager.getProject().getAnalyzerWrapper().getNonBlocking();
+        if (analyzer == null) {
+            chrome.systemOutput("Code Intelligence is still being built. Please wait until completion.");
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * Shows the symbol selection dialog and adds usage information for the selected symbol.
      */
-    public Future<?> findSymbolUsageAsync() {
-        // Use contextManager's task submission
-        return contextManager.submitContextTask("Find Symbol Usage", () -> {
+    public void findSymbolUsageAsync() {
+        if (!isAnalyzerReady()) {
+            return;
+        }
+
+        contextManager.submitContextTask("Find Symbol Usage", () -> {
             try {
-                var analyzer = contextManager.getProject().getAnalyzerUninterrupted(); // Use contextManager
+                var analyzer = contextManager.getProject().getAnalyzerUninterrupted();
                 if (analyzer.isEmpty()) {
-                    chrome.toolErrorRaw("Code Intelligence is empty; nothing to add"); // Use chrome
+                    chrome.toolErrorRaw("Code Intelligence is empty; nothing to add");
                     return;
                 }
 
                 String symbol = showSymbolSelectionDialog("Select Symbol", CodeUnitType.ALL);
                 if (symbol != null && !symbol.isBlank()) {
-                    contextManager.usageForIdentifier(symbol); // Use contextManager
+                    contextManager.usageForIdentifier(symbol);
                 } else {
-                    chrome.systemOutput("No symbol selected."); // Use chrome
+                    chrome.systemOutput("No symbol selected.");
                 }
             } catch (CancellationException cex) {
-                chrome.systemOutput("Symbol selection canceled."); // Use chrome
+                chrome.systemOutput("Symbol selection canceled.");
             }
             // No finally needed, submitContextTask handles enabling buttons
         });
@@ -774,25 +761,28 @@ public class ContextPanel extends JPanel {
     /**
      * Shows the method selection dialog and adds callers information for the selected method.
      */
-    public Future<?> findMethodCallersAsync() {
-        // Use contextManager's task submission
-        return contextManager.submitContextTask("Find Method Callers", () -> {
+    public void findMethodCallersAsync() {
+        if (!isAnalyzerReady()) {
+            return;
+        }
+
+        contextManager.submitContextTask("Find Method Callers", () -> {
             try {
-                var analyzer = contextManager.getProject().getAnalyzerUninterrupted(); // Use contextManager
+                var analyzer = contextManager.getProject().getAnalyzerUninterrupted();
                 if (analyzer.isEmpty()) {
-                    chrome.toolErrorRaw("Code Intelligence is empty; nothing to add"); // Use chrome
+                    chrome.toolErrorRaw("Code Intelligence is empty; nothing to add");
                     return;
                 }
 
                 var dialog = showCallGraphDialog("Select Method", true);
                 if (dialog == null || !dialog.isConfirmed()) { // Check confirmed state
-                    chrome.systemOutput("No method selected."); // Use chrome
+                    chrome.systemOutput("No method selected.");
                 } else {
-                    // Use contextManager
+
                     contextManager.callersForMethod(dialog.getSelectedMethod(), dialog.getDepth(), dialog.getCallGraph());
                 }
             } catch (CancellationException cex) {
-                chrome.systemOutput("Method selection canceled."); // Use chrome
+                chrome.systemOutput("Method selection canceled.");
             }
             // No finally needed, submitContextTask handles enabling buttons
         });
@@ -801,25 +791,28 @@ public class ContextPanel extends JPanel {
     /**
      * Shows the call graph dialog and adds callees information for the selected method.
      */
-    public Future<?> findMethodCalleesAsync() {
-        // Use contextManager's task submission
-        return contextManager.submitContextTask("Find Method Callees", () -> {
+    public void findMethodCalleesAsync() {
+        if (!isAnalyzerReady()) {
+            return;
+        }
+
+        contextManager.submitContextTask("Find Method Callees", () -> {
             try {
-                var analyzer = contextManager.getProject().getAnalyzerUninterrupted(); // Use contextManager
+                var analyzer = contextManager.getProject().getAnalyzerUninterrupted();
                 if (analyzer.isEmpty()) {
-                    chrome.toolErrorRaw("Code Intelligence is empty; nothing to add"); // Use chrome
+                    chrome.toolErrorRaw("Code Intelligence is empty; nothing to add");
                     return;
                 }
 
                 var dialog = showCallGraphDialog("Select Method for Callees", false);
                 if (dialog == null || !dialog.isConfirmed() || dialog.getSelectedMethod() == null || dialog.getSelectedMethod().isBlank()) {
-                    chrome.systemOutput("No method selected."); // Use chrome
+                    chrome.systemOutput("No method selected.");
                 } else {
-                    // Use contextManager
+
                     contextManager.calleesForMethod(dialog.getSelectedMethod(), dialog.getDepth(), dialog.getCallGraph());
                 }
             } catch (CancellationException cex) {
-                chrome.systemOutput("Method selection canceled."); // Use chrome
+                chrome.systemOutput("Method selection canceled.");
             }
             // No finally needed, submitContextTask handles enabling buttons
         });
@@ -829,12 +822,12 @@ public class ContextPanel extends JPanel {
      * Show the symbol selection dialog with a type filter
      */
     private String showSymbolSelectionDialog(String title, Set<CodeUnitType> typeFilter) {
-        var analyzer = contextManager.getProject().getAnalyzerUninterrupted(); // Use contextManager
+        var analyzer = contextManager.getProject().getAnalyzerUninterrupted();
         var dialogRef = new AtomicReference<SymbolSelectionDialog>();
         SwingUtil.runOnEDT(() -> {
-            var dialog = new SymbolSelectionDialog(chrome.getFrame(), analyzer, title, typeFilter); // Use chrome
-            dialog.setSize((int) (chrome.getFrame().getWidth() * 0.9), dialog.getHeight()); // Use chrome
-            dialog.setLocationRelativeTo(chrome.getFrame()); // Use chrome
+            var dialog = new SymbolSelectionDialog(chrome.getFrame(), analyzer, title, typeFilter);
+            dialog.setSize((int) (chrome.getFrame().getWidth() * 0.9), dialog.getHeight());
+            dialog.setLocationRelativeTo(chrome.getFrame());
             dialog.setVisible(true);
             dialogRef.set(dialog);
         });
@@ -853,12 +846,12 @@ public class ContextPanel extends JPanel {
      * Show the call graph dialog for configuring method and depth
      */
     private CallGraphDialog showCallGraphDialog(String title, boolean isCallerGraph) {
-        var analyzer = contextManager.getProject().getAnalyzerUninterrupted(); // Use contextManager
+        var analyzer = contextManager.getProject().getAnalyzerUninterrupted();
         var dialogRef = new AtomicReference<CallGraphDialog>();
         SwingUtil.runOnEDT(() -> {
-            var dialog = new CallGraphDialog(chrome.getFrame(), analyzer, title, isCallerGraph); // Use chrome
-            dialog.setSize((int) (chrome.getFrame().getWidth() * 0.9), dialog.getHeight()); // Use chrome
-            dialog.setLocationRelativeTo(chrome.getFrame()); // Use chrome
+            var dialog = new CallGraphDialog(chrome.getFrame(), analyzer, title, isCallerGraph);
+            dialog.setSize((int) (chrome.getFrame().getWidth() * 0.9), dialog.getHeight());
+            dialog.setLocationRelativeTo(chrome.getFrame());
             dialog.setVisible(true);
             dialogRef.set(dialog);
         });
@@ -1093,8 +1086,6 @@ public class ContextPanel extends JPanel {
             for (var frag : selectedFragments) {
                 if (frag instanceof ContextFragment.HistoryFragment) {
                     clearHistory = true;
-                } else if (frag instanceof ContextFragment.AutoContext) {
-                    contextManager.setAutoContextFiles(0); // Qualify contextManager
                 } else if (frag instanceof ContextFragment.PathFragment pf) {
                     pathFragsToRemove.add(pf);
                 } else {
@@ -1117,74 +1108,78 @@ public class ContextPanel extends JPanel {
     }
 
     private void doSummarizeAction(List<? extends ContextFragment> selectedFragments) {
-        var project = contextManager.getProject(); // Qualify contextManager
-        var analyzer = project.getAnalyzerWrapper();
-        try {
-            if (analyzer.getNonBlocking() != null && analyzer.get().isEmpty()) {
-                chrome.toolErrorRaw("Code Intelligence is empty; nothing to add");
-                return;
-            }
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+        var project = contextManager.getProject();
+        if (!isAnalyzerReady()) {
+            return;
         }
 
-        HashSet<CodeUnit> sources = new HashSet<>();
-        if (selectedFragments.isEmpty()) {
-            // Show dialog allowing selection of files OR classes for summarization
-            // Only allow selecting project files that contain classes for the Files tab
-            IAnalyzer az;
-            try {
-                az = analyzer.get();
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-            var completableProjectFiles = contextManager.submitBackgroundTask("Gathering symbolx", () -> {
-                return project.getAllFiles().stream().parallel()
-                        .filter(f -> !az.getClassesInFile(f).isEmpty())
-                        .collect(Collectors.toSet());
-            });
+        HashSet<ProjectFile> selectedFiles = new HashSet<>();
+        HashSet<CodeUnit> selectedClasses = new HashSet<>();
 
+        if (selectedFragments.isEmpty()) {
+            // Dialog case: select files OR classes
+            // Prepare project files for completion (can be done async)
+            // No need to filter here anymore, the dialog handles presentation.
+            var completableProjectFiles = contextManager.submitBackgroundTask("Gathering project files", project::getAllFiles);
+
+            // Show dialog allowing selection of files OR classes
             var selection = showMultiSourceSelectionDialog("Summarize Sources",
                                                            false, // No external files for summarize
-                                                           completableProjectFiles, // Project files with classes
-                                                           Set.of(SelectionMode.FILES, SelectionMode.CLASSES)); // Both modes
+                                                           completableProjectFiles, // All project files for completion
+                                                           Set.of(SelectionMode.FILES, SelectionMode.CLASSES)); // Both modes allowed
 
             if (selection == null || selection.isEmpty()) {
+                chrome.systemOutput("No files or classes selected for summarization.");
                 chrome.systemOutput("No files or classes selected for summarization.");
                 return;
             }
 
-            // Process selected files
+            // Add selected files (must be ProjectFile for summarization)
             if (selection.files() != null) {
-                var projectFiles = toProjectFilesUnsafe(selection.files());
-                for (var file : projectFiles) {
-                    sources.addAll(az.getClassesInFile(file));
-                }
+                selectedFiles.addAll(toProjectFilesUnsafe(selection.files()));
             }
-
-            // Process selected classes
+            // Add selected classes/symbols
             if (selection.classes() != null) {
-                sources.addAll(selection.classes());
+                selectedClasses.addAll(selection.classes());
             }
-        } else {
-            // Extract sources from selected fragments
+        } // End: if (selectedFragments.isEmpty())
+        else {
+            // Fragment case: Extract files and classes from selected fragments
             for (var frag : selectedFragments) {
-                sources.addAll(frag.sources(project));
+                if (frag instanceof ContextFragment.ProjectPathFragment ppf) {
+                    // If it's a file fragment, add the file
+                    selectedFiles.add(ppf.file());
+                } else {
+                    // Otherwise, add the sources (which should be classes/symbols)
+                    selectedClasses.addAll(frag.sources(project));
+                }
             }
         }
 
-        if (sources.isEmpty()) {
-            chrome.toolErrorRaw("No classes found in the selected " + (selectedFragments.isEmpty() ? "files" : "fragments")); // Qualify chrome
+        if (selectedFiles.isEmpty() && selectedClasses.isEmpty()) {
+            chrome.toolErrorRaw("No files or classes identified for summarization in the selection.");
             return;
         }
 
-        boolean success = contextManager.summarizeClasses(sources); // Qualify contextManager
+        // Call the updated addSummaries method
+        boolean success = contextManager.addSummaries(selectedFiles, selectedClasses);
+
         if (success) {
-            chrome.systemOutput("Summarized " + sources.size() + " classes"); // Qualify chrome
+            int fileCount = selectedFiles.size();
+            int classCount = selectedClasses.size();
+            String message = "Summarized ";
+            if (fileCount > 0 && classCount > 0) {
+                message += fileCount + " file(s) and " + classCount + " symbol(s)";
+            } else if (fileCount > 0) {
+                message += fileCount + " file(s)";
+            } else {
+                message += classCount + " symbol(s)";
+            }
+            chrome.systemOutput(message);
         } else {
-            chrome.toolErrorRaw("No summarizable classes found"); // Qualify chrome
+            chrome.toolErrorRaw("No summarizable content found in the selected files or symbols.");
         }
-    }
+    } // End: doSummarizeAction
 
     /**
      * Cast BrokkFile to ProjectFile. Will throw if ExternalFiles are present.

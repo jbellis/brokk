@@ -54,8 +54,6 @@ public class Brokk {
             System.setProperty("apple.awt.application.name", "Brokk");
         }
 
-        // Models are now initialized within ContextManager after instantiation
-
         SwingUtilities.invokeLater(() -> {
             // 1) Set FlatLaf Look & Feel - we'll use light as default initially
             try {

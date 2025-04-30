@@ -86,12 +86,12 @@ public class SearchAgent {
         this.io = contextManager.getIo();
         this.toolRegistry = toolRegistry;
 
-        // Set initial state based on analyzer presence
-        allowSearch = !analyzer.isEmpty();
-        allowInspect = !analyzer.isEmpty();
-        allowPagerank = !analyzer.isEmpty();
-        allowAnswer = true; // Can always answer/abort initially if context exists
-        allowTextSearch = analyzer.isEmpty(); // Enable text search only if no analyzer
+        // Set initial state based on analyzer presence and capabilities
+        allowSearch = analyzer.isCpg();      // Needs CPG for searchSymbols, getUsages
+        allowInspect = analyzer.isCpg();     // Needs CPG for getSources, getCallGraph
+        allowPagerank = analyzer.isCpg();    // Needs CPG for getRelatedClasses
+        allowAnswer = true;                 // Can always answer/abort initially if context exists
+        allowTextSearch = !analyzer.isCpg(); // Enable text search only if no CPG analyzer
         symbolsFound = false;
         beastMode = false;
     }
@@ -473,12 +473,11 @@ public class SearchAgent {
             var arguments = historyEntry.argumentsMap(); // Use helper from ToolHistoryEntry
 
             return switch (request.name()) { // Use request.name()
-                case "searchSymbols", "searchSubstrings", "searchFilenames" ->
-                        formatListParameter(arguments, "patterns");
+                case "searchSymbols", "searchSubstrings", "searchFilenames" -> formatListParameter(arguments, "patterns");
                 case "getFileContents" -> formatListParameter(arguments, "filenames");
+                case "getFileSummaries" -> formatListParameter(arguments, "filePaths");
                 case "getUsages" -> formatListParameter(arguments, "symbols");
-                case "getRelatedClasses", "getClassSkeletons",
-                     "getClassSources" -> formatListParameter(arguments, "classNames");
+                case "getRelatedClasses", "getClassSkeletons", "getClassSources" -> formatListParameter(arguments, "classNames");
                 case "getMethodSources" -> formatListParameter(arguments, "methodNames");
                 case "getCallGraphTo", "getCallGraphFrom" ->
                         arguments.getOrDefault("methodName", "").toString(); // Added graph tools
@@ -509,6 +508,7 @@ public class SearchAgent {
                 case "searchSymbols", "searchSubstrings", "searchFilenames" ->
                         getParameterListSignatures(toolName, arguments, "patterns");
                 case "getFileContents" -> getParameterListSignatures(toolName, arguments, "filenames");
+                case "getFileSummaries" -> getParameterListSignatures(toolName, arguments, "filePaths");
                 case "getUsages" -> getParameterListSignatures(toolName, arguments, "symbols");
                 case "getRelatedClasses", "getClassSkeletons",
                      "getClassSources" -> getParameterListSignatures(toolName, arguments, "classNames");
@@ -594,9 +594,9 @@ public class SearchAgent {
     /**
      * Extracts class name from a symbol
      */
-    private Optional<String> extractClassNameFromSymbol(String symbol) {
+    private Optional<? extends String> extractClassNameFromSymbol(String symbol) {
         return analyzer.getDefinition(symbol)
-                .flatMap(cu -> Optional.of(cu.classUnit().fqName()));
+                .flatMap(cu -> cu.classUnit().flatMap(cu2 -> Optional.of(cu2.fqName())));
     }
 
     /**
@@ -605,8 +605,8 @@ public class SearchAgent {
      * Returns null if the forged request would ALSO be a duplicate (signals caller to skip).
      */
     private ToolExecutionRequest handleDuplicateRequestIfNeeded(ToolExecutionRequest request) { // Takes/returns ToolExecutionRequest
-        if (analyzer.isEmpty()) {
-            // No duplicate detection without analyzer
+        if (!analyzer.isCpg()) {
+            // No duplicate detection without CPG analyzer (as CPG tools are the ones likely duplicated)
             return request;
         }
 
@@ -707,8 +707,8 @@ public class SearchAgent {
         List<String> names = new ArrayList<>();
         if (beastMode) return names; // Only answer/abort in beast mode
 
-        // Add names based on analyzer presence and state flags
-        if (!analyzer.isEmpty()) {
+        // Add names based on CPG analyzer presence and state flags
+        if (analyzer.isCpg()) {
             if (allowSearch) {
                 names.add("searchSymbols");
                 names.add("getUsages");
@@ -939,12 +939,11 @@ public class SearchAgent {
             });
 
             return switch (request.name()) {
-                case "searchSymbols", "searchSubstrings", "searchFilenames" ->
-                        formatListParameter(arguments, "patterns");
-                case "getFileContents" -> formatListParameter(arguments, "filenames");
-                case "getUsages" -> formatListParameter(arguments, "symbols");
-                case "getRelatedClasses", "getClassSkeletons",
-                     "getClassSources" -> formatListParameter(arguments, "classNames");
+                 case "searchSymbols", "searchSubstrings", "searchFilenames" -> formatListParameter(arguments, "patterns");
+                 case "getFileContents" -> formatListParameter(arguments, "filenames");
+                 case "getFileSummaries" -> formatListParameter(arguments, "filePaths");
+                 case "getUsages" -> formatListParameter(arguments, "symbols");
+                 case "getRelatedClasses", "getClassSkeletons", "getClassSources" -> formatListParameter(arguments, "classNames");
                 case "getMethodSources" -> formatListParameter(arguments, "methodNames");
                 case "getCallGraphTo", "getCallGraphFrom" -> arguments.getOrDefault("methodName", "").toString();
                 case "answerSearch", "abortSearch" -> "";
@@ -971,10 +970,12 @@ public class SearchAgent {
 
         String toolName = request.name();
         String resultText = execResult.resultText(); // Null check done in factory/constructor
-        var toolsRequiringSummaries = Set.of("searchSymbols", "getUsages", "getClassSources", "searchSubstrings", "searchFilenames", "getFileContents", "getRelatedClasses");
+        var toolsRequiringSummaries = Set.of("searchSymbols", "getUsages", "getClassSources",
+                                             "searchSubstrings", "searchFilenames", "getFileContents", "getRelatedClasses",
+                                             "getFileSummaries");
 
         if (toolsRequiringSummaries.contains(toolName) && Messages.getApproximateTokens(resultText) > SUMMARIZE_THRESHOLD) {
-            logger.debug("Queueing summarization for tool {}", toolName);
+            logger.debug("Queueing summarization for tool {} (length {})", toolName, Messages.getApproximateTokens(resultText));
             historyEntry.summarizeFuture = summarizeResultAsync(query, historyEntry);
         } else if (toolName.equals("searchSymbols") || toolName.equals("getRelatedClasses")) {
             // Apply prefix compression if not summarizing for searchSymbols and getRelatedClasses
@@ -1161,10 +1162,8 @@ public class SearchAgent {
         logger.debug("Combined tracked and LLM classes before normalize/coalesce: {}", combinedNames);
         // Transform to CodeUnit
         var codeUnits = combinedNames.stream()
-                .map(analyzer::getDefinition)
-                .filter(Optional::isPresent)
-                .map(Optional::get)
-                .map(CodeUnit::classUnit)
+                .flatMap(name -> analyzer.getDefinition(name).stream())
+                .flatMap(cu   -> cu.classUnit().stream())
                 .collect(Collectors.toSet());
         var coalesced = AnalyzerUtil.coalesceInnerClasses(codeUnits);
 
