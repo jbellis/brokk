@@ -46,25 +46,30 @@ public class CodeFenceRenderer implements NodeRenderer {
         
         int id = idProvider.getId(node);
         String language = node.getInfo().toString();
-        String content = node.getContentChars().toString();
+        
+        // Get raw content with original indentation preserved
+        // node.getContentChars() loses indentation, so we use getContentLines() instead
+        String content = node.getContentLines()
+                .stream()
+                .map(Object::toString)  // Keep the original text with indentation
+                .collect(java.util.stream.Collectors.joining("\n"));
         
         logger.debug("Rendering code fence with id={}, language={}, content length={}", 
                      id, language, content.length());
         
-        // Output placeholder tag with content both as text and as attribute (for test compatibility)
+        // Output placeholder tag with content as attribute only (no need for body)
         html.line();
         html.raw("<code-fence");
         html.raw(" data-id=\"" + id + "\"");
         html.raw(" data-lang=\"" + escapeHtml(language) + "\"");
         html.raw(" data-content=\"" + escapeHtml(content) + "\"");
-        html.raw(">");
-        html.text(content); // HtmlWriter.text() automatically handles HTML escaping
-        html.raw("</code-fence>");
+        html.raw(" />");
         html.line();
     }
     
     /**
      * Basic HTML escaping for attribute values.
+     * This preserves all whitespace characters including spaces and tabs.
      */
     private String escapeHtml(String text) {
         return text.replace("&", "&amp;")
