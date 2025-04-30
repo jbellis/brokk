@@ -2,17 +2,23 @@ package io.github.jbellis.brokk.gui.mop.stream;
 
 import io.github.jbellis.brokk.gui.mop.stream.blocks.CodeBlockComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.CodeBlockFactory;
+import io.github.jbellis.brokk.gui.mop.stream.blocks.ComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.ComponentDataFactory;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.CompositeComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.EditBlockComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.EditBlockFactory;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.MarkdownComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.MarkdownFactory;
+import io.github.jbellis.brokk.gui.mop.stream.flex.IdProvider;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -25,6 +31,7 @@ public class MiniParserTest {
     private MiniParser parser;
     private MarkdownFactory mdFactory;
     private Map<String, ComponentDataFactory> factories;
+    private IdProvider idProvider;
     
     @BeforeEach
     void setUp() {
@@ -33,6 +40,7 @@ public class MiniParserTest {
         factories = new HashMap<>();
         factories.put("code-fence", new CodeBlockFactory());
         factories.put("edit-block", new EditBlockFactory());
+        idProvider = new IdProvider();
     }
     
     @Test
@@ -40,8 +48,8 @@ public class MiniParserTest {
         var html = "<p>This is a simple paragraph.</p>";
         var doc = Jsoup.parse(html);
         var element = doc.body().child(0); // <p> element
-        
-        var components = parser.parse(element, mdFactory, factories);
+
+        var components = parser.parse(element, mdFactory, factories, idProvider);
         
         // Should produce a single MarkdownComponentData
         assertEquals(1, components.size());
@@ -57,8 +65,8 @@ public class MiniParserTest {
                   "</li></ul>";
         var doc = Jsoup.parse(html);
         var element = doc.body().child(0); // <ul> element
-        
-        var components = parser.parse(element, mdFactory, factories);
+
+        var components = parser.parse(element, mdFactory, factories, idProvider);
         
         // Should produce a single CompositeComponentData
         assertEquals(1, components.size());
@@ -94,8 +102,8 @@ public class MiniParserTest {
                   "</div>";
         var doc = Jsoup.parse(html);
         var element = doc.body().child(0); // <div> element
-        
-        var components = parser.parse(element, mdFactory, factories);
+
+        var components = parser.parse(element, mdFactory, factories, idProvider);
         
         // Should produce a single CompositeComponentData
         assertEquals(1, components.size());
@@ -126,8 +134,8 @@ public class MiniParserTest {
                   "</li></ul></blockquote>";
         var doc = Jsoup.parse(html);
         var element = doc.body().child(0); // <blockquote> element
-        
-        var components = parser.parse(element, mdFactory, factories);
+
+        var components = parser.parse(element, mdFactory, factories, idProvider);
         
         // Should produce a single CompositeComponentData
         assertEquals(1, components.size());
@@ -158,8 +166,8 @@ public class MiniParserTest {
                   "</blockquote>";
         var doc = Jsoup.parse(html);
         var element = doc.body().child(0); // <blockquote> element
-        
-        var components = parser.parse(element, mdFactory, factories);
+
+        var components = parser.parse(element, mdFactory, factories, idProvider);
         
         // Should produce a single CompositeComponentData
         assertEquals(1, components.size());
@@ -196,8 +204,8 @@ public class MiniParserTest {
                   "</div>";
         var doc = Jsoup.parse(html);
         var element = doc.body().child(0); // <div> element
-        
-        var components = parser.parse(element, mdFactory, factories);
+
+        var components = parser.parse(element, mdFactory, factories, idProvider);
         
         // Should produce a single CompositeComponentData
         assertEquals(1, components.size());
@@ -227,7 +235,7 @@ public class MiniParserTest {
         var doc = Jsoup.parse(html);
         var element = doc.body().child(0);
         
-        var components = parser.parse(element, mdFactory, factories);
+        var components = parser.parse(element, mdFactory, factories, idProvider);
         assertEquals(1, components.size());
         
         // Test component creation with light theme
@@ -244,5 +252,110 @@ public class MiniParserTest {
             var panel = composite.createComponent(false);
             assertEquals(composite.children().size(), panel.getComponentCount());
         }
+    }
+    
+    // ==== Test stable ID generation ====
+    
+    @Test
+    void sameHtmlSameIds() {
+        String html = "<p>Hello world</p>";
+        int id1 = extractOnlyMarkdownId(html);
+        int id2 = extractOnlyMarkdownId(html);  // second parse
+        assertEquals(id1, id2, "Markdown id must be deterministic");
+    }
+    
+    @Test
+    void idUnchangedWhenContentBelowChanges() {
+        String original = """
+            <div>
+              <p>Alpha</p>
+              <code-fence data-id="77" data-lang="java" data-content="x();"/>
+            </div>""";
+
+        String withExtraPara = """
+            <div>
+              <p>Alpha</p>
+              <code-fence data-id="77" data-lang="java" data-content="x();"/>
+              <p>EXTRA</p>
+            </div>""";
+
+        int idBefore = extractMarkdownId(original, 0);     // index of <p>Alpha</p>
+        int idAfter = extractMarkdownId(withExtraPara, 0); // index shifted down
+        assertEquals(idBefore, idAfter,
+                    "Id of unchanged paragraph must stay the same when text is inserted above");
+    }
+    
+    @Test
+    void twoChunksUnderSameParagraphHaveDifferentIdsButStable() {
+        String html = """
+            <p>before
+               <code-fence data-id="11" data-lang="none" data-content="dummy();"/>
+               after</p>""";
+
+        var idsFirstParse = extractAllMarkdownIds(html);
+        var idsSecondParse = extractAllMarkdownIds(html);  // determinism
+
+        assertEquals(2, idsFirstParse.size());
+        assertNotEquals(idsFirstParse.get(0), idsFirstParse.get(1), "Chunks must have distinct ids");
+        assertEquals(idsFirstParse, idsSecondParse, "Ids must be repeatable");
+    }
+    
+    @Test
+    void textNodeAnchorStillStable() {
+        // A text node under body
+        String html = "<html><body>Plain text with no wrapping element</body></html>";
+        String html2 = "<html><body>Plain text with no wrapping element 123</body></html>";
+        int id1 = extractOnlyMarkdownId(html);
+        int id2 = extractOnlyMarkdownId(html2);  // small change should retain same ID
+        assertEquals(id1, id2, "Text node anchor should produce stable ID");
+    }
+    
+    // ==== Helper methods for stable ID tests ====
+    
+    private int extractOnlyMarkdownId(String html) {
+        var ids = extractAllMarkdownIds(html);
+        assertEquals(1, ids.size(), "Expected single markdown block");
+        return ids.getFirst();
+    }
+
+    private int extractMarkdownId(String html, int index) {
+        var ids = extractAllMarkdownIds(html);
+        assertTrue(index < ids.size(), "Not enough markdown blocks found");
+        return ids.get(index);
+    }
+    
+    private List<Integer> extractAllMarkdownIds(String html) {
+        var doc = Jsoup.parse(html);
+        var body = doc.body();
+        var list = new ArrayList<Integer>();
+
+        for (Node child : body.childNodes()) {
+            if (child instanceof Element element) {
+                var comps = parser.parse(element, mdFactory, factories, idProvider);
+                for (var cd : flatten(comps)) {
+                    if (cd instanceof MarkdownComponentData md) {
+                        list.add(md.id());
+                    }
+                }
+            } else if (child instanceof org.jsoup.nodes.TextNode textNode && !textNode.isBlank()) {
+                // For plain text nodes, create a markdown component directly
+                int id = idProvider.getId(body); // Use body as anchor for stability
+                list.add(id);
+            }
+        }
+        return list;
+    }
+
+    // Recursively expand composites
+    private List<ComponentData> flatten(List<ComponentData> in) {
+        var out = new ArrayList<ComponentData>();
+        for (ComponentData cd : in) {
+            if (cd instanceof CompositeComponentData c) {
+                out.addAll(flatten(c.children()));
+            } else {
+                out.add(cd);
+            }
+        }
+        return out;
     }
 }

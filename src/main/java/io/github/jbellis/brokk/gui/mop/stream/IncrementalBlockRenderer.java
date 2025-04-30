@@ -210,20 +210,23 @@ public final class IncrementalBlockRenderer {
         // Initialize the MiniParser
         var miniParser = new MiniParser();
         
-        // Reset counter to create stable ids for markdown segments
-        MarkdownFactory.resetCounter();
-        
-        // Process each top-level child element in the body
-        for (Element child : body.children()) {
-            // Parse the element tree to find nested custom tags
-            var parsedElements = miniParser.parse(child, markdownFactory, FACTORIES);
-            
-            // For stability of IDs, ensure composites get a deterministic ID
-            // derived from the source element's position via IdProvider
-            parsedElements = normalizeCompositeId(child, parsedElements);
-            
-            // Add all parsed components to our result list
-            result.addAll(parsedElements);
+        // Process each top-level node in the body (including TextNodes)
+        for (Node child : body.childNodes()) {
+            if (child instanceof Element element) {
+                // Parse the element tree to find nested custom tags
+                var parsedElements = miniParser.parse(element, markdownFactory, FACTORIES, idProvider);
+                
+                // For stability of IDs, ensure composites get a deterministic ID
+                // derived from the source element's position via IdProvider
+                parsedElements = normalizeCompositeId(element, parsedElements);
+                
+                // Add all parsed components to our result list
+                result.addAll(parsedElements);
+            } else if (child instanceof org.jsoup.nodes.TextNode textNode && !textNode.isBlank()) {
+                // For plain text nodes, create a markdown component directly
+                int id = idProvider.getId(body); // Use body as anchor for stability
+                result.add(markdownFactory.fromText(id, org.jsoup.nodes.Entities.escape(textNode.getWholeText())));
+            }
         }
         
         return result;

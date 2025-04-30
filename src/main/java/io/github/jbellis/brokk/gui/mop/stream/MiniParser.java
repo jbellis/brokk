@@ -4,6 +4,7 @@ import io.github.jbellis.brokk.gui.mop.stream.blocks.ComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.ComponentDataFactory;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.CompositeComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.MarkdownFactory;
+import io.github.jbellis.brokk.gui.mop.stream.flex.IdProvider;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jsoup.nodes.Element;
@@ -11,8 +12,10 @@ import org.jsoup.nodes.Node;
 import org.jsoup.nodes.TextNode;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -25,6 +28,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class MiniParser {
     private static final Logger logger = LogManager.getLogger(MiniParser.class);
     private static final AtomicInteger snippetIdGen = new AtomicInteger(1000);
+    
+    private IdProvider idProvider;
+    private Map<Integer, int[]> ordinalByAnchor = new HashMap<>();
 
     /**
      * Parses a top-level HTML element and extracts all custom tags within it.
@@ -32,11 +38,16 @@ public class MiniParser {
      * @param topLevel The top-level HTML element to parse
      * @param mdFactory The factory for creating markdown components
      * @param factories Map of tag names to their component factories
+     * @param idProvider Provider for generating stable IDs
      * @return A list of ComponentData objects (usually a single composite if nested tags are found)
      */
     public List<ComponentData> parse(Element topLevel, 
                                     MarkdownFactory mdFactory,
-                                    Map<String, ComponentDataFactory> factories) {
+                                    Map<String, ComponentDataFactory> factories,
+                                    IdProvider idProvider) {
+        
+        this.idProvider = idProvider;
+        this.ordinalByAnchor = new HashMap<>();
         
         var childrenData = new ArrayList<ComponentData>();
         var sb = new StringBuilder();
@@ -46,7 +57,8 @@ public class MiniParser {
         
         // Flush any remaining HTML text
         if (sb.length() > 0) {
-            childrenData.add(mdFactory.fromText(sb.toString()));
+            // Pass the current anchor if it exists, otherwise the top level element
+            flushMarkdown(currentAnchor != null ? currentAnchor : topLevel, sb, childrenData, mdFactory);
         }
         
         // If we found any nested custom tags, wrap in a composite
@@ -84,8 +96,7 @@ public class MiniParser {
             if (factories.containsKey(tagName)) {
                 // Flush any accumulated HTML first
                 if (sb.length() > 0) {
-                    childrenData.add(mdFactory.fromText(sb.toString()));
-                    sb.setLength(0);
+                    flushMarkdown(node, sb, childrenData, mdFactory);
                 }
                 
                 // Create component for this custom tag
@@ -94,6 +105,7 @@ public class MiniParser {
                 
             } else {
                 // This is a regular HTML element - serialize opening tag
+                Node anchor = ensureAnchor(node, sb);
                 sb.append("<").append(tagName);
                 
                 // Add attributes
@@ -113,9 +125,81 @@ public class MiniParser {
             }
         } else if (node instanceof TextNode textNode) {
             // Just append the text
+            ensureAnchor(node, sb);
             sb.append(textNode.getWholeText());
         }
         // Other node types (comments, etc.) are ignored
+    }
+    
+    // Current anchor node for the in-progress markdown segment
+    private Node currentAnchor = null;
+    
+    /**
+     * Remembers the first node that contributes to an empty StringBuilder.
+     * This node becomes the "anchor" for generating a stable ID.
+     * 
+     * @param node The current node being processed
+     * @param sb The StringBuilder containing accumulated HTML
+     * @return The anchor node (either current or previous)
+     */
+    private Node ensureAnchor(Node node, StringBuilder sb) {
+        if (sb.length() == 0 && currentAnchor == null) {
+            currentAnchor = node;
+        }
+        return currentAnchor;
+    }
+    
+    /**
+     * Flushes the accumulated HTML to a new MarkdownComponentData with a stable ID.
+     * 
+     * @param anchor The node to derive the stable ID from
+     * @param sb The StringBuilder containing HTML to flush
+     * @param childrenData List to add the new component to
+     * @param mdFactory Factory for creating markdown components
+     */
+    private void flushMarkdown(Node anchor, StringBuilder sb, List<ComponentData> childrenData, MarkdownFactory mdFactory) {
+        if (sb.length() == 0) return;
+        
+        int id = computeStableId(anchor);
+        childrenData.add(mdFactory.fromText(id, sb.toString()));
+        
+        sb.setLength(0);
+        currentAnchor = null;
+    }
+    
+    /**
+     * Computes a stable, deterministic ID for a markdown segment
+     * based on the anchor node's position in the document.
+     * 
+     * @param anchor The node to derive the ID from
+     * @return A stable integer ID
+     */
+    private int computeStableId(Node anchor) {
+        // We prefer an Element - fall back to parent if anchor is a TextNode
+        int baseId;
+        if (anchor instanceof Element e) {
+            baseId = idProvider.getId(e);
+        } else {
+            // For a TextNode or other node type, find the nearest Element parent
+            Node parent = anchor.parent();
+            while (parent != null && !(parent instanceof Element)) {
+                parent = parent.parent();
+            }
+            
+            if (parent instanceof Element e) {
+                baseId = idProvider.getId(e);
+            } else {
+                // Fallback if no Element parent found (unlikely)
+                baseId = Math.abs(anchor.hashCode());
+            }
+        }
+        
+        // Track ordinals per baseId (not per Node instance) to handle multiple segments 
+        // with the same structural position
+        int ordinal = ordinalByAnchor.computeIfAbsent(baseId, k -> new int[1])[0]++;
+        
+        // Use Objects.hash to combine values safely
+        return Math.abs(Objects.hash(baseId, ordinal));
     }
     
     /**

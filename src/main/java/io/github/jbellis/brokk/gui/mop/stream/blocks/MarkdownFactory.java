@@ -7,9 +7,6 @@ import org.jsoup.nodes.Element;
  * Handles both explicit "markdown" tags and plain text nodes.
  */
 public class MarkdownFactory implements ComponentDataFactory {
-    // Counter for generating unique IDs for markdown segments
-    private static int markdownCounter = 0;
-    
     @Override
     public String tagName() {
         return "markdown";
@@ -17,20 +14,13 @@ public class MarkdownFactory implements ComponentDataFactory {
     
     @Override
     public ComponentData fromElement(Element element) {
-        return new MarkdownComponentData(++markdownCounter, element.html());
+        throw new UnsupportedOperationException("Direct parsing of <markdown> tags is not supported");
     }
     
     /**
-     * Creates a MarkdownComponentData from plain text.
+     * Creates a MarkdownComponentData from plain text with an explicit ID.
      */
-    public ComponentData fromText(String html) {
-        return new MarkdownComponentData(++markdownCounter, html);
-    }
-    
-    /**
-     * Resets the markdown counter to zero.
-     */
-    public static void resetCounter() {
-        markdownCounter = 0;
+    public ComponentData fromText(int id, String html) {
+        return new MarkdownComponentData(id, html);
     }
 }
