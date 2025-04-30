@@ -3,7 +3,6 @@ package io.github.jbellis.brokk.gui.mop.stream.blocks;
 import io.github.jbellis.brokk.gui.mop.MarkdownRenderUtil;
 
 import javax.swing.*;
-import javax.swing.text.JTextComponent;
 import java.awt.*;
 
 /**

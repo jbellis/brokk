@@ -166,22 +166,25 @@ public final class IncrementalBlockRenderer {
         root.revalidate();
         root.repaint();
     }
-    
+
     /**
      * Ensures all components are in the correct order according to the component data list.
-     * 
+     *
      * @param components The ordered list of component data
      */
     private void ensureComponentOrder(List<ComponentData> components) {
-        // Remove all components but don't dispose them
-        root.removeAll();
-        
-        // Add them back in the correct order
-        for (ComponentData data : components) {
-            BlockEntry entry = registry.get(data.id());
-            if (entry != null) {
-                root.add(entry.comp);
+        for (int i = 0; i < components.size(); i++) {
+            var cd = components.get(i);
+            var entry = registry.get(cd.id());
+            if (entry == null) continue;          // should not happen
+            var current = (i < root.getComponentCount()) ? root.getComponent(i) : null;
+            if (current != entry.comp) {
+                root.add(entry.comp, i);          // inserts or moves in-place
             }
+        }
+        // trim extras (if any)
+        while (root.getComponentCount() > components.size()) {
+            root.remove(components.size());
         }
     }
 
