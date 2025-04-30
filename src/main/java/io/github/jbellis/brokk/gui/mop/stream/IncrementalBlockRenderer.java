@@ -203,40 +203,19 @@ public final class IncrementalBlockRenderer {
         Document doc = Jsoup.parse(html);
         var body = doc.body();
         
-        // Track text nodes until we hit a special block
-        StringBuilder currentText = new StringBuilder();
-        // reset counter to create stable ids for markdown segments
-        MarkdownFactory.resetCounter();
-        // Process body as a flat sequence, handling text separately
-        for (Node node : body.childNodes()) {
-            if (node instanceof Element element) {
-                String tagName = element.tagName();
-                
-                
-                var factory = FACTORIES.get(tagName);
-                logger.debug(html);
-                if (factory != null) {
-                    // We found a special block
-                    
-                    // If we have accumulated text, add it as a markdown component first
-                    if (!currentText.isEmpty()) {
-                        result.add(markdownFactory.fromText(currentText.toString()));
-                        currentText.setLength(0);
-                    }
-                    
-                    // Add the special block
-                    result.add(factory.fromElement(element));
-                    continue;
-                }
-            }
-            
-            // Regular HTML, append to current text
-            currentText.append(node);
-        }
+        // Initialize the MiniParser
+        var miniParser = new MiniParser();
         
-        // Don't forget any trailing text
-        if (!currentText.isEmpty()) {
-            result.add(markdownFactory.fromText(currentText.toString()));
+        // Reset counter to create stable ids for markdown segments
+        MarkdownFactory.resetCounter();
+        
+        // Process each top-level child element in the body
+        for (Element child : body.children()) {
+            // Parse the element tree to find nested custom tags
+            var parsedElements = miniParser.parse(child, markdownFactory, FACTORIES);
+            
+            // Add all parsed components to our result list
+            result.addAll(parsedElements);
         }
         
         return result;

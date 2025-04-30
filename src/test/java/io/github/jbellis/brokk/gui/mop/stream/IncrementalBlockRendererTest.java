@@ -36,34 +36,52 @@ public class IncrementalBlockRendererTest {
     }
     
     @Test
-    void nestedCodeFenceNotRecognisedYet() {
+    void nestedCodeFenceIsRecognized() {
         String md = "- item\n  ```java\n  int x=1;\n  ```";
         var cds = TestUtil.parseMarkdown(md);
         
-        // Current implementation treats the entire list as one markdown component
-        // and doesn't detect the nested code fence
+        // After implementing MiniParser, we should now detect the nested code fence
         assertTrue(
-            cds.stream().noneMatch(c -> c instanceof CodeBlockComponentData),
-            "Current code should NOT detect nested fence"
+            cds.stream().anyMatch(c -> c instanceof CompositeComponentData),
+            "Should detect nested fence as a CompositeComponentData"
         );
-        assertEquals(1, cds.size());
-        assertTrue(cds.get(0) instanceof MarkdownComponentData);
+        
+        // Get the first composite and check it contains a CodeBlockComponentData
+        var composite = (CompositeComponentData) cds.stream()
+            .filter(c -> c instanceof CompositeComponentData)
+            .findFirst()
+            .orElseThrow();
+            
+        assertTrue(
+            composite.children().stream().anyMatch(c -> c instanceof CodeBlockComponentData),
+            "Composite should contain a CodeBlockComponentData"
+        );
     }
     
     @Test
-    void directHtmlNestedFenceNotRecognized() {
+    void directHtmlNestedFenceIsRecognized() {
         String html = "<ul><li>Here is a code block:\n" +
                       "<code-fence data-id=\"123\" data-lang=\"java\" data-content=\"System.out.println(&quot;test&quot;)\"/>\n" +
                       "</li></ul>";
                       
         var cds = TestUtil.parseHtml(html);
         
+        // With MiniParser, we should now extract the nested code fence
         assertTrue(
-            cds.stream().noneMatch(c -> c instanceof CodeBlockComponentData),
-            "Current code should NOT detect nested fence in direct HTML"
+            cds.stream().anyMatch(c -> c instanceof CompositeComponentData),
+            "Should detect nested fence in direct HTML as a CompositeComponentData"
         );
-        assertEquals(1, cds.size());
-        assertTrue(cds.get(0) instanceof MarkdownComponentData);
+        
+        // Get the composite and verify it contains a code block
+        var composite = (CompositeComponentData) cds.stream()
+            .filter(c -> c instanceof CompositeComponentData)
+            .findFirst()
+            .orElseThrow();
+            
+        assertTrue(
+            composite.children().stream().anyMatch(c -> c instanceof CodeBlockComponentData),
+            "Composite should contain a CodeBlockComponentData"
+        );
     }
 
     @Test
