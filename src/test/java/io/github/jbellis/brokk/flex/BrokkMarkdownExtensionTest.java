@@ -496,4 +496,31 @@ class BrokkMarkdownExtensionTest {
         assertTrue(html.contains("if n &lt; 2:"), "Code content should be preserved");
         assertTrue(html.contains("return n"), "Code content should be preserved");
     }
+    
+    @Test
+    void rawHtmlIsEscapedWhenEscapeHtmlFlagSet() {
+        var md = """
+                Here is some **Markdown**.
+
+                <div class="note">Raw <em>HTML</em> block</div>
+                """;
+
+        String html = renderer.render(parser.parse(md));
+        System.out.println(html);
+
+        // 1) Raw HTML tags must be escaped
+        assertFalse(html.contains("<div"), "Raw <div> should NOT appear");
+        assertFalse(html.contains("</div>"), "Raw </div> should NOT appear");
+        assertFalse(html.contains("<em>"), "Raw <em> should be escaped");
+
+        // 2) Escaped versions must be present
+        assertTrue(html.contains("&lt;div class=&quot;note&quot;&gt;"),
+                   "Escaped <div> should be present");
+        assertTrue(html.contains("&lt;/div&gt;"), "Escaped </div> should be present");
+        assertTrue(html.contains("&lt;em&gt;HTML&lt;/em&gt;"), "Escaped <em> should be present");
+
+        // 3) Markdown-generated tags (e.g. <strong>) must still render normally
+        assertTrue(html.contains("<strong>Markdown</strong>"),
+                   "Markdown-generated <strong> should remain");
+    }
 }

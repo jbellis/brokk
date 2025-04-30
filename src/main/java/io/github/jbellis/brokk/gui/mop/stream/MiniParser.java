@@ -105,12 +105,13 @@ public class MiniParser {
                 
             } else {
                 // This is a regular HTML element - serialize opening tag
-                Node anchor = ensureAnchor(node, sb);
+                ensureAnchor(node, sb);
                 sb.append("<").append(tagName);
                 
-                // Add attributes
+                // Add attributes with proper escaping
                 element.attributes().forEach(attr -> 
-                    sb.append(" ").append(attr.getKey()).append("=\"").append(attr.getValue()).append("\"")
+                    sb.append(" ").append(attr.getKey()).append("=\"")
+                      .append(org.jsoup.nodes.Entities.escape(attr.getValue())).append("\"")
                 );
                 
                 sb.append(">");
@@ -124,9 +125,9 @@ public class MiniParser {
                 sb.append("</").append(tagName).append(">");
             }
         } else if (node instanceof TextNode textNode) {
-            // Just append the text
+            // Just append the text with proper escaping
             ensureAnchor(node, sb);
-            sb.append(textNode.getWholeText());
+            sb.append(org.jsoup.nodes.Entities.escape(textNode.getWholeText()));
         }
         // Other node types (comments, etc.) are ignored
     }
