@@ -460,6 +460,74 @@ class BrokkMarkdownExtensionTest {
 
         String html = renderer.render(parser.parse(md));
         System.out.println(html);
+
+
+        // Verify HTML structure
+        assertTrue(html.contains("<ol"), "Ordered list should be present");
+        assertTrue(html.contains("<li>"), "List items should be present");
+        assertTrue(html.contains("<strong>The Fix:</strong>"), "Bold text should be preserved");
+        assertTrue(html.contains("<strong>Expected Result:</strong>"), "Bold text should be preserved");
+
+        // Verify code block is created
+        assertTrue(html.contains("<code-fence"), "Should have a code fence element");
+        assertEquals(1, html.split("<code-fence").length - 1, "Should have exactly 1 code block");
+
+        // Verify code content is included
+        assertTrue(html.contains("data-content=\"revalidate();"), "Code content should be present");
+        assertTrue(html.contains("repaint();"), "Code content should be present");
+
+        // Verify inline code is preserved
+        assertTrue(html.contains("<code>MarkdownOutputPanel.updateLastMessage</code>"),
+                   "Inline code should be preserved");
+        assertTrue(html.contains("<code>IncrementalBlockRenderer</code>"),
+                   "Inline code should be preserved");
+        assertTrue(html.contains("<code>BoxLayout</code>"),
+                   "Inline code should be preserved");
+    }
+    
+    
+    @Test
+    void realWorldEditBlocksGetsRenderedCorrectly4() {
+        var md = """
+                 Here's what needs to be changed:
+                 
+                 1. In `IncrementalBlockRenderer.buildComponentData()`, we need to process all child Nodes, not just Elements
+                 2. For TextNodes that aren't blank, we'll create MarkdownComponentData directly
+                 
+                 Here's the implementation:
+                 
+                 ```java
+                 <<<<<<< SEARCH src/main/java/io/github/jbellis/brokk/gui/mop/stream/IncrementalBlockRenderer.java
+                     private List<ComponentData> buildComponentData(String html) {
+                         List<ComponentData> result = new ArrayList<>();
+                         return result;
+                     }
+                 ======= src/main/java/io/github/jbellis/brokk/gui/mop/stream/IncrementalBlockRenderer.java
+                     private List<ComponentData> buildComponentData(String html) {
+                         List<ComponentData> result = new ArrayList<>();
+                         return result;
+                     }
+                 >>>>>>> REPLACE src/main/java/io/github/jbellis/brokk/gui/mop/stream/IncrementalBlockRenderer.java
+                 ```
+                 
+                 another one
+                 
+                ```java
+                file1.txt
+                <<<<<<< SEARCH
+                one
+                =======
+                two
+                >>>>>>> REPLACE
+                ```
+                 
+                 This change ensures that all top-level text nodes are properly parsed and included in the component data list, while maintaining their stable IDs derived from the body element itself.
+                """;
+
+        String html = renderer.render(parser.parse(md));
+        System.out.println(html);
+        
+        // TODO: we need to find such S/R blocks too
     }
     
     @Test
