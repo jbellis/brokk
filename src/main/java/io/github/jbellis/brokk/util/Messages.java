@@ -127,4 +127,10 @@ public class Messages {
         }
         return tokenizer.encode(text).size();
     }
+
+    public static int getApproximateTokens(Collection<ChatMessage> messages) {
+        return getApproximateTokens(messages.stream()
+                                            .map(Messages::getText)
+                                            .collect(Collectors.joining("\n")));
+    }
 }

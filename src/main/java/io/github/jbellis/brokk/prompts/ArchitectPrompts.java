@@ -43,7 +43,7 @@ public abstract class ArchitectPrompts extends CodePrompts {
 
     @Override
     protected SystemMessage systemMessage(ContextManager cm, String reminder) {
-        var workspaceSummary = formatWorkspaceSummary(cm, false);
+        var workspaceSummary = formatWorkspaceDescriptions(cm, false);
         var styleGuide = cm.getProject().getStyleGuide();
 
         var text = """

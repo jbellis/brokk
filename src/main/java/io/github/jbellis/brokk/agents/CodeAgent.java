@@ -173,7 +173,14 @@ public class CodeAgent {
             }
 
             // Apply all accumulated blocks
-            var editResult = EditBlock.applyEditBlocks(contextManager, io, blocks);
+            EditBlock.EditResult editResult;
+            try {
+                editResult = EditBlock.applyEditBlocks(contextManager, io, blocks);
+            } catch (IOException e) {
+                io.toolErrorRaw(e.getMessage());
+                stopDetails = new SessionResult.StopDetails(SessionResult.StopReason.IO_ERROR, e.getMessage());
+                break;
+            }
             if (editResult.hadSuccessfulEdits()) {
                 int succeeded = blocks.size() - editResult.failedBlocks().size();
                 io.llmOutput("\n" + succeeded + " SEARCH/REPLACE blocks applied.", ChatMessageType.CUSTOM);
@@ -260,7 +267,7 @@ public class CodeAgent {
         var finalMessages = forArchitect ? List.copyOf(io.getLlmRawMessages()) : getMessagesForHistory(parser);
         return new SessionResult("Code: " + finalActionDescription,
                                  new ContextFragment.TaskFragment(finalMessages, userInput),
-                                 Map.copyOf(originalContents),
+                                 originalContents,
                                  stopDetails);
     }
 
@@ -300,8 +307,7 @@ public class CodeAgent {
         // Process files in parallel using streams
         var futures = failuresByFile.stream().parallel().map(file -> CompletableFuture.supplyAsync(() -> {
              try {
-                 // Record original content *just before* replacement
-                 originalContents.putIfAbsent(file, file.read());
+                 assert originalContents.containsKey(file); // should have been added by diff attempt
 
                  // Prepare request
                  var goal = "The previous attempt to modify this file using SEARCH/REPLACE failed repeatedly. Original goal: " + originalUserInput;

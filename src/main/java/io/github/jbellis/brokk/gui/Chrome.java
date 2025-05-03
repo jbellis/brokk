@@ -220,7 +220,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
     private void initializeThemeManager() {
         assert getProject() != null;
 
-        logger.debug("Initializing theme manager");
+        logger.trace("Initializing theme manager");
         // JMHighlightPainter.initializePainters(); // Removed: Painters are now created dynamically with theme colors
         // Initialize theme manager now that all components are created
         // and contextManager should be properly set
@@ -228,7 +228,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
 
         // Apply current theme based on project settings
         String currentTheme = Project.getTheme();
-        logger.debug("Applying theme from project settings: {}", currentTheme);
+        logger.trace("Applying theme from project settings: {}", currentTheme);
         boolean isDark = THEME_DARK.equalsIgnoreCase(currentTheme);
         themeManager.applyTheme(isDark);
         historyOutputPanel.updateTheme(isDark);
@@ -292,7 +292,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
         // This prevents stomping on an active llm output since it will only be the case
         // if the user is selecting a different context, as opposed to a background task
         // updating the summary or autocontext.
-        logger.debug("Loading context.  active={}, new={}", activeContext == null ? "null" : activeContext.getId(), ctx.getId());
+        logger.trace("Loading context.  active={}, new={}", activeContext == null ? "null" : activeContext.getId(), ctx.getId());
         boolean resetOutput = (activeContext == null || activeContext.getId() != ctx.getId());
         activeContext = ctx;
 
@@ -340,7 +340,6 @@ public class Chrome implements AutoCloseable, IConsoleIO {
 
     private JComponent buildBackgroundStatusLabel() {
         backgroundStatusLabel = new JLabel(BGTASK_EMPTY);
-        backgroundStatusLabel.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         backgroundStatusLabel.setBorder(new EmptyBorder(2, 5, 2, 5));
         backgroundLabelPreferredSize = backgroundStatusLabel.getPreferredSize();
         return backgroundStatusLabel;
@@ -676,18 +675,38 @@ public class Chrome implements AutoCloseable, IConsoleIO {
             return;
         }
 
-        var bounds = project.getMainWindowBounds();
-        if (bounds.width <= 0 || bounds.height <= 0) {
-            frame.setLocationRelativeTo(null);
-        } else {
-            frame.setSize(bounds.width, bounds.height);
-            if (bounds.x >= 0 && bounds.y >= 0 && isPositionOnScreen(bounds.x, bounds.y)) {
-                frame.setLocation(bounds.x, bounds.y);
+        var boundsOptional = project.getMainWindowBounds();
+        if (boundsOptional.isEmpty()) {
+            // No valid saved bounds, apply default placement logic
+            GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
+            GraphicsDevice defaultScreen = ge.getDefaultScreenDevice();
+            Rectangle screenBounds = defaultScreen.getDefaultConfiguration().getBounds();
+
+            if (screenBounds.height <= 1080) {
+                // Maximize on smaller screens
+                frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
             } else {
+                // Right half on larger screens
+                int halfWidth = screenBounds.width / 2;
+                int x = screenBounds.x + halfWidth;
+                frame.setBounds(x, screenBounds.y, halfWidth, screenBounds.height);
+            }
+            logger.debug("Applying default window placement based on screen size.");
+        } else {
+            var bounds = boundsOptional.get();
+            // Valid bounds found, use them
+            frame.setSize(bounds.width, bounds.height);
+            if (isPositionOnScreen(bounds.x, bounds.y)) {
+                frame.setLocation(bounds.x, bounds.y);
+                logger.debug("Restoring window position from saved bounds.");
+            } else {
+                // Saved position is off-screen, center instead
                 frame.setLocationRelativeTo(null);
+                logger.debug("Saved window position is off-screen, centering window.");
             }
         }
 
+        // Listener to save bounds on move/resize
         frame.addComponentListener(new java.awt.event.ComponentAdapter() {
             @Override
             public void componentResized(java.awt.event.ComponentEvent e) {
@@ -705,7 +724,7 @@ public class Chrome implements AutoCloseable, IConsoleIO {
             if (topSplitPos > 0) {
                 topSplitPane.setDividerLocation(topSplitPos);
             } else {
-                topSplitPane.setDividerLocation(0.2);
+                topSplitPane.setDividerLocation(0.4); // Sensible default: 40% for instructions panel
             }
             topSplitPane.addPropertyChangeListener(JSplitPane.DIVIDER_LOCATION_PROPERTY, e -> {
                 if (topSplitPane.isShowing()) {

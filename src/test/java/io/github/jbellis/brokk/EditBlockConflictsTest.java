@@ -175,7 +175,7 @@ class EditBlockConflictsTest {
     }
 
     @Test
-    void testApplyEditsCreatesNewFile(@TempDir Path tempDir) throws IOException {
+    void testApplyEditsCreatesNewFile(@TempDir Path tempDir) throws IOException, EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         TestConsoleIO io = new TestConsoleIO();
         Path existingFile = tempDir.resolve("fileA.txt");
         Files.writeString(existingFile, "Original text\n");
@@ -211,7 +211,7 @@ class EditBlockConflictsTest {
     }
 
     @Test
-    void testApplyEditsFailsForUnknownFile(@TempDir Path tempDir) throws IOException {
+    void testApplyEditsFailsForUnknownFile(@TempDir Path tempDir) throws IOException, EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         TestConsoleIO io = new TestConsoleIO();
 
         Path existingFile = tempDir.resolve("fileA.txt");
@@ -287,7 +287,7 @@ class EditBlockConflictsTest {
     }
 
     @Test
-    void testNoMatchFailure(@TempDir Path tempDir) throws IOException {
+    void testNoMatchFailure(@TempDir Path tempDir) throws IOException, EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         TestConsoleIO io = new TestConsoleIO();
         Path existingFile = tempDir.resolve("fileA.txt");
         Files.writeString(existingFile, "AAA\nBBB\nCCC\n");
@@ -315,7 +315,7 @@ class EditBlockConflictsTest {
     }
 
     @Test
-    void testEditResultContainsOriginalContents(@TempDir Path tempDir) throws IOException {
+    void testEditResultContainsOriginalContents(@TempDir Path tempDir) throws IOException, EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         TestConsoleIO io = new TestConsoleIO();
         Path existingFile = tempDir.resolve("fileA.txt");
         String originalContent = "Original text\n";
@@ -343,7 +343,7 @@ class EditBlockConflictsTest {
     }
 
     @Test
-    void testApplyEditsEmptySearchReplacesFile(@TempDir Path tempDir) throws IOException {
+    void testApplyEditsEmptySearchReplacesFile(@TempDir Path tempDir) throws IOException, EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         TestConsoleIO io = new TestConsoleIO();
         Path testFile = tempDir.resolve("replaceTest.txt");
         String originalContent = "Initial content.\n";
@@ -489,7 +489,7 @@ class EditBlockConflictsTest {
     }
 
     @Test
-    void testNoMatchFailureWithExistingReplacementText(@TempDir Path tempDir) throws IOException {
+    void testNoMatchFailureWithExistingReplacementText(@TempDir Path tempDir) throws IOException, EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
         TestConsoleIO io = new TestConsoleIO();
         Path existingFile = tempDir.resolve("fileA.txt");
         String initialContent = "AAA\nBBB\nCCC\n";
@@ -524,7 +524,7 @@ class EditBlockConflictsTest {
         }
 
         @Test
-        void testNoMatchFailureWithDiffLikeSearchText(@TempDir Path tempDir) throws IOException {
+        void testNoMatchFailureWithDiffLikeSearchText(@TempDir Path tempDir) throws IOException, EditBlock.AmbiguousMatchException, EditBlock.NoMatchException {
             TestConsoleIO io = new TestConsoleIO();
             Path existingFile = tempDir.resolve("fileB.txt");
             String initialContent = "Line 1\nLine 2\nLine 3\n";

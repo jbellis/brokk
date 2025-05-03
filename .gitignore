@@ -9,6 +9,7 @@ target/
 .idea/compiler.xml
 .idea/libraries/
 .idea/scala_settings.xml
+.idea/misc.xml
 *.iws
 *.iml
 *.ipr

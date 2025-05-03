@@ -365,7 +365,7 @@ public class WorkspaceTools {
     Retrieves the full source code of specific methods and adds to the Workspace each as a separate read-only text fragment.
     Faster and more efficient than including entire files or classes when you only need a few methods.
     """)
-    public String addMethodSources(
+    public String addMethodSourcesToWorkspace(
             @P("List of fully qualified method names (e.g., ['com.example.ClassA.method1', 'org.another.ClassB.processData']) to retrieve sources for")
             List<String> methodNames
     ) {

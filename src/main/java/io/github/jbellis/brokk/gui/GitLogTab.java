@@ -110,15 +110,15 @@ public class GitLogTab extends JPanel {
                 if (column == 1 && row >= 0 && row < getRowCount()) {
                     String branchName = (String) getValueAt(row, 1);
                     if ("stashes".equals(branchName)) {
-                        c.setFont(new Font(Font.MONOSPACED, Font.ITALIC, 12));
+                        c.setFont(new Font(Font.MONOSPACED, Font.ITALIC, 13));
                     } else {
-                        c.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+                        c.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
                     }
                 }
                 return c;
             }
         };
-        branchTable.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        branchTable.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
         branchTable.setRowHeight(18);
         branchTable.getColumnModel().getColumn(0).setMaxWidth(20);
         branchTable.getColumnModel().getColumn(0).setMinWidth(20);
@@ -139,7 +139,7 @@ public class GitLogTab extends JPanel {
             }
         };
         remoteBranchTable = new JTable(remoteBranchTableModel);
-        remoteBranchTable.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        remoteBranchTable.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
         remoteBranchTable.setRowHeight(18);
         remoteBranchPanel.add(new JScrollPane(remoteBranchTable), BorderLayout.CENTER);
 

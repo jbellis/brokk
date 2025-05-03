@@ -70,13 +70,17 @@ public record SessionResult(String actionDescription,
          */
         READ_ONLY_EDIT,
         /**
+         * Unable to write new file contents
+         */
+        IO_ERROR,
+        /**
          * the LLM called answer() but did not provide a result
          */
         SEARCH_INVALID_ANSWER,
         /**
          * the LLM determined that it was not possible to answer the query
          */
-        SEARCH_IMPOSSIBLE;
+        SEARCH_IMPOSSIBLE,
     }
 
     public record StopDetails(StopReason reason, String explanation) {

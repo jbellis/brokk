@@ -392,7 +392,6 @@ public class PreviewTextPanel extends JPanel {
         // Create edit area with the same styling as the command input in Chrome
         RSyntaxTextArea editArea = new RSyntaxTextArea(3, 40);
         editArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_NONE);
-        editArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
         editArea.setHighlightCurrentLine(false);
         editArea.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(Color.GRAY),
@@ -551,7 +550,6 @@ public class PreviewTextPanel extends JPanel {
         systemArea.setEditable(false);
         systemArea.setLineWrap(true);
         systemArea.setWrapStyleWord(true);
-        systemArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         systemArea.setRows(5);
         JScrollPane systemScrollPane = new JScrollPane(systemArea);
         systemScrollPane.setBorder(BorderFactory.createTitledBorder(

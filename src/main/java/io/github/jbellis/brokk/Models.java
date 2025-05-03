@@ -21,6 +21,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import static java.lang.Math.min;
+
 /**
  * Manages dynamically loaded models via LiteLLM.
  */
@@ -31,7 +33,7 @@ public final class Models {
     /**
      * Represents the parsed Brokk API key components.
      */
-    public record KeyParts(java.util.UUID userId, String proToken, String freeToken) {}
+    public record KeyParts(java.util.UUID userId, String token) {}
 
     /**
      * Parses a Brokk API key of the form 'brk+<userId>+<proToken>+<freeToken>'.
@@ -46,8 +48,8 @@ public final class Models {
             throw new IllegalArgumentException("Key cannot be empty");
         }
         var parts = key.split("\\+");
-        if (parts.length != 4 || !"brk".equals(parts[0])) {
-            throw new IllegalArgumentException("Key must have format 'brk+<userId>+<proToken>+<freeToken>'");
+        if (parts.length != 3 || !"brk".equals(parts[0])) {
+            throw new IllegalArgumentException("Key must have format 'brk+<userId>+<token>'");
         }
 
         java.util.UUID userId;
@@ -58,10 +60,7 @@ public final class Models {
         }
 
         // Tokens no longer have sk- prefix in the raw key, prepend it here
-        var proToken = "sk-" + parts[2];
-        var freeToken = "sk-" + parts[3];
-
-        return new KeyParts(userId, proToken, freeToken);
+        return new KeyParts(userId, "sk-" + parts[2]);
     }
 
     private final Logger logger = LogManager.getLogger(Models.class);
@@ -78,6 +77,10 @@ public final class Models {
             .build();
 
     public static final String UNAVAILABLE = "AI is unavailable";
+
+    // these models are defined for low-ltency use cases that don't require high intelligence,
+    // they are not suitable for writing code
+    private static final Set<String> SYSTEM_ONLY_MODELS = Set.of("gemini-2.0-flash-lite", "gpt-4.1-nano");
 
     // Cached model storage
     private final ConcurrentHashMap<String, StreamingChatLanguageModel> loadedModels = new ConcurrentHashMap<>();
@@ -156,7 +159,8 @@ public final class Models {
         if (quickModel == null) {
             quickModel = new UnavailableStreamingModel();
         }
-        quickestModel = get("gemini-2.0-flash-lite", Project.ReasoningLevel.DEFAULT);
+        // hardcode quickest temperature to 0 so that Quick Context inference is reproducible
+        quickestModel = get("gemini-2.0-flash-lite", Project.ReasoningLevel.DEFAULT, 0.0);
         if (quickestModel == null) {
             quickestModel = new UnavailableStreamingModel();
         }
@@ -164,7 +168,7 @@ public final class Models {
         // STT model initialization
         var sttLocation = modelInfoMap.entrySet().stream()
                 .filter(entry -> "audio_transcription".equals(entry.getValue().get("mode")))
-                .map(entry -> entry.getKey())
+                .map(Map.Entry::getKey)
                 .findFirst()
                 .orElse(null);
 
@@ -184,7 +188,7 @@ public final class Models {
         logger.debug(url);
         Request request = new Request.Builder()
                 .url(url)
-                .header("Authorization", "Bearer " + kp.proToken())
+                .header("Authorization", "Bearer " + kp.token())
                 .get()
                 .build();
         try (Response response = httpClient.newCall(request).execute()) {
@@ -220,7 +224,7 @@ public final class Models {
         if (isBrokk) {
             var kp = parseKey(Project.getBrokkKey());
             // Use proToken to check available models and balance
-            authHeader = "Bearer " + kp.proToken();
+            authHeader = "Bearer " + kp.token();
         }
         Request request = new Request.Builder()
                 .url(baseUrl + "/model/info")
@@ -353,10 +357,8 @@ public final class Models {
      * e.g. "deepseek-v3" -> "deepseek/deepseek-chat"
      */
     public Map<String, String> getAvailableModels() {
-        // flash-lite is defined for low-ltency use cases that don't require high intelligence,
-        // it's not suitible for writing code
         return modelLocations.entrySet().stream()
-                .filter(e -> !e.getKey().equals("gemini-2.0-flash-lite"))
+                .filter(e -> !SYSTEM_ONLY_MODELS.contains(e.getKey()))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
@@ -418,10 +420,8 @@ public final class Models {
      * Retrieves or creates a StreamingChatLanguageModel for the given modelName and reasoning level.
      *
      * @param modelName      The display name of the model (e.g., "gemini-2.5-pro-exp-03-25").
-     * @param reasoningLevel The desired reasoning level.
-     * @return The configured model instance, or null if the model name is invalid.
      */
-    public StreamingChatLanguageModel get(String modelName, Project.ReasoningLevel reasoningLevel) {
+    public StreamingChatLanguageModel get(String modelName, Project.ReasoningLevel reasoningLevel, Double temperature) {
         // Use a composite key for the cache to include reasoning level if not default
         String cacheKey = modelName + (reasoningLevel == Project.ReasoningLevel.DEFAULT ? "" : ":" + reasoningLevel.name());
 
@@ -434,41 +434,47 @@ public final class Models {
                 return null;
             }
 
+            // OpenAI says, "Your rate limit is calculated as the maximum of max_tokens
+            // and the estimated number of tokens based on the character count of your request.
+            // https://platform.openai.com/docs/guides/rate-limits
+            // We don't have a good way to predict output size, but almost all of them are lower than 32k,
+            // and CodeAgent can pick up an request that stopped early from the last edit block
+            var maxTokens = min(32768, getMaxOutputTokens(location));
+
             // We connect to LiteLLM using an OpenAiStreamingChatModel, specifying baseUrl
             // placeholder, LiteLLM manages actual keys
-            String baseUrl = Project.getLlmProxy(); // Get full URL (including scheme) from project settings
+            String baseUrl = Project.getLlmProxy();
             var builder = OpenAiStreamingChatModel.builder()
                     .logRequests(true)
                     .logResponses(true)
                     .strictJsonSchema(true)
-                    .maxTokens(getMaxOutputTokens(location))
+                    .maxTokens(maxTokens)
                     .baseUrl(baseUrl)
                     .timeout(Duration.ofMinutes(3)); // default 60s is not enough
 
             if (Project.getLlmProxySetting() == Project.LlmProxySetting.BROKK) {
                 var kp = parseKey(Project.getBrokkKey());
                 // Select token based on balance status
-                var selectedToken = isFreeTierOnly ? kp.freeToken() : kp.proToken();
-                logger.debug("Using {} for model '{}' request (low balance: {})",
-                             isFreeTierOnly ? "freeToken" : "proToken", modelName, isFreeTierOnly);
                 builder = builder
-                        .apiKey(selectedToken)
-                        .customHeaders(Map.of("Authorization", "Bearer " + selectedToken))
+                        .apiKey(kp.token)
+                        .customHeaders(Map.of("Authorization", "Bearer " + kp.token))
                         .user(kp.userId().toString());
             } else {
                 // Non-Brokk proxy
                 builder = builder.apiKey("dummy-key");
             }
 
-            builder = builder.modelName(location); // Use the resolved location
+            builder = builder.modelName(location);
 
+            // default request parameters
+            var params = OpenAiChatRequestParameters.builder()
+                    .temperature(temperature);
             // Apply reasoning effort if not default and supported
-            logger.debug("Applying reasoning effort {} to model {}", reasoningLevel, modelName);
+            logger.trace("Applying reasoning effort {} to model {}", reasoningLevel, modelName);
             if (supportsReasoning(modelName) && reasoningLevel != Project.ReasoningLevel.DEFAULT) {
-                builder.defaultRequestParameters(OpenAiChatRequestParameters.builder()
-                                                         .reasoningEffort(reasoningLevel.name().toLowerCase())
-                                                         .build());
+                params = params.reasoningEffort(reasoningLevel.name().toLowerCase());
             }
+            builder.defaultRequestParameters(params.build());
 
             if (modelName.contains("sonnet")) {
                 // "Claude 3.7 Sonnet may be less likely to make make parallel tool calls in a response,
@@ -479,6 +485,10 @@ public final class Models {
 
             return builder.build();
         });
+    }
+
+    public StreamingChatLanguageModel get(String modelName, Project.ReasoningLevel reasoningLevel) {
+        return get(modelName, reasoningLevel, null);
     }
 
     public boolean supportsJsonSchema(StreamingChatLanguageModel model) {
@@ -716,11 +726,7 @@ public final class Models {
             var authHeader = "Bearer dummy-key"; // Default for non-Brokk
             if (Project.getLlmProxySetting() == Project.LlmProxySetting.BROKK) {
                 var kp = parseKey(Project.getBrokkKey());
-                // Access the parent Models instance's isLowBalance flag
-                var selectedToken = Models.this.isFreeTierOnly ? kp.freeToken() : kp.proToken();
-                logger.debug("Using {} for STT request (low balance: {})",
-                             Models.this.isFreeTierOnly ? "freeToken" : "proToken", Models.this.isFreeTierOnly);
-                authHeader = "Bearer " + selectedToken;
+                authHeader = "Bearer " + kp.token;
             }
 
             Request request = new Request.Builder()

@@ -71,26 +71,31 @@ public class EditBlock {
     }
 
     // -- Exceptions for file resolution --
-    /** Thrown when a filename provided by the LLM cannot be uniquely resolved. */
+
+    /**
+     * Thrown when a filename provided by the LLM cannot be uniquely resolved.
+     */
     public static class SymbolNotFoundException extends Exception {
         public SymbolNotFoundException(String message) {
             super(message);
         }
     }
 
-    /** Thrown when a filename provided by the LLM matches multiple files. */
+    /**
+     * Thrown when a filename provided by the LLM matches multiple files.
+     */
     public static class SymbolAmbiguousException extends Exception {
         public SymbolAmbiguousException(String message) {
             super(message);
         }
     }
-    
+
     /**
      * Pre-creates empty files for SearchReplaceBlocks representing new files
      * (those with empty beforeText). This ensures files exist on disk before
      * they are added to the context, preventing race conditions with UI updates.
-     * 
-     * @param blocks Collection of SearchReplaceBlocks potentially containing new file creations
+     *
+     * @param blocks         Collection of SearchReplaceBlocks potentially containing new file creations
      * @param contextManager The context manager for resolving file paths
      */
     public static void preCreateNewFiles(Collection<SearchReplaceBlock> blocks, IContextManager contextManager) {
@@ -100,7 +105,7 @@ public class EditBlock {
             if (block.filename() == null || !block.beforeText().trim().isEmpty()) {
                 continue;
             }
-            
+
             // Resolve the file path (same logic used in applyEditBlocks)
             ProjectFile file;
             try {
@@ -109,7 +114,7 @@ public class EditBlock {
                 logger.debug("Failed to resolve file for pre-creation: {}", e.getMessage());
                 continue;
             }
-            
+
             // Create the empty file if it doesn't exist yet
             if (!file.exists()) {
                 try {
@@ -126,7 +131,9 @@ public class EditBlock {
     /**
      * Parse the LLM response for SEARCH/REPLACE blocks and apply them.
      */
-    public static EditResult applyEditBlocks(IContextManager contextManager, IConsoleIO io, Collection<SearchReplaceBlock> blocks) {
+    public static EditResult applyEditBlocks(IContextManager contextManager, IConsoleIO io, Collection<SearchReplaceBlock> blocks)
+    throws IOException
+    {
         // Track which blocks succeed or fail during application
         List<FailedBlock> failed = new ArrayList<>();
         Map<SearchReplaceBlock, ProjectFile> succeeded = new HashMap<>();
@@ -151,26 +158,26 @@ public class EditBlock {
 
             // 2. Apply the edit using replaceInFile
             try {
-                // Save original content before attempting change
-                if (!changedFiles.containsKey(file)) {
-                    changedFiles.put(file, file.exists() ? file.read() : "");
-                }
+            // Save original content before attempting change
+            if (!changedFiles.containsKey(file)) {
+                changedFiles.put(file, file.exists() ? file.read() : "");
+            }
 
-                // Perform the replacement
-                replaceInFile(file, block.beforeText(), block.afterText());
+            // Perform the replacement
+            replaceInFile(file, block.beforeText(), block.afterText());
 
-                // If successful, add to succeeded list
-                succeeded.put(block, file);
-                if (isCreateNew) {
-                    try {
-                        contextManager.addToGit(List.of(file));
-                        io.systemOutput("Added to git " + file);
-                    } catch (IOException e) {
-                        io.systemOutput("Failed to git add " + file + ": " + e.getMessage());
-                        // Continue anyway, git add failure is not fatal here
-                    }
+            // If successful, add to succeeded list
+            succeeded.put(block, file);
+            if (isCreateNew) {
+                try {
+                    contextManager.addToGit(List.of(file));
+                    io.systemOutput("Added to git " + file);
+                } catch (IOException e) {
+                    io.systemOutput("Failed to git add " + file + ": " + e.getMessage());
+                    // Continue anyway, git add failure is not fatal here
                 }
-            } catch (NoMatchException | AmbiguousMatchException e) {
+            }
+        } catch(NoMatchException | AmbiguousMatchException e) {
                 assert changedFiles.containsKey(file);
                 var originalContent = changedFiles.get(file);
                 String commentary;
@@ -178,46 +185,30 @@ public class EditBlock {
                     replaceMostSimilarChunk(originalContent, block.afterText, "");
                     // if it didn't throw:
                     commentary = """
-                    Note: The replacement text is already present in the file. If we no longer need to apply
-                    this block, omit it from your reply.
-                    """.stripIndent();
+                                 The replacement text is already present in the file. If we no longer need to apply
+                                 this block, omit it from your reply.
+                                 """.stripIndent();
                 } catch (NoMatchException | AmbiguousMatchException e2) {
                     commentary = "";
-                    }
-
-                    // Check if the search block looks like a diff
-                    if (block.beforeText().lines().anyMatch(line -> line.startsWith("-") || line.startsWith("+"))) {
-                        commentary += """
-                        Reminder: Brokk uses SEARCH/REPLACE blocks, not unified diff format.
-                        Ensure the `<<<<<<< SEARCH $filename` block matches the existing code exactly.
-                        """.stripIndent();
-                    }
-
-                    logger.debug("Edit application failed for file [{}] {}: {}", file, e.getClass().getSimpleName(), e.getMessage());
-                    var reason = e instanceof NoMatchException ? EditBlockFailureReason.NO_MATCH : EditBlockFailureReason.AMBIGUOUS_MATCH;
-                    failed.add(new FailedBlock(block, reason, commentary));
-                    // Restore original content if we saved it and the edit failed
-                    if (changedFiles.containsKey(file)) {
-                        try {
-                        file.write(changedFiles.get(file));
-                    } catch (IOException writeErr) {
-                        io.toolError("Failed restoring original content for " + file + " after failed edit: " + writeErr.getMessage());
-                    }
                 }
+
+                // Check if the search block looks like a diff
+                if (block.beforeText().lines().anyMatch(line -> line.startsWith("-") || line.startsWith("+"))) {
+                    commentary += """
+                                  Reminder: Brokk uses SEARCH/REPLACE blocks, not unified diff format.
+                                  Ensure the `<<<<<<< SEARCH $filename` block matches the existing code exactly.
+                                  """.stripIndent();
+                }
+
+                logger.debug("Edit application failed for file [{}] {}: {}", file, e.getClass().getSimpleName(), e.getMessage());
+                var reason = e instanceof NoMatchException ? EditBlockFailureReason.NO_MATCH : EditBlockFailureReason.AMBIGUOUS_MATCH;
+                failed.add(new FailedBlock(block, reason, commentary));
             } catch (IOException e) {
-                logger.warn("IO error applying edit to file [{}]: {}", file, e.getMessage());
-                io.toolError("Failed reading/writing " + file + ": " + e.getMessage());
-                failed.add(new FailedBlock(block, EditBlockFailureReason.IO_ERROR));
-                // Restore original content if possible
-                if (changedFiles.containsKey(file)) {
-                    try {
-                        file.write(changedFiles.get(file));
-                    } catch (IOException writeErr) {
-                        io.toolError("Failed restoring original content for " + file + " after IO error: " + writeErr.getMessage());
-                    }
-                }
-             }
-         } // End of for loop
+                var msg = "Error applying edit to " + file;
+                logger.warn("{}: {}", msg, e.getMessage());
+                throw new IOException(msg);
+            }
+        }
 
         changedFiles.keySet().retainAll(succeeded.values());
         return new EditResult(changedFiles, failed);
@@ -232,14 +223,16 @@ public class EditBlock {
         public SearchReplaceBlock {
             // filename can be null on bad parse
             assert beforeText != null;
-            assert  afterText != null;
+            assert afterText != null;
         }
     }
 
-    public record ParseResult(List<SearchReplaceBlock> blocks, String parseError) { }
+    public record ParseResult(List<SearchReplaceBlock> blocks, String parseError) {
+    }
 
-    public record ExtendedParseResult(List<OutputBlock> blocks, String parseError) { }
-    
+    public record ExtendedParseResult(List<OutputBlock> blocks, String parseError) {
+    }
+
     /**
      * Represents a segment of the LLM output, categorized as either plain text or a parsed Edit Block.
      */
@@ -251,12 +244,16 @@ public class EditBlock {
             assert (text == null) != (block == null);
         }
 
-        /** Convenience constructor for plain text blocks. */
+        /**
+         * Convenience constructor for plain text blocks.
+         */
         public static OutputBlock plain(String text) {
             return new OutputBlock(text, null);
         }
 
-        /** Convenience constructor for Edit blocks. */
+        /**
+         * Convenience constructor for Edit blocks.
+         */
         public static OutputBlock edit(SearchReplaceBlock block) {
             return new OutputBlock(null, block);
         }
@@ -268,7 +265,7 @@ public class EditBlock {
      * Throws AmbiguousMatchException if more than one match is found.
      */
     public static void replaceInFile(ProjectFile file, String beforeText, String afterText)
-            throws IOException, NoMatchException, AmbiguousMatchException
+    throws IOException, NoMatchException, AmbiguousMatchException
     {
         String original = file.exists() ? file.read() : "";
         String updated = replaceMostSimilarChunk(original, beforeText, afterText);
@@ -299,7 +296,7 @@ public class EditBlock {
      * Throws AmbiguousMatchException if multiple matches are found.
      */
     static String replaceMostSimilarChunk(String content, String target, String replace)
-            throws AmbiguousMatchException, NoMatchException
+    throws AmbiguousMatchException, NoMatchException
     {
         // 1) prep for line-based matching
         ContentLines originalCL = prep(content);
@@ -343,7 +340,9 @@ public class EditBlock {
         throw new NoMatchException("No matching oldLines found in content");
     }
 
-    /** Counts how many leading lines in 'lines' are completely blank (trim().isEmpty()). */
+    /**
+     * Counts how many leading lines in 'lines' are completely blank (trim().isEmpty()).
+     */
     static int countLeadingBlankLines(String[] lines) {
         int c = 0;
         for (String ln : lines) {
@@ -405,7 +404,8 @@ public class EditBlock {
     public static String perfectOrWhitespace(String[] originalLines,
                                              String[] targetLines,
                                              String[] replaceLines)
-            throws AmbiguousMatchException, NoMatchException {
+    throws AmbiguousMatchException, NoMatchException
+    {
         try {
             return perfectReplace(originalLines, targetLines, replaceLines);
         } catch (NoMatchException e) {
@@ -421,7 +421,7 @@ public class EditBlock {
     public static String perfectReplace(String[] originalLines,
                                         String[] targetLines,
                                         String[] replaceLines)
-            throws AmbiguousMatchException, NoMatchException
+    throws AmbiguousMatchException, NoMatchException
     {
         // special-case replace entire file (empty target)
         if (targetLines.length == 0) {
@@ -471,7 +471,7 @@ public class EditBlock {
     static String replaceIgnoringWhitespace(String[] originalLines,
                                             String[] targetLines,
                                             String[] replaceLines)
-            throws AmbiguousMatchException, NoMatchException
+    throws AmbiguousMatchException, NoMatchException
     {
         var truncatedTarget = removeLeadingTrailingEmptyLines(targetLines);
         var truncatedReplace = removeLeadingTrailingEmptyLines(replaceLines);
@@ -589,21 +589,22 @@ public class EditBlock {
         return new ContentLines(content, lines);
     }
 
-    private record ContentLines(String original, String[] lines) { }
+    private record ContentLines(String original, String[] lines) {
+    }
 
     /**
      * Resolves a filename string to a ProjectFile.
      * Handles partial paths, checks against editable files, tracked files, and project files.
      *
-     * @param cm         The context manager.
-     * @param filename   The filename string to resolve (potentially partial).
-     * @param createNew  If true, allow resolving to a non-existent file path for creation.
+     * @param cm        The context manager.
+     * @param filename  The filename string to resolve (potentially partial).
+     * @param createNew If true, allow resolving to a non-existent file path for creation.
      * @return The resolved ProjectFile.
-     * @throws SymbolNotFoundException if the file cannot be found.
+     * @throws SymbolNotFoundException  if the file cannot be found.
      * @throws SymbolAmbiguousException if the filename matches multiple files.
      */
     static ProjectFile resolveProjectFile(IContextManager cm, String filename, boolean createNew)
-            throws SymbolNotFoundException, SymbolAmbiguousException
+    throws SymbolNotFoundException, SymbolAmbiguousException
     {
         var file = cm.toFile(filename);
 
@@ -640,8 +641,8 @@ public class EditBlock {
                         .filter(f -> f.getFileName().equalsIgnoreCase(file.getFileName()))
                         .toList();
                 if (exactBaseMatches.size() == 1) {
-                     logger.debug("Resolved ambiguous tracked filename [{}] to exact basename match [{}]", filename, exactBaseMatches.getFirst());
-                     return exactBaseMatches.getFirst();
+                    logger.debug("Resolved ambiguous tracked filename [{}] to exact basename match [{}]", filename, exactBaseMatches.getFirst());
+                    return exactBaseMatches.getFirst();
                 }
                 throw new SymbolAmbiguousException("Filename '%s' matches multiple tracked files: %s".formatted(filename, trackedMatches));
             }

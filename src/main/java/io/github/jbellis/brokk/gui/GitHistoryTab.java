@@ -49,7 +49,6 @@ public class GitHistoryTab extends JPanel {
 
         fileHistoryTable = new JTable(fileHistoryModel);
         fileHistoryTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        fileHistoryTable.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         fileHistoryTable.setRowHeight(18);
 
         // Hide the ID column

@@ -1,10 +1,7 @@
 package io.github.jbellis.brokk;
 
 import dev.langchain4j.data.message.*;
-import io.github.jbellis.brokk.analyzer.BrokkFile;
-import io.github.jbellis.brokk.analyzer.CodeUnit;
-import io.github.jbellis.brokk.analyzer.ExternalFile;
-import io.github.jbellis.brokk.analyzer.ProjectFile;
+import io.github.jbellis.brokk.analyzer.*;
 import io.github.jbellis.brokk.prompts.EditBlockParser;
 import io.github.jbellis.brokk.util.Messages;
 import org.fife.ui.rsyntaxtextarea.FileTypeUtil;
@@ -16,10 +13,8 @@ import java.io.ObjectInputStream;
 import java.io.Serial;
 import java.io.Serializable;
 import java.nio.file.Path;
-import java.util.Comparator;
+import java.util.*;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -71,6 +66,13 @@ public interface ContextFragment extends Serializable {
      */
     String format() throws IOException;
 
+    /**
+     * for Quick Context LLM
+     */
+    default String formatSummary(IAnalyzer analyzer) {
+        return description();
+    }
+
     default boolean isText() {
         return true;
     }
@@ -101,7 +103,7 @@ public interface ContextFragment extends Serializable {
         return true;
     }
 
-    static Set<ProjectFile> parseRepoFiles(String text, IProject project) {
+    static Set<ProjectFile> parseProjectFiles(String text, IProject project) {
         var exactMatches = project.getAllFiles().stream().parallel()
                 .filter(f -> text.contains(f.toString()))
                 .collect(Collectors.toSet());
@@ -142,6 +144,10 @@ public interface ContextFragment extends Serializable {
                     </file>
                     """.stripIndent().formatted(file().toString(), id(), text());
         }
+
+        static String formatSummary(BrokkFile file) {
+            return "<file source=\"%s\" />".formatted(file);
+        }
     }
 
     record ProjectPathFragment(ProjectFile file, int id) implements PathFragment {
@@ -167,6 +173,23 @@ public interface ContextFragment extends Serializable {
                 return file.getFileName();
             }
             return "%s [%s]".formatted(file.getFileName(), file.getParent());
+        }
+
+        @Override
+        public String formatSummary(IAnalyzer analyzer) {
+            var summary = analyzer.getSkeletons(file).entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .map(Map.Entry::getValue)
+                    .collect(Collectors.joining("\n"));
+            if (summary.isBlank()) {
+                // this also handles the analyzer.isEmpty case
+                return PathFragment.formatSummary(file);
+            }
+            return """
+                   <file source="%s" summarized=true>
+                   %s
+                   </file>
+                   """.formatted(file, summary);
         }
 
         @Override
@@ -233,6 +256,16 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
+        public String formatSummary(IAnalyzer analyzer) {
+            return PathFragment.formatSummary(file);
+        }
+
+        @Override
+        public int hashCode() {
+            return 0;
+        }
+
+        @Override
         public String toString() {
             return "GitFileFragment('%s' @%s)".formatted(file, shortRevision());
         }
@@ -259,6 +292,11 @@ public interface ContextFragment extends Serializable {
         @Override
         public Set<CodeUnit> sources(IProject project) {
             return Set.of();
+        }
+
+        @Override
+        public String formatSummary(IAnalyzer analyzer) {
+            return PathFragment.formatSummary(file);
         }
     }
 
@@ -323,6 +361,11 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
+        public String formatSummary(IAnalyzer analyzer) {
+            return PathFragment.formatSummary(file);
+        }
+
+        @Override
         public String toString() {
             return "ImageFileFragment('%s')".formatted(file);
         }
@@ -357,7 +400,7 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
-        public String format() throws IOException {
+        public String format() {
             return """
                     <fragment description="%s" fragmentid="%d">
                     %s
@@ -374,7 +417,7 @@ public interface ContextFragment extends Serializable {
 
         @Override
         public Set<ProjectFile> files(IProject project) {
-            return parseRepoFiles(text(), project);
+            return parseProjectFiles(text(), project);
         }
 
         @Override
@@ -382,6 +425,11 @@ public interface ContextFragment extends Serializable {
             return files(project).stream()
                     .flatMap(f -> project.getAnalyzerUninterrupted().getClassesInFile(f).stream())
                     .collect(java.util.stream.Collectors.toSet());
+        }
+
+        @Override
+        public String formatSummary(IAnalyzer analyzer) {
+            return "<fragment description=\"%s\" />".formatted(description());
         }
 
         @Override
@@ -468,6 +516,11 @@ public interface ContextFragment extends Serializable {
         @Override
         public String description() {
             return "Search: " + query;
+        }
+
+        @Override
+        public String formatSummary(IAnalyzer analyzer) {
+            return format(); // full search result
         }
 
         // --- Custom Serialization using Proxy Pattern ---
@@ -619,7 +672,7 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
-        public String format() throws IOException {
+        public String format() {
             return """
               <fragment description="%s" fragmentid="%d">
               %s
@@ -670,6 +723,11 @@ public interface ContextFragment extends Serializable {
         @Override
         public String description() {
             return "stacktrace of " + exception;
+        }
+
+        @Override
+        public String formatSummary(IAnalyzer analyzer) {
+            return format(); // full source
         }
 
         @Override
@@ -812,6 +870,14 @@ public interface ContextFragment extends Serializable {
                     .collect(Collectors.joining("\n\n"));
         }
 
+        public static SkeletonFragment merge(Collection<SkeletonFragment> fragments) {
+            var combinedSkeletons = new HashMap<CodeUnit, String>();
+            for (var fragment : fragments) {
+                combinedSkeletons.putAll(fragment.skeletons());
+            }
+            return new SkeletonFragment(combinedSkeletons);
+        }
+
         private Set<CodeUnit> nonDummy() {
             return skeletons.keySet().stream().filter(k -> k.source() != AutoContext.DUMMY).collect(Collectors.toSet());
         }
@@ -860,6 +926,11 @@ public interface ContextFragment extends Serializable {
                     id(),
                     text()
             );
+        }
+
+        @Override
+        public String formatSummary(IAnalyzer analyzer) {
+            return format();
         }
 
         public Map<CodeUnit, String> skeletons() {
@@ -937,6 +1008,11 @@ public interface ContextFragment extends Serializable {
         }
 
         @Override
+        public String formatSummary(IAnalyzer analyzer) {
+            return "";
+        }
+
+        @Override
         public String toString() {
             return "ConversationFragment(" + history.size() + " tasks)";
         }
@@ -982,6 +1058,11 @@ public interface ContextFragment extends Serializable {
             // FIXME the right thing to do here is probably to throw UnsupportedOperationException,
             // but lots of stuff breaks without text(), so I am putting that off for another refactor
             return TaskEntry.formatMessages(messages);
+        }
+
+        @Override
+        public String formatSummary(IAnalyzer analyzer) {
+            return format(); // if it's explicitly added to the workspace it's probably important
         }
 
         @Override

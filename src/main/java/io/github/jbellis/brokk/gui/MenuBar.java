@@ -143,7 +143,7 @@ public class MenuBar {
         menuBar.add(editMenu);
 
         // Context menu
-        var contextMenu = new JMenu("Context");
+        var contextMenu = new JMenu("Workspace");
 
         var refreshItem = new JMenuItem("Refresh Code Intelligence");
         refreshItem.addActionListener(e -> {

@@ -57,6 +57,14 @@ public class ThemeColors {
         LIGHT_COLORS.put("border_color_hex", Color.decode("#dddddd"));
         LIGHT_COLORS.put("codeHighlight", new Color(125, 140, 111));
         LIGHT_COLORS.put("rsyntax_background", Color.WHITE);
+        
+        // Git status colors for Commit tab
+        DARK_COLORS.put("git_status_new", new Color(88, 203, 63));
+        DARK_COLORS.put("git_status_modified", new Color(71, 239, 230));
+        DARK_COLORS.put("git_status_deleted", new Color(147, 99, 63));
+        LIGHT_COLORS.put("git_status_new", new Color(42, 119, 34));
+        LIGHT_COLORS.put("git_status_modified", new Color(60, 118, 202));
+        LIGHT_COLORS.put("git_status_deleted", new Color(67, 100, 109));
 
         // File reference badge colors (same for both themes for now)
         Color badgeBorder = new Color(66, 139, 202);

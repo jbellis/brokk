@@ -1,7 +1,6 @@
 package io.github.jbellis.brokk.prompts;
 
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.ChatMessageType;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
@@ -85,11 +84,11 @@ public abstract class CodePrompts {
     }
 
     /**
-     * Generates a concise summary of the workspace contents.
+     * Generates a concise description of the workspace contents.
      * @param cm The ContextManager.
      * @return A string summarizing editable files, read-only snippets, etc.
      */
-    public static String formatWorkspaceSummary(ContextManager cm, boolean includeAutocontext) {
+    public static String formatWorkspaceDescriptions(ContextManager cm, boolean includeAutocontext) {
         var editableContents = cm.getEditableSummary();
         var readOnlyContents = cm.getReadOnlySummary();
         var workspaceBuilder = new StringBuilder();
@@ -103,7 +102,7 @@ public abstract class CodePrompts {
     }
 
     protected SystemMessage systemMessage(ContextManager cm, String reminder) {
-        var workspaceSummary = formatWorkspaceSummary(cm, true);
+        var workspaceSummary = formatWorkspaceDescriptions(cm, true);
         var styleGuide = cm.getProject().getStyleGuide();
 
         var text = """
@@ -224,16 +223,23 @@ public abstract class CodePrompts {
                     }
 
                     String failedBlocksXml = fileFailures.stream()
-                            .map(f -> """
-                                      <failed_block reason="%s">
-                                      <block>
-                                      %s
-                                      </block>
-                                      <commentary>
-                                      %s
-                                      </commentary>
-                                      </failed_block>
-                                      """.formatted(f.reason(), parser.repr(f.block()), f.commentary()).stripIndent())
+                            .map(f -> {
+                                var commentaryText = f.commentary().isBlank()
+                                                     ? ""
+                                                     : """
+                                                       <commentary>
+                                                       %s
+                                                       </commentary>
+                                                       """.formatted(f.commentary());
+                                return """
+                                       <failed_block reason="%s">
+                                       <block>
+                                       %s
+                                       %s
+                                       </block>
+                                       </failed_block>
+                                       """.formatted(f.reason(), parser.repr(f.block()), commentaryText).stripIndent();
+                            })
                             .collect(Collectors.joining("\n"));
 
                     return """
@@ -275,12 +281,6 @@ public abstract class CodePrompts {
                           </note>
                           """.formatted(succeededCount, pluralizeSuccess).stripIndent();
         }
-
-        // we don't send file details to the output
-        var summary = """
-                      \nFailed to apply %s block(s), retrying
-                      """.stripIndent().formatted(failedBlocks.size());
-        io.llmOutput(summary, ChatMessageType.CUSTOM);
 
         // Construct the full message for the LLM
         return """

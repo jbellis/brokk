@@ -351,21 +351,23 @@ public class EditBlockParser {
     }
 
     public String repr(EditBlock.SearchReplaceBlock block) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(DEFAULT_FENCE[0]).append("\n");
-        sb.append(block.filename());;
-        sb.append("<<<<<<< SEARCH");
-        sb.append(block.beforeText());
-        if (!block.beforeText().endsWith("\n")) {
-            sb.append("\n");
-        }
-        sb.append("=======\n");
-        sb.append(block.afterText());
-        if (!block.afterText().endsWith("\n")) {
-            sb.append("\n");
-        }
-        sb.append(">>>>>>> REPLACE\n");
-
-        return sb.toString();
+        var beforeText = block.beforeText();
+        var afterText = block.afterText();
+        return """
+               %s
+               %s
+               <<<<<<< SEARCH
+               %s%s
+               =======
+               %s%s
+               >>>>>>> REPLACE
+               %s
+               """.formatted(DEFAULT_FENCE[0],
+                             block.filename(),
+                             beforeText,
+                             beforeText.endsWith("\n") ? "" : "\n",
+                             afterText,
+                             afterText.endsWith("\n") ? "" : "\n",
+                             DEFAULT_FENCE[1]);
     }
 }

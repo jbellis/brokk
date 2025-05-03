@@ -257,7 +257,7 @@ public class ArchitectAgent {
             // 4) Figure out which tools are allowed in this step
             var toolSpecs = new ArrayList<ToolSpecification>();
             var analyzerTools = List.of("addClassesToWorkspace",
-                                        "addUsagesToWorkspace",
+                                        "addSymbolUsagesToWorkspace",
                                         "addClassSummariesToWorkspace",
                                         "addMethodSourcesToWorkspace",
                                         "addCallGraphInToWorkspace",

@@ -23,6 +23,8 @@ scalacOptions ++= Seq(
   "-feature",
 )
 
+val jlamaVersion = "1.0.0-beta3" // Assuming this matches langchain4j-jlama
+
 // Additional repositories
 resolvers ++= Seq(
   "Gradle Libs" at "https://repo.gradle.org/gradle/libs-releases",
@@ -37,6 +39,8 @@ libraryDependencies ++= Seq(
   "dev.langchain4j" % "langchain4j" % "1.0.0-beta3",
   "dev.langchain4j" % "langchain4j-open-ai" % "1.0.0-beta3",
   "com.squareup.okhttp3" % "okhttp" % "4.12.0",
+
+  "com.github.tjake" % "jlama-core" % "0.8.3",
 
   // Console and logging
   "org.slf4j" % "slf4j-api" % "2.0.16",
@@ -101,4 +105,5 @@ assembly / mainClass := Some("io.github.jbellis.brokk.Brokk")
 testFrameworks += new TestFramework("com.github.sbt.junit.JupiterFramework")
 
 Compile / run / fork := true
-javaOptions ++= Seq("-ea")
+javaOptions += "-ea"
+javaOptions += "--add-modules=jdk.incubator.vector"

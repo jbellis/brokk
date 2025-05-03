@@ -1,25 +1,20 @@
 package io.github.jbellis.brokk;
 
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.Content;
-import dev.langchain4j.data.message.ImageContent;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.TextContent;
-import dev.langchain4j.data.message.UserMessage;
+import com.google.common.collect.Streams;
+import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
-import io.github.jbellis.brokk.agents.BuildAgent;
-import io.github.jbellis.brokk.agents.BuildAgent.BuildDetails;
 import io.github.jbellis.brokk.ContextFragment.PathFragment;
 import io.github.jbellis.brokk.ContextFragment.VirtualFragment;
 import io.github.jbellis.brokk.ContextHistory.UndoResult;
+import io.github.jbellis.brokk.agents.BuildAgent;
+import io.github.jbellis.brokk.agents.BuildAgent.BuildDetails;
 import io.github.jbellis.brokk.analyzer.*;
 import io.github.jbellis.brokk.gui.Chrome;
 import io.github.jbellis.brokk.prompts.EditBlockParser;
 import io.github.jbellis.brokk.prompts.SummarizerPrompts;
-import io.github.jbellis.brokk.tools.WorkspaceTools;
 import io.github.jbellis.brokk.tools.SearchTools;
 import io.github.jbellis.brokk.tools.ToolRegistry;
+import io.github.jbellis.brokk.tools.WorkspaceTools;
 import io.github.jbellis.brokk.util.ImageUtil;
 import io.github.jbellis.brokk.util.LoggingExecutorService;
 import io.github.jbellis.brokk.util.Messages;
@@ -33,26 +28,17 @@ import javax.swing.*;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Properties;
-import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -234,9 +220,93 @@ public class ContextManager implements IContextManager, AutoCloseable {
         // Ensure style guide and build details are loaded/generated asynchronously
         ensureStyleGuide();
         ensureBuildDetailsAsync(); // Changed from ensureBuildCommand
+        cleanupOldHistoryAsync(); // Clean up old LLM history logs
 
         chrome.getInstructionsPanel().checkBalanceAndNotify();
     }
+
+    /**
+     * Submits a background task to clean up old LLM session history directories.
+     */
+    private void cleanupOldHistoryAsync() {
+        submitBackgroundTask("Cleaning up LLM history", this::cleanupOldHistory);
+    }
+
+    /**
+     * Scans the LLM history directory and deletes subdirectories whose last modified time
+     * is older than one week. This method runs synchronously but is intended to be
+     * called from a background task.
+     */
+    private void cleanupOldHistory() {
+        var historyBaseDir = Llm.getHistoryBaseDir(project.getRoot());
+        if (!Files.isDirectory(historyBaseDir)) {
+            logger.debug("LLM history directory {} does not exist, skipping cleanup.", historyBaseDir);
+            return;
+        }
+
+        var cutoff = Instant.now().minus(Duration.ofDays(7));
+        var deletedCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+        logger.trace("Scanning LLM history directory {} for entries modified before {}", historyBaseDir, cutoff);
+        try (var stream = Files.list(historyBaseDir)) {
+            stream.filter(Files::isDirectory) // Process only directories
+                    .forEach(entry -> {
+                        try {
+                            var lastModifiedTime = Files.getLastModifiedTime(entry).toInstant();
+                            if (lastModifiedTime.isBefore(cutoff)) {
+                                logger.trace("Attempting to delete old history directory (modified {}): {}", lastModifiedTime, entry);
+                                if (deleteDirectoryRecursively(entry)) {
+                                    deletedCount.incrementAndGet();
+                                } else {
+                                    logger.error("Failed to fully delete old history directory: {}", entry);
+                                }
+                            }
+                        } catch (IOException e) {
+                            // Log error getting last modified time for a specific entry, but continue with others
+                            logger.error("Error checking last modified time for history entry: {}", entry, e);
+                        }
+                    });
+        } catch (IOException e) {
+            // Log error listing the base history directory itself
+            logger.error("Error listing LLM history directory {}", historyBaseDir, e);
+        }
+
+        int count = deletedCount.get();
+        if (count > 0) {
+            logger.debug("Deleted {} old LLM history directories.", count);
+        } else {
+            logger.debug("No old LLM history directories found to delete.");
+        }
+    }
+
+    /**
+     * Recursively deletes a directory and its contents.
+     * Logs errors encountered during deletion.
+     *
+     * @param path The directory path to delete.
+     * @return true if the directory was successfully deleted (or didn't exist), false otherwise.
+     */
+    private boolean deleteDirectoryRecursively(Path path) {
+        assert Files.exists(path);
+        try (var stream = Files.walk(path)) {
+            stream
+                    .sorted(Comparator.reverseOrder()) // Ensure contents are deleted before directories
+                    .forEach(p -> {
+                        try {
+                            Files.delete(p);
+                        } catch (IOException e) {
+                            // Log the specific error but allow the walk to continue trying other files/dirs
+                            logger.error("Failed to delete path {} during recursive cleanup of {}", p, path, e);
+                        }
+                    });
+            // Final check after attempting deletion
+            return !Files.exists(path);
+        } catch (IOException e) {
+            logger.error("Failed to walk or initiate deletion for directory: {}", path, e);
+            return false;
+        }
+    }
+
 
     @Override
     public void replaceContext(Context context, Context replacement) {
@@ -1029,6 +1099,34 @@ public class ContextManager implements IContextManager, AutoCloseable {
         return List.of(workspaceUserMessage, new AiMessage("Thank you for providing the Workspace contents."));
     }
 
+    /**
+     * @return a summary of each fragment in the workspace; for most fragment types this is just the description,
+     * but for some (SearchFragment) it's the full text and for others (files, skeletons) it's the class summaries.
+     */
+    public Collection<ChatMessage> getWorkspaceSummaryMessages() {
+        var c = topContext();
+        IAnalyzer analyzer = getAnalyzerUninterrupted(); // Might block
+
+        // --- Process Read-Only Fragments ---
+        var summaries = Streams.concat(c.getReadOnlyFragments(), c.getEditableFragments())
+                .map(fragment -> fragment.formatSummary(analyzer))
+                .filter(s -> !s.isBlank())
+                .collect(Collectors.joining("\n"));
+
+        if (summaries.isEmpty()) {
+            return List.of();
+        }
+
+        String summaryText = """
+                             <workspace-summary>
+                             %s
+                             </workspace-summary>
+                             """.stripIndent().formatted(summaries).trim();
+
+        var summaryUserMessage = new UserMessage(summaryText);
+        return List.of(summaryUserMessage, new AiMessage("Okay, I have the workspace summary."));
+    }
+
     private String readOnlySummaryDescription(ContextFragment cf) {
         if (cf instanceof PathFragment pf) {
             return pf.file().toString();
@@ -1145,6 +1243,9 @@ public class ContextManager implements IContextManager, AutoCloseable {
     {
         logger.warn("Removing unreadable fragment {}", f.description(), th);
         io.toolErrorRaw("Removing unreadable fragment " + f.description());
+        // removeBadFragment takes IOException, but we caught Exception. Wrap it.
+        // Ideally removeBadFragment would take Exception or Throwable.
+        IOException wrapper = (th instanceof IOException ioe) ? ioe : new IOException("Error processing fragment: " + th.getMessage(), th);
         pushContext(c -> c.removeBadFragment(f));
     }
 
@@ -1283,7 +1384,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
     private void ensureBuildDetailsAsync() {
         BuildDetails currentDetails = project.getBuildDetails();
         if (currentDetails != null) {
-            logger.debug("Loaded existing build details {}", currentDetails);
+            logger.trace("Loaded existing build details {}", currentDetails);
             return;
         }
 

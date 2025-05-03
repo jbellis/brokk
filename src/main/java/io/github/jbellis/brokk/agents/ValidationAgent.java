@@ -14,7 +14,6 @@ import org.apache.logging.log4j.Logger;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 /**
@@ -71,7 +70,7 @@ public class ValidationAgent {
                 .map(ProjectFile::toString)
                 .collect(Collectors.joining("\n"));
 
-        var workspaceSummary = CodePrompts.formatWorkspaceSummary(contextManager, true);
+        var workspaceSummary = CodePrompts.formatWorkspaceDescriptions(contextManager, true);
 
         var systemMessage = """
                 You are an assistant that identifies potentially relevant test files.

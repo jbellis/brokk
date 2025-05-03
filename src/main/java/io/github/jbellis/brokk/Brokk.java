@@ -1,5 +1,9 @@
 package io.github.jbellis.brokk;
 
+import com.github.tjake.jlama.model.AbstractModel;
+import com.github.tjake.jlama.model.ModelSupport;
+import com.github.tjake.jlama.safetensors.DType;
+import com.github.tjake.jlama.safetensors.SafeTensorSupport;
 import io.github.jbellis.brokk.gui.Chrome;
 import io.github.jbellis.brokk.gui.dialogs.SettingsDialog; // Import SettingsDialog
 import org.apache.logging.log4j.LogManager;
@@ -8,20 +12,45 @@ import org.apache.logging.log4j.Logger;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.WindowEvent;
+import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 
 public class Brokk {
     private static final Logger logger = LogManager.getLogger(Brokk.class);
-    
+
     private static final ConcurrentHashMap<Path, Chrome> openProjectWindows = new ConcurrentHashMap<>();
     private static final Set<Path> reOpeningProjects = ConcurrentHashMap.newKeySet();
+    public static final CompletableFuture<AbstractModel> embeddingModelFuture;
     // key for empty project in the openProjectWindows map, should not be used as a path on disk
     private static final Path EMPTY_PROJECT = Path.of("∅");
 
     public static final String ICON_RESOURCE = "/brokk-icon.png";
+
+    static {
+        embeddingModelFuture = CompletableFuture.supplyAsync(() -> {
+            logger.info("Loading embedding model asynchronously...");
+            var modelName = "sentence-transformers/all-MiniLM-L6-v2";
+            File localModelPath = null;
+            try {
+                var cacheDir = System.getProperty("user.home") + "/.cache/brokk";
+                new File(cacheDir).mkdirs();
+                localModelPath = SafeTensorSupport.maybeDownloadModel(cacheDir, modelName);
+            } catch (IOException e) {
+                logger.warn(e);
+                return null;
+            }
+            // Assuming loadEmbeddingModel returns BertEmbeddingModel or a compatible type
+            var model = ModelSupport.loadEmbeddingModel(localModelPath, DType.F32, DType.I8);
+            logger.info("Embedding model loading complete.");
+            // Cast to the specific type expected by the Future if necessary
+            return model;
+        });
+    }
 
     /**
      * Main entry point: Start up Brokk with no project loaded,

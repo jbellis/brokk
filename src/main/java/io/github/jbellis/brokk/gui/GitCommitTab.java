@@ -81,20 +81,26 @@ public class GitCommitTab extends JPanel {
                 String path = (String) table.getModel().getValueAt(row, 1);
                 String fullPath = path.isEmpty() ? filename : path + "/" + filename;
                 String status = fileStatusMap.get(fullPath);
+                boolean darkTheme = UIManager.getLookAndFeel().getName().toLowerCase().contains("dark");
+                
                 if (!isSelected) {
+                    var newColor = io.github.jbellis.brokk.gui.mop.ThemeColors.getColor(darkTheme, "git_status_new");
+                    var modifiedColor = io.github.jbellis.brokk.gui.mop.ThemeColors.getColor(darkTheme, "git_status_modified");
+                    var deletedColor = io.github.jbellis.brokk.gui.mop.ThemeColors.getColor(darkTheme, "git_status_deleted");
+                    
                     switch (status) {
-                        case "new" -> cell.setForeground(java.awt.Color.GREEN);
-                        case "deleted" -> cell.setForeground(java.awt.Color.RED);
-                        case "modified" -> cell.setForeground(java.awt.Color.BLUE);
-                        default -> cell.setForeground(java.awt.Color.BLACK);
+                        case "new" -> cell.setForeground(newColor);
+                        case "deleted" -> cell.setForeground(deletedColor);
+                        case "modified" -> cell.setForeground(modifiedColor);
+                        default -> cell.setForeground(table.getForeground());
                     }
                 } else {
                     cell.setForeground(table.getSelectionForeground());
+                    cell.setBackground(table.getSelectionBackground());
                 }
                 return cell;
             }
         });
-        uncommittedFilesTable.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         uncommittedFilesTable.setRowHeight(18);
         uncommittedFilesTable.getColumnModel().getColumn(0).setPreferredWidth(150);
         uncommittedFilesTable.getColumnModel().getColumn(1).setPreferredWidth(450);
@@ -402,7 +408,7 @@ public class GitCommitTab extends JPanel {
      */
     public void updateCommitPanel()
     {
-        logger.debug("Starting updateCommitPanel");
+        logger.trace("Starting updateCommitPanel");
         if (getRepo() == null) {
             logger.warn("Cannot update commit panel, GitRepo is null");
             suggestMessageButton.setEnabled(false);
@@ -425,7 +431,7 @@ public class GitCommitTab extends JPanel {
         contextManager.submitBackgroundTask("Checking uncommitted files", () -> {
             try {
                 var uncommittedFiles = getRepo().getModifiedFiles();
-                logger.debug("Found modified files {}", uncommittedFiles);
+                logger.trace("Found modified files {}", uncommittedFiles);
                 var gitStatus = getRepo().getGit().status().call();
                 var addedSet = gitStatus.getAdded();
                 var removedSet = new java.util.HashSet<>(gitStatus.getRemoved());
@@ -447,19 +453,19 @@ public class GitCommitTab extends JPanel {
                     model.setRowCount(0);
 
                     if (uncommittedFiles.isEmpty()) {
-                        logger.debug("No modified files found");
+                        logger.trace("No modified files found");
                         suggestMessageButton.setEnabled(false);
                         commitButton.setEnabled(false);
                         stashButton.setEnabled(false);
                     } else {
-                        logger.debug("Found {} modified files to display", uncommittedFiles.size());
+                        logger.trace("Found {} modified files to display", uncommittedFiles.size());
                         // Track row indices for files that were previously selected
                         List<Integer> rowsToSelect = new ArrayList<>();
 
                         for (int i = 0; i < uncommittedFiles.size(); i++) {
                             var file = uncommittedFiles.get(i);
                             model.addRow(new Object[]{file.getFileName(), file.getParent()});
-                            logger.debug("Added file to table: {}/{}", file.getParent(), file.getFileName());
+                            logger.trace("Added file to table: {}/{}", file.getParent(), file.getFileName());
 
                             // Check if this file was previously selected
                             String fullPath = file.getParent().isEmpty() ?
@@ -474,7 +480,7 @@ public class GitCommitTab extends JPanel {
                             for (int row : rowsToSelect) {
                                 uncommittedFilesTable.addRowSelectionInterval(row, row);
                             }
-                            logger.debug("Restored selection for {} rows", rowsToSelect.size());
+                            logger.trace("Restored selection for {} rows", rowsToSelect.size());
                         }
 
                         suggestMessageButton.setEnabled(true);
@@ -617,7 +623,7 @@ public class GitCommitTab extends JPanel {
                 chrome.systemOutput("All changes stashed successfully: " + stashDescription);
             } else {
                 String fileList = selectedFiles.size() <= 3
-                                  ? selectedFiles.stream().map(Object::toString).collect(Collectors.joining(", "))
+                                  ? selectedFiles.stream().map(ProjectFile::getFileName).collect(Collectors.joining(", "))
                                   : selectedFiles.size() + " files";
                 chrome.systemOutput("Stashed " + fileList + ": " + stashDescription);
             }
