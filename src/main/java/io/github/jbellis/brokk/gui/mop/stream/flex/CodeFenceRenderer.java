@@ -33,42 +33,29 @@ public class CodeFenceRenderer implements NodeRenderer {
     }
     
     /**
-     * Renders a fenced code block as a placeholder HTML element.
+     * Renders a fenced code block as a placeholder HTML element,
+     * preserving internal whitespace.
      */
     private void render(FencedCodeBlock node, NodeRendererContext context, HtmlWriter html) {
-       
         int id = idProvider.getId(node);
         String language = node.getInfo().toString();
-        
-        // Get raw content with original indentation preserved
-        // node.getContentChars() loses indentation, so we use getContentLines() instead
-        String content = node.getContentLines()
-                .stream()
-                .map(Object::toString)  // Keep the original text with indentation
-                .collect(java.util.stream.Collectors.joining("\n"));
-        
-        logger.debug("Rendering code fence with id={}, language={}, content length={}", 
+        String content = node.getContentChars().toString();
+
+        logger.debug("Rendering code fence with id={}, language={}, content length={}",
                      id, language, content.length());
-        
-        // Output placeholder tag with content as attribute only (no need for body)
+
+        // Output the code-fence element with attributes, containing a pre block
+        // for whitespace preservation in the browser.
         html.line();
-        html.raw("<code-fence");
-        html.raw(" data-id=\"" + id + "\"");
-        html.raw(" data-lang=\"" + escapeHtml(language) + "\"");
-        html.raw(" data-content=\"" + escapeHtml(content) + "\"");
-        html.raw(" />");
+        html.attr("data-id", String.valueOf(id))
+            .attr("data-lang", language)
+            .withAttr()
+            .tag("code-fence") // Attributes are applied here
+            .openPre()         // Enter preformatted mode for whitespace preservation
+            .text(content)     // Render content, escaping HTML but preserving whitespace
+            .closePre()        // Exit preformatted mode
+            .closeTag("code-fence");
         html.line();
-    }
-    
-    /**
-     * Basic HTML escaping for attribute values.
-     * This preserves all whitespace characters including spaces and tabs.
-     */
-    private String escapeHtml(String text) {
-        return text.replace("&", "&amp;")
-                  .replace("<", "&lt;")
-                  .replace(">", "&gt;")
-                  .replace("\"", "&quot;");
     }
     
     /**

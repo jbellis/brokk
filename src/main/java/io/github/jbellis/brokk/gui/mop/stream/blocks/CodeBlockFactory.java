@@ -13,9 +13,12 @@ public class CodeBlockFactory implements ComponentDataFactory {
     
     @Override
     public ComponentData fromElement(Element element) {
-        int id = Integer.parseInt(element.attr("data-id"));
+            int id = Integer.parseInt(element.attr("data-id"));
         String lang = element.attr("data-lang");
-        String content = element.attr("data-content"); // Get attribute content with preserved whitespace
+        
+        // Extract content from the <pre> element to preserve whitespace
+        Element preElement = element.selectFirst("pre");
+        String content = preElement != null ? preElement.wholeText() : element.wholeText();
         
         return new CodeBlockComponentData(id, content, lang);
     }
