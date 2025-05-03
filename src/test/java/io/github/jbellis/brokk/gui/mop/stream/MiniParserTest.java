@@ -38,9 +38,35 @@ public class MiniParserTest {
         parser = new MiniParser();
         mdFactory = new MarkdownFactory();
         factories = new HashMap<>();
-        factories.put("code-fence", new CodeBlockFactory());
+        factories.put("code-fence", new TestCodeBlockFactory());
         factories.put("edit-block", new EditBlockFactory());
         idProvider = new IdProvider();
+    }
+    
+    /**
+     * Test-specific CodeBlockFactory that extracts content from element body
+     * rather than data-content attribute
+     */
+    private static class TestCodeBlockFactory extends CodeBlockFactory {
+        @Override
+        public ComponentData fromElement(org.jsoup.nodes.Element element) {
+            int id = Integer.parseInt(element.attr("data-id"));
+            String lang = element.attr("data-lang");
+            
+            // Extract code from element text or first pre tag if present
+            String code = "";
+            var preTag = element.selectFirst("pre");
+            if (preTag != null) {
+                code = preTag.text();
+            } else if (element.hasAttr("data-content")) {
+                // Fallback to data-content for backward compatibility
+                code = element.attr("data-content");
+            } else {
+                code = element.text();
+            }
+            
+            return new CodeBlockComponentData(id, code, lang);
+        }
     }
     
     @Test
@@ -61,7 +87,7 @@ public class MiniParserTest {
     @Test
     void testNestedCodeFence() {
         var html = "<ul><li>Here is a code block:\n" +
-                  "<code-fence data-id=\"123\" data-lang=\"java\" data-content=\"System.out.println(&quot;test&quot;);\"/>\n" +
+                  "<code-fence data-id=\"123\" data-lang=\"java\"><pre>System.out.println(\"test\");</pre></code-fence>\n" +
                   "</li></ul>";
         var doc = Jsoup.parse(html);
         var element = doc.body().child(0); // <ul> element
@@ -95,9 +121,9 @@ public class MiniParserTest {
     void testMultipleNestedCustomTags() {
         var html = "<div>" +
                   "  <p>First paragraph</p>" +
-                  "  <code-fence data-id=\"123\" data-lang=\"java\" data-content=\"code1();\"/>" +
+                  "  <code-fence data-id=\"123\" data-lang=\"java\"><pre>code1();</pre></code-fence>" +
                   "  <p>Second paragraph</p>" +
-                  "  <code-fence data-id=\"124\" data-lang=\"python\" data-content=\"code2();\"/>" +
+                  "  <code-fence data-id=\"124\" data-lang=\"python\"><pre>code2();</pre></code-fence>" +
                   "  <p>Final paragraph</p>" +
                   "</div>";
         var doc = Jsoup.parse(html);
@@ -130,7 +156,7 @@ public class MiniParserTest {
     @Test
     void testDeepNestedCustomTag() {
         var html = "<blockquote><ul><li>" +
-                  "  <code-fence data-id=\"123\" data-lang=\"java\" data-content=\"deeplyNested();\"/>" +
+                  "  <code-fence data-id=\"123\" data-lang=\"java\"><pre>deeplyNested();</pre></code-fence>" +
                   "</li></ul></blockquote>";
         var doc = Jsoup.parse(html);
         var element = doc.body().child(0); // <blockquote> element

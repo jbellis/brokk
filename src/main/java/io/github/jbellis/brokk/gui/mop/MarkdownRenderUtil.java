@@ -198,9 +198,9 @@ public class MarkdownRenderUtil {
      */
     public static JEditorPane createHtmlPane(boolean isDarkTheme) {
         var htmlPane = new JEditorPane();
+        htmlPane.setContentType("text/html");
         DefaultCaret caret = (DefaultCaret) htmlPane.getCaret();
         caret.setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
-        htmlPane.setContentType("text/html");
         htmlPane.setEditable(false);
         htmlPane.setAlignmentX(Component.LEFT_ALIGNMENT);
         htmlPane.setText("<html><body></body></html>");

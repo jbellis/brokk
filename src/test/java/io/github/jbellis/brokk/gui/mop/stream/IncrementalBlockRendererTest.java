@@ -91,7 +91,7 @@ public class IncrementalBlockRendererTest {
         // Test with mixed content
         String html = """
             <p>Regular markdown text</p>
-            <code-fence data-id="1" data-lang="java" data-content="public class Test {}"></code-fence>
+            <code-fence data-id="1" data-lang="java"><pre>public class Test {}</pre></code-fence>
             <p>More text</p>
             <edit-block data-id="2" data-adds="5" data-dels="3" data-file="Test.java"></edit-block>
             <p>Final text</p>

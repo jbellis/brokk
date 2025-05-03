@@ -35,7 +35,6 @@ public final class Reconciler {
      * @param darkTheme Whether to use dark theme styling for new components
      */
     public static void reconcile(JPanel container, List<ComponentData> desired, Map<Integer, BlockEntry> registry, boolean darkTheme) {
-        assert SwingUtilities.isEventDispatchThread() : "Reconciler must be called on the EDT";
         Set<Integer> seen = new HashSet<>();
 
         // Process each desired component

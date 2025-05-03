@@ -57,7 +57,7 @@ class BrokkMarkdownExtensionTest {
         // 2) Data attributes are present and escaped properly
         assertTrue(html.contains("data-lang=\"java\""), "language attribute missing");
         assertTrue(html.contains("data-id=\""), "id attribute missing");
-        assertTrue(html.contains("data-content=\""), "content attribute missing");
+        assertTrue(html.matches("(?s).*<code-fence[^>]*>.*System.out.println.*</code-fence>.*"), "Code should be present in element body");
 
         // 3) Code content is properly included and escaped
         assertTrue(html.contains("System.out.println"), "code content should be included");
@@ -438,8 +438,8 @@ class BrokkMarkdownExtensionTest {
         assertEquals(2, html.split("<code-fence").length - 1, "Should have exactly 2 code blocks");
 
         // Verify code content is included
-        assertTrue(html.contains("data-content=\"record Row"), "First code block content should be present");
-        assertTrue(html.contains("data-content=\"var bubble"), "Second code block content should be present");
+        assertTrue(html.matches("(?s).*<code-fence[^>]*>.*record Row.*</code-fence>.*"), "First code block content should be present");
+        assertTrue(html.matches("(?s).*<code-fence[^>]*>.*var bubble.*</code-fence>.*"), "Second code block content should be present");
 
         // Verify IDs are present
         assertTrue(html.contains("data-id=\""), "ID attributes should be present");
@@ -473,7 +473,7 @@ class BrokkMarkdownExtensionTest {
         assertEquals(1, html.split("<code-fence").length - 1, "Should have exactly 1 code block");
 
         // Verify code content is included
-        assertTrue(html.contains("data-content=\"revalidate();"), "Code content should be present");
+        assertTrue(html.matches("(?s).*<code-fence[^>]*>.*revalidate\\(\\);.*</code-fence>.*"), "Code content should be present");
         assertTrue(html.contains("repaint();"), "Code content should be present");
 
         // Verify inline code is preserved
@@ -556,7 +556,7 @@ class BrokkMarkdownExtensionTest {
         System.out.println("ACTUAL CONTENT: [" + actualContent + "]");
         
         // Assert core content is present (without checking indentation)
-        assertTrue(html.contains("data-content=\"def fibonacci(n):"), "Code should be present in content");
+        assertTrue(html.matches("(?s).*<code-fence[^>]*>.*def fibonacci.*</code-fence>.*"), "Code should be present in element body");
         
         // TODO: Ideally we would preserve indentation, but Flexmark's FencedCodeBlock 
         // normalizes indentation internally before we can access it.
