@@ -39,7 +39,7 @@ public final class IncrementalBlockRenderer {
     private final IdProvider idProvider;
 
     // Component tracking
-    private final Map<Integer, BlockEntry> registry = new LinkedHashMap<>();
+    private final Map<Integer, Reconciler.BlockEntry> registry = new LinkedHashMap<>();
     private String lastHtmlFingerprint = "";
     
     // Component factories
@@ -123,69 +123,7 @@ public final class IncrementalBlockRenderer {
      * @param components The list of component data to render
      */
     private void updateUI(List<ComponentData> components) {
-        Set<Integer> seen = new HashSet<>();
-        
-        // Process each component
-        for (ComponentData cd : components) {
-            BlockEntry entry = registry.get(cd.id());
-            
-            if (entry == null) {
-                // Create new component
-                JComponent comp = cd.createComponent(isDarkTheme);
-                entry = new BlockEntry(comp, cd.fp());
-                registry.put(cd.id(), entry);
-                root.add(comp);
-                logger.debug("Created new component with id {}: {}", cd.id(), cd.getClass().getSimpleName());
-            } else {
-                logger.debug("cd.fp()={} vs. entry.fp={}", cd.fp(), entry.fp);
-                if (!cd.fp().equals(entry.fp)) {
-                    // Update existing component
-                    cd.updateComponent(entry.comp);
-                    entry.fp = cd.fp();
-                    logger.debug("Updated component with id {}: {}", cd.id(), cd.getClass().getSimpleName());
-                }
-            }
-            
-            seen.add(cd.id());
-        }
-        
-        // Remove components that are no longer present
-        registry.keySet().removeIf(id -> {
-            if (!seen.contains(id)) {
-                logger.debug("Removing component with id {}", id);
-                root.remove(registry.get(id).comp);
-                return true;
-            }
-            return false;
-        });
-        
-        // Ensure components are in the correct order
-        ensureComponentOrder(components);
-        
-        // Revalidate and repaint
-        root.revalidate();
-        root.repaint();
-    }
-
-    /**
-     * Ensures all components are in the correct order according to the component data list.
-     *
-     * @param components The ordered list of component data
-     */
-    private void ensureComponentOrder(List<ComponentData> components) {
-        for (int i = 0; i < components.size(); i++) {
-            var cd = components.get(i);
-            var entry = registry.get(cd.id());
-            if (entry == null) continue;          // should not happen
-            var current = (i < root.getComponentCount()) ? root.getComponent(i) : null;
-            if (current != entry.comp) {
-                root.add(entry.comp, i);          // inserts or moves in-place
-            }
-        }
-        // trim extras (if any)
-        while (root.getComponentCount() > components.size()) {
-            root.remove(components.size());
-        }
+        Reconciler.reconcile(root, components, registry, isDarkTheme);
     }
 
     private String createHtml(String md) {
@@ -259,16 +197,4 @@ public final class IncrementalBlockRenderer {
         return List.of(new CompositeComponentData(stableId, composite.children()));
     }
     
-    /**
-     * Tracks a rendered component and its current fingerprint.
-     */
-    private static class BlockEntry {
-        JComponent comp;
-        String fp;
-        
-        BlockEntry(JComponent comp, String fp) {
-            this.comp = comp;
-            this.fp = fp;
-        }
-    }
 }

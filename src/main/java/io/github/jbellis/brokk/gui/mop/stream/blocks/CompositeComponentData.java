@@ -1,10 +1,13 @@
 package io.github.jbellis.brokk.gui.mop.stream.blocks;
 
 import io.github.jbellis.brokk.gui.mop.ThemeColors;
+import io.github.jbellis.brokk.gui.mop.stream.Reconciler;
 
 import javax.swing.*;
 import java.awt.*;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -48,34 +51,26 @@ public record CompositeComponentData(
         return panel;
     }
 
+    private static final String REGISTRY_KEY = "brokk.registry";
+
+    @SuppressWarnings("unchecked")
+    private static Map<Integer, Reconciler.BlockEntry> registryOf(JPanel panel) {
+        var map = (Map<Integer, Reconciler.BlockEntry>) panel.getClientProperty(REGISTRY_KEY);
+        if (map == null) {
+            map = new LinkedHashMap<>();
+            panel.putClientProperty(REGISTRY_KEY, map);
+        }
+        return map;
+    }
+
     @Override
     public void updateComponent(JComponent component) {
         if (!(component instanceof JPanel panel)) {
             return;
         }
         
-        Boolean darkTheme = (Boolean) panel.getClientProperty(THEME_FLAG);
-
-        // Check if number of children matches number of components
-        var components = panel.getComponents();
-        if (components.length != children.size()) {
-            // Child count mismatch, rebuild all components
-            panel.removeAll();
-            for (ComponentData child : children) {
-                var childComp = child.createComponent(darkTheme);
-                childComp.setAlignmentX(Component.LEFT_ALIGNMENT);
-                panel.add(childComp);
-            }
-        } else {
-            // Update existing components without rebuilding
-            for (int i = 0; i < children.size(); i++) {
-                if (components[i] instanceof JComponent jcomp) {
-                    children.get(i).updateComponent(jcomp);
-                }
-            }
-        }
-
-        panel.revalidate();
-        panel.repaint();
+        boolean darkTheme = Boolean.TRUE.equals(panel.getClientProperty(THEME_FLAG));
+        var registry = registryOf(panel);
+        Reconciler.reconcile(panel, children, registry, darkTheme);
     }
 }
