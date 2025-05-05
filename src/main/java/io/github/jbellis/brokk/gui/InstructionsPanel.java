@@ -611,7 +611,7 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
     }
 
     private void showHistoryMenu(Component invoker) {
-        logger.debug("Showing history menu");
+        logger.trace("Showing history menu");
         JPopupMenu historyMenu = new JPopupMenu();
         var project = chrome.getProject();
         if (project == null) {
@@ -621,7 +621,7 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
             historyMenu.add(errorItem);
         } else {
             List<String> historyItems = project.loadTextHistory();
-            logger.debug("History items loaded: {}", historyItems.size());
+            logger.trace("History items loaded: {}", historyItems.size());
             if (historyItems.isEmpty()) {
                 JMenuItem emptyItem = new JMenuItem("(No history items)");
                 emptyItem.setEnabled(false);
@@ -658,7 +658,7 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
         historyMenu.setMinimumSize(new Dimension(DROPDOWN_MENU_WIDTH, 0));
         historyMenu.setPreferredSize(new Dimension(DROPDOWN_MENU_WIDTH, historyMenu.getPreferredSize().height));
         historyMenu.pack();
-        logger.debug("Showing history menu with preferred width: {}", DROPDOWN_MENU_WIDTH);
+        logger.trace("Showing history menu with preferred width: {}", DROPDOWN_MENU_WIDTH);
         historyMenu.show(invoker, 0, invoker.getHeight());
     }
 
@@ -878,18 +878,23 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
         }
 
         // 10. Process results and schedule UI update
-        if (recommendations.success()) {
-            var fileRefs = recommendations.fragments().stream()
-                    .flatMap(f -> f.files(contextManager.getProject()).stream())
-                    .distinct()
-                    .map(pf -> new FileReferenceData(pf.getFileName(), pf.toString(), pf))
-                    .toList();
-            logger.debug("Task {} updating quick reference table with {} suggestions", myGen, fileRefs.size());
-            SwingUtilities.invokeLater(() -> showSuggestionsTable(fileRefs));
-        } else {
-            logger.debug("Task {} quick context suggestion failed: {}", myGen, recommendations.reasoning());
-            SwingUtilities.invokeLater(() -> showFailureLabel(recommendations.reasoning()));
-        }
+         if (recommendations.success()) {
+             var fileRefs = recommendations.fragments().stream()
+                                       .flatMap(f -> f.files(contextManager.getProject()).stream())
+                                       .distinct()
+                                       .map(pf -> new FileReferenceData(pf.getFileName(), pf.toString(), pf))
+                                       .toList();
+             if (fileRefs.isEmpty()) {
+                 logger.debug("Task {} found no relevant files.", myGen);
+                 SwingUtilities.invokeLater(() -> showFailureLabel("No quick suggestions"));
+             } else {
+                 logger.debug("Task {} updating quick reference table with {} suggestions", myGen, fileRefs.size());
+                 SwingUtilities.invokeLater(() -> showSuggestionsTable(fileRefs));
+             }
+         } else {
+             logger.debug("Task {} quick context suggestion failed: {}", myGen, recommendations.reasoning());
+             SwingUtilities.invokeLater(() -> showFailureLabel(recommendations.reasoning()));
+         }
     }
 
     /**

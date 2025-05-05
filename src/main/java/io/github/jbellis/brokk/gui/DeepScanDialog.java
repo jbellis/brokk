@@ -1,6 +1,7 @@
 package io.github.jbellis.brokk.gui;
 
 import com.google.common.collect.Streams;
+import io.github.jbellis.brokk.Context;
 import io.github.jbellis.brokk.ContextFragment;
 import io.github.jbellis.brokk.Project;
 import io.github.jbellis.brokk.agents.ContextAgent;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.function.BiFunction;
+import java.util.stream.Collectors;
 
 /**
  * Handles the execution of the Deep Scan agents (Context and Validation)
@@ -64,7 +66,12 @@ class DeepScanDialog {
             logger.debug("Deep Scan: Running ValidationAgent...");
             var agent = new ValidationAgent(contextManager);
             var relevantTestResults = agent.execute(goal);
+            var ctx = contextManager.topContext();
+            var filesInWorkspace = Streams.concat(ctx.editableFiles(), ctx.readonlyFiles())
+                    .map(ContextFragment.PathFragment::file)
+                    .collect(Collectors.toSet());
             var files = relevantTestResults.stream()
+                    .filter(f -> !filesInWorkspace.contains(f))
                     .distinct()
                     .toList();
             logger.debug("Deep Scan: ValidationAgent found {} relevant test files.", files.size());

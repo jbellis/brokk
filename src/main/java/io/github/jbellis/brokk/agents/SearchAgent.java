@@ -888,10 +888,7 @@ public class SearchAgent {
                 llmOutput("\n" + explanation);
             }
 
-            ToolExecutionResult result = Set.of("answerSearch", "abortSearch").contains(request.name())
-                                         ? toolRegistry.executeTool(this, request)
-                                         : toolRegistry.executeTool(request);
-
+            ToolExecutionResult result = toolRegistry.executeTool(this, request);
             var entry = new ToolHistoryEntry(request, result);
 
             handlePostExecution(entry);

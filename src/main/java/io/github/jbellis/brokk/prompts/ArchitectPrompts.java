@@ -1,9 +1,7 @@
 package io.github.jbellis.brokk.prompts;
 
-import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
 import io.github.jbellis.brokk.ContextManager;
 
 import java.util.ArrayList;
@@ -15,35 +13,15 @@ public abstract class ArchitectPrompts extends CodePrompts {
     public List<ChatMessage> collectMessages(ContextManager cm, List<ChatMessage> sessionMessages) throws InterruptedException {
         var messages = new ArrayList<ChatMessage>();
         messages.add(systemMessage(cm, CodePrompts.ARCHITECT_REMINDER));
-        messages.addAll(cm.getWorkspaceContentsMessages());
+        messages.addAll(cm.getWorkspaceContentsMessages(true));
         messages.addAll(cm.getHistoryMessages());
         messages.addAll(sessionMessages);
-        // top 10 related classes
-        String topClassesRaw = "";
-        // Check if an analyzer language is configured (not null)
-        if (cm.getAnalyzer().isCpg()) {
-            var ac = cm.topContext().buildAutoContext(10);
-            topClassesRaw = ac.text();
-            if (!topClassesRaw.isBlank()) {
-                var topClassesText = topClassesRaw.isBlank() ? "" : """
-                    <related_classes>
-                    Here are some classes that may be related to what is in your Workspace. If relevant, you
-                    should explicitly add them with addClassSummariesToWorkspace or addClassesToWorkspace so they are
-                    visible to Code Agent. If they are not relevant, just ignore them:
-                    
-                    %s
-                    </related_classes>
-                    """.stripIndent().formatted(topClassesRaw);
-                messages.add(new UserMessage(topClassesText));
-                messages.add(new AiMessage("I will examine these classes."));
-            }
-        }
         return messages;
     }
 
     @Override
     protected SystemMessage systemMessage(ContextManager cm, String reminder) {
-        var workspaceSummary = formatWorkspaceDescriptions(cm, false);
+        var workspaceSummary = formatWorkspaceDescriptions(cm);
         var styleGuide = cm.getProject().getStyleGuide();
 
         var text = """
@@ -93,9 +71,9 @@ public abstract class ArchitectPrompts extends CodePrompts {
 
         Use Search Agent whenever you are not sure where to find relevant code or how the user's goal relates to the project.
         Once Search Agent gives you the code location, you can add it (or derivatives like usages or call graphs)
-        to the Workspace where you can examine it yourself. Search Agent is slow! so use it only when
-        you don't know where to find the necessary information yourself. (Remember, it's fine to add things
-        just to see if they are relevant, and drop them later if it turns out that they are not.)
+        to the Workspace where you can examine it yourself. However! if you already know where to
+        find the necessary information yourself, prefer adding it directly to searching redundantly.
+        (Remember, it's fine to add things to the Workspace just to see if they are relevant, and drop them later if it turns out that they are not.)
 
         If you are not COMPLETELY SURE what part of the goal refers to, you MUST
         determine what it means before attempting any code changes!  If the request is still ambiguous or
@@ -155,7 +133,7 @@ public abstract class ArchitectPrompts extends CodePrompts {
         """.stripIndent();
     }
 
-    public String getFinalInstructions(String goal) {
+    public String getFinalInstructions(ContextManager cm, String goal) {
         return """
                 <goal>
                 %s
@@ -175,6 +153,11 @@ public abstract class ArchitectPrompts extends CodePrompts {
                 - projectFinished or abortProject, since they terminate execution
                 
                 When you are done, call projectFinished or abortProject.
-                """.stripIndent().formatted(goal);
+                
+                Here is a summary of the current Workspace. Its full contents were sent earlier in the chat.
+                <workspace_summary>
+                %s
+                </workspace_summary>
+                """.stripIndent().formatted(goal, formatWorkspaceDescriptions(cm));
     }
 }

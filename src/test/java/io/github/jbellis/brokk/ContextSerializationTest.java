@@ -123,11 +123,11 @@ public class ContextSerializationTest {
         context = context
                 .addVirtualFragment(new ContextFragment.StringFragment("string content", "String Fragment", SyntaxConstants.SYNTAX_STYLE_NONE))
                 .addVirtualFragment(new ContextFragment.SkeletonFragment(
-                        Map.of(CodeUnit.cls(mockFile, "com.test.Test"), "class Test {}")
+                        Map.of(CodeUnit.cls(mockFile, "com.test", "Test"), "class Test {}")
                 ));
 
         // Create SearchFragment separately to ensure sources are serializable
-        var searchSources = Set.of(CodeUnit.cls(mockFile, "Test"));
+        var searchSources = Set.of(CodeUnit.cls(mockFile, "", "Test"));
         context = context.addVirtualFragment(new ContextFragment.SearchFragment("query", "explanation", searchSources));
 
         // Add fragments that use Future
@@ -139,13 +139,13 @@ public class ContextSerializationTest {
 
         // Add fragment with usage
         context = context.addVirtualFragment(
-                new ContextFragment.UsageFragment("Test.method", Set.of(CodeUnit.cls(mockFile, "com.test.Test")), "Test.method()")
+                new ContextFragment.UsageFragment("Test.method", Set.of(CodeUnit.cls(mockFile, "com.test", "Test")), "Test.method()")
         );
 
         // Add stacktrace fragment
         context = context.addVirtualFragment(
                 new ContextFragment.StacktraceFragment(
-                        Set.of(CodeUnit.cls(mockFile, "com.test.Test")),
+                        Set.of(CodeUnit.cls(mockFile, "com.test", "Test")),
                         "original",
                         "NPE",
                         "code"
@@ -186,7 +186,7 @@ public class ContextSerializationTest {
         assertEquals("Search: query", searchFragment.description());
         assertTrue(searchFragment.text().contains("query"));
         assertTrue(searchFragment.text().contains("explanation"));
-        assertEquals(Set.of(CodeUnit.cls(mockFile, "Test")), searchFragment.sources(null)); // project is unused in this impl
+        assertEquals(Set.of(CodeUnit.cls(mockFile, "", "Test")), searchFragment.sources(null)); // project is unused in this impl
     }
 
     @Test

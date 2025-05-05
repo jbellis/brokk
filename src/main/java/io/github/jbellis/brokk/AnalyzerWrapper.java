@@ -1,23 +1,20 @@
 package io.github.jbellis.brokk;
 
 import io.github.jbellis.brokk.Project.CpgRefresh;
-import java.awt.KeyboardFocusManager;
 
-import io.github.jbellis.brokk.analyzer.DisabledAnalyzer;
-import io.github.jbellis.brokk.analyzer.IAnalyzer;
-import io.github.jbellis.brokk.analyzer.JavaAnalyzer;
-import io.github.jbellis.brokk.analyzer.CodeUnit;
+import io.github.jbellis.brokk.analyzer.*;
 import io.github.jbellis.brokk.analyzer.Language;
-import io.github.jbellis.brokk.analyzer.ProjectFile;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+
+import javax.swing.*;
+import java.awt.KeyboardFocusManager;
 
 import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 
-import javax.swing.*;
 import java.io.IOException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -41,6 +38,7 @@ public class AnalyzerWrapper implements AutoCloseable {
     private final Path root;
     private final ContextManager.TaskRunner runner;
     private final Project project;
+    private final Language language;
 
     private volatile boolean running = true;
     private volatile boolean paused = false;
@@ -61,6 +59,7 @@ public class AnalyzerWrapper implements AutoCloseable {
         this.listener = listener;
 
         // build the initial Analyzer
+        language = project.getAnalyzerLanguage();
         future = runner.submit("Initializing code intelligence", this::loadOrCreateAnalyzer);
     }
 
@@ -160,7 +159,7 @@ public class AnalyzerWrapper implements AutoCloseable {
             );
             rebuild();
         } else {
-            logger.debug("No tracked files changed; skipping analyzer rebuild");
+            logger.trace("No tracked files changed; skipping analyzer rebuild");
         }
     }
 
@@ -175,9 +174,10 @@ public class AnalyzerWrapper implements AutoCloseable {
             return new DisabledAnalyzer();
         }
 
+        // FIXME
         Path analyzerPath = root.resolve(".brokk").resolve("joern.cpg");
         if (project.getCpgRefresh() == CpgRefresh.UNSET) {
-            logger.debug("First startup: timing CPG creation");
+            logger.debug("First startup: timing Analyzer creation");
             long start = System.currentTimeMillis();
             var analyzer = createAndSaveAnalyzer();
             long duration = System.currentTimeMillis() - start;
@@ -185,7 +185,7 @@ public class AnalyzerWrapper implements AutoCloseable {
                 logger.info("Empty analyzer");
                 listener.afterFirstBuild("");
             } else if (duration > 3 * 6000) {
-                project.setCpgRefresh(CpgRefresh.MANUAL);
+                project.setAnalyzerRefresh(CpgRefresh.MANUAL);
                 var msg = """
                 Code Intelligence found %d classes in %,d ms.
                 Since this was slow, code intelligence will only refresh when explicitly requested via the Context menu.
@@ -194,7 +194,7 @@ public class AnalyzerWrapper implements AutoCloseable {
                 listener.afterFirstBuild(msg);
                 logger.info(msg);
             } else if (duration > 5000) {
-                project.setCpgRefresh(CpgRefresh.ON_RESTART);
+                project.setAnalyzerRefresh(CpgRefresh.ON_RESTART);
                 var msg = """
                 Code Intelligence found %d classes in %,d ms.
                 Since this was slow, code intelligence will only refresh on restart, or when explicitly requested via the Context menu.
@@ -203,15 +203,13 @@ public class AnalyzerWrapper implements AutoCloseable {
                 listener.afterFirstBuild(msg);
                 logger.info(msg);
             } else {
-                project.setCpgRefresh(CpgRefresh.AUTO);
+                project.setAnalyzerRefresh(CpgRefresh.AUTO);
                 var msg = """
                 Code Intelligence found %d classes in %,d ms.
                 If this is fewer than expected, it's probably because Brokk only looks for %s files.
-                If this is not a useful subset of your project, the best option is to disable
-                Code Intelligence by setting code_intelligence_language=%s in .brokk/project.properties.
-                Otherwise, Code Intelligence will refresh automatically when changes are made to tracked files.
-                You can change this in the Settings -> Project dialog.
-                """.stripIndent().formatted(analyzer.getAllClasses().size(), duration, Language.JAVA, Language.NONE);
+                If this is not a useful subset of your project, you can change it in the Settings -> Project
+                dialog, or disable Code Intelligence by setting the language to NONE.
+                """.stripIndent().formatted(analyzer.getAllClasses().size(), duration, language.getExtensions(), Language.NONE);
                 listener.afterFirstBuild(msg);
                 logger.info(msg);
                 startWatcher();
@@ -230,17 +228,22 @@ public class AnalyzerWrapper implements AutoCloseable {
     }
 
     public boolean isCpg() {
-        return project.getAnalyzerLanguage() == Language.JAVA;
+        return project.getAnalyzerLanguage() == io.github.jbellis.brokk.analyzer.Language.JAVA;
     }
 
     private IAnalyzer createAndSaveAnalyzer() {
         IAnalyzer newAnalyzer;
-        if (project.getAnalyzerLanguage() == Language.JAVA) {
+        logger.debug("Creating {} analyzer for {}", language, project.getRoot());
+        if (language == io.github.jbellis.brokk.analyzer.Language.JAVA) {
             newAnalyzer = new JavaAnalyzer(root);
             Path analyzerPath = root.resolve(".brokk").resolve("joern.cpg");
             ((JavaAnalyzer) newAnalyzer).writeCpg(analyzerPath);
         } else {
-            throw new AssertionError();
+            newAnalyzer = switch (language) {
+                case PYTHON -> new PythonAnalyzer(project);
+                case C_SHARP -> new CSharpAnalyzer(project);
+                default -> new DisabledAnalyzer();
+            };
         }
 
         logger.debug("Analyzer (re)build completed");
@@ -252,7 +255,7 @@ public class AnalyzerWrapper implements AutoCloseable {
         if (!Files.exists(analyzerPath)) {
             return null;
         }
-        
+
         // In MANUAL mode, always use cached data if it exists
         if (project.getCpgRefresh() == CpgRefresh.MANUAL) {
             logger.debug("MANUAL refresh mode - using cached analyzer");
@@ -308,7 +311,7 @@ public class AnalyzerWrapper implements AutoCloseable {
         }
 
         rebuildInProgress = true;
-        logger.debug("Rebuilding analyzer");
+        logger.trace("Rebuilding analyzer");
         future = runner.submit("Rebuilding code intelligence", () -> {
             try {
                 currentAnalyzer = createAndSaveAnalyzer();
@@ -319,7 +322,7 @@ public class AnalyzerWrapper implements AutoCloseable {
                     // If another rebuild got requested while we were busy, immediately start a new one.
                     if (rebuildPending) {
                         rebuildPending = false;
-                        logger.debug("rebuilding immediately");
+                        logger.trace("rebuilding immediately");
                         rebuild();
                     } else {
                         externalRebuildRequested = false;

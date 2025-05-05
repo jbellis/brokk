@@ -1,8 +1,11 @@
-def method1():
+def funcA():
     # outside of class
     print("hello")
 
-class APython:
+class A:
+    def __init__(self):
+        self.x = 0
+        
     def method1(self) -> None:
         print("hello")
 

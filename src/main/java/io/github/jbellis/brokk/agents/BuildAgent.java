@@ -54,7 +54,7 @@ public class BuildAgent {
                                                                   .name("listFiles")
                                                                   .arguments("{\"directoryPath\": \".\"}") // Request root dir
                                                                   .build();
-        ToolExecutionResult initialResult = toolRegistry.executeTool(initialRequest);
+        ToolExecutionResult initialResult = toolRegistry.executeTool(this, initialRequest);
         ToolExecutionResultMessage initialResultMessage = initialResult.toExecutionResultMessage();
 
         // Add the initial result to history (no AI request for this one)
@@ -149,7 +149,7 @@ public class BuildAgent {
             for (var request : otherRequests) {
                 String toolName = request.name();
                 logger.debug(String.format("Agent action: %s (%s)", toolName, request.arguments()));
-                ToolExecutionResult execResult = toolRegistry.executeTool(request);
+                ToolExecutionResult execResult = toolRegistry.executeTool(this, request);
                 ToolExecutionResultMessage resultMessage = execResult.toExecutionResultMessage();
 
                 // Record individual tool result history

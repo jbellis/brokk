@@ -183,9 +183,8 @@ public final class Models {
 
     public float getUserBalance() throws IOException {
         var kp = parseKey(Project.getBrokkKey());
-        // Use proToken for balance lookup
         String url = "https://app.brokk.ai/api/payments/balance-lookup/" + kp.userId();
-        logger.debug(url);
+        logger.trace(url);
         Request request = new Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer " + kp.token())
@@ -534,11 +533,16 @@ public final class Models {
             return true;
         }
 
-        // gemini, o3, o4-mini, and grok-3 support function calling but not parallel calls so force them to emulation mode as well
+        // gemini and grok-3 support function calling but not parallel calls
         return location.contains("gemini")
-                || location.contains("grok-3")
-                || location.contains("o3") // Check specific location for o3/o4-mini if possible
-                || location.contains("o4-mini"); // Adjust these checks based on actual location strings
+                || location.contains("grok-3");
+    }
+
+    public boolean supportsParallelCalls(StreamingChatLanguageModel model) {
+        // mostly we force models that don't support parallel calls to use our emulation, but o3 does so poorly with that
+        // that serial calls is the lesser evil
+        var location = model.defaultRequestParameters().modelName();
+        return !location.contains("o3") && !location.contains("o4-mini");
     }
 
     /**

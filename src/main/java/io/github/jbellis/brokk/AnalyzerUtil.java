@@ -16,6 +16,8 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects; // Added import
+import java.util.Optional; // Added import
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -181,16 +183,15 @@ public class AnalyzerUtil {
 
         return classNames.stream()
                 .distinct()
-                .map(fqcn -> {
-                    Option<String> skeletonOpt = analyzer.getSkeleton(fqcn);
-                    var fileOpt = analyzer.getFileFor(fqcn); // Need file for CodeUnit
-                    if (skeletonOpt.isDefined() && fileOpt.isPresent()) {
-                        return Map.entry(CodeUnit.cls(fileOpt.get(), fqcn), skeletonOpt.get());
-                    }
-                    return null;
+                .map(analyzer::getDefinition) // Get the CodeUnit definition directly
+                .flatMap(Optional::stream)    // Convert Optional<CodeUnit> to Stream<CodeUnit>
+                .filter(CodeUnit::isClass)    // Ensure it's a class CodeUnit
+                .map(cu -> {
+                    Option<String> skeletonOpt = analyzer.getSkeleton(cu.fqName()); // Use fqName from CodeUnit
+                    return skeletonOpt.isDefined() ? Map.entry(cu, skeletonOpt.get()) : null; // Create entry if skeleton exists
                 })
-                .filter(java.util.Objects::nonNull)
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+                .filter(Objects::nonNull) // Filter out null entries (where skeleton wasn't found)
+                .collect(Collectors.toMap(entry -> entry.getKey(), entry -> entry.getValue())); // Use explicit lambdas
     }
 
     /**

@@ -136,10 +136,11 @@ public class Brokk {
     public static void openProject(Path path)
     {
         final Path projectPath = path.toAbsolutePath().normalize();
+        logger.debug("Opening project at " + projectPath);
 
         var existingWindow = openProjectWindows.get(projectPath);
         if (existingWindow != null) {
-            logger.info("Project already open: {}. Bringing window to front.", projectPath);
+            logger.debug("Project already open: {}. Bringing window to front.", projectPath);
             SwingUtilities.invokeLater(() -> {
                 var frame = existingWindow.getFrame();
                 frame.setState(Frame.NORMAL);
@@ -160,7 +161,7 @@ public class Brokk {
         // but *after* the project and UI frame are created
         var project = contextManager.getProject();
         if (project.getDataRetentionPolicy() == Project.DataRetentionPolicy.UNSET) {
-            logger.info("Project {} has no Data Retention Policy set. Showing dialog.", projectPath.getFileName());
+            logger.debug("Project {} has no Data Retention Policy set. Showing dialog.", projectPath.getFileName());
             // Run the dialog on the EDT after the main frame setup might have happened
             SwingUtilities.invokeLater(() -> {
                  SettingsDialog.showStandaloneDataRetentionDialog(project, io.getFrame());

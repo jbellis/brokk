@@ -70,7 +70,7 @@ public class ValidationAgent {
                 .map(ProjectFile::toString)
                 .collect(Collectors.joining("\n"));
 
-        var workspaceSummary = CodePrompts.formatWorkspaceDescriptions(contextManager, true);
+        var workspaceSummary = CodePrompts.formatWorkspaceDescriptions(contextManager);
 
         var systemMessage = """
                 You are an assistant that identifies potentially relevant test files.

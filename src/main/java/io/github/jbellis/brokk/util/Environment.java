@@ -25,8 +25,9 @@ public class Environment {
                           : createProcessBuilder(root, "/bin/sh", "-c", command).start();
 
         try {
-            // Wait (indefinitely) for the process to finish; this call *is* interruptible
+            // Wait for the process to finish; this call *is* interruptible
             if (!process.waitFor(120, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
                 // TODO need a better way to signal timed out
                 return new ProcessResultInternal(-1, "", "");
             }

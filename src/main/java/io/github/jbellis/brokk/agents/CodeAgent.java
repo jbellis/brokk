@@ -748,7 +748,7 @@ public class CodeAgent {
             return "";
         }
 
-        io.llmOutput("Running verification command: " + verificationCommand, ChatMessageType.CUSTOM);
+        io.llmOutput("\nRunning verification command: " + verificationCommand, ChatMessageType.CUSTOM);
         var result = Environment.instance.captureShellCommand(verificationCommand, cm.getProject().getRoot());
         logger.debug("Verification command result: {}", result);
 

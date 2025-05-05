@@ -744,10 +744,10 @@ public class ContextManager implements IContextManager, AutoCloseable {
         // Extract the class from the method name for sources
         Set<CodeUnit> sources = new HashSet<>();
         String className = ContextFragment.toClassname(methodName);
-        java.util.Optional<ProjectFile> sourceFile = getAnalyzerUninterrupted().getFileFor(className);
-        if (sourceFile.isPresent()) {
-            sources.add(CodeUnit.cls(sourceFile.get(), className));
-        }
+        // Use getDefinition to find the class CodeUnit and add it to sources
+        getAnalyzerUninterrupted().getDefinition(className)
+                .filter(CodeUnit::isClass)
+                .ifPresent(sources::add);
 
         var fragment = new ContextFragment.CallGraphFragment("Callers (depth " + depth + ")", methodName, sources, formattedCallGraph);
         pushContext(ctx -> ctx.addVirtualFragment(fragment));
@@ -775,10 +775,10 @@ public class ContextManager implements IContextManager, AutoCloseable {
         // Extract the class from the method name for sources
         Set<CodeUnit> sources = new HashSet<>();
         String className = ContextFragment.toClassname(methodName);
-        java.util.Optional<ProjectFile> sourceFile = getAnalyzerUninterrupted().getFileFor(className);
-        if (sourceFile.isPresent()) {
-            sources.add(CodeUnit.cls(sourceFile.get(), className));
-        }
+        // Use getDefinition to find the class CodeUnit and add it to sources
+        getAnalyzerUninterrupted().getDefinition(className)
+                .filter(CodeUnit::isClass)
+                .ifPresent(sources::add);
 
         // The output is similar to UsageFragment, so we'll use that
         var fragment = new ContextFragment.CallGraphFragment("Callees (depth " + depth + ")", methodName, sources, formattedCallGraph);
@@ -807,10 +807,11 @@ public class ContextManager implements IContextManager, AutoCloseable {
             var methodSource = analyzer.getMethodSource(methodFullName);
             if (methodSource.isDefined()) {
                 String className = ContextFragment.toClassname(methodFullName);
-                var sourceFile = analyzer.getFileFor(className);
-                if (sourceFile.isPresent()) { // Use isPresent() for Optional
-                    sources.add(CodeUnit.cls(sourceFile.get(), className));
-                }
+                // Use getDefinition to find the class CodeUnit and add it to sources
+                analyzer.getDefinition(className)
+                        .filter(CodeUnit::isClass) // Ensure it's a class
+                        .ifPresent(sources::add); // Add the CodeUnit directly
+
                 content.append(methodFullName).append(":\n");
                 content.append(methodSource.get()).append("\n\n");
             }
@@ -836,12 +837,8 @@ public class ContextManager implements IContextManager, AutoCloseable {
     public boolean addSummaries(Set<ProjectFile> files, Set<CodeUnit> classes) {
         IAnalyzer analyzer;
         analyzer = getAnalyzerUninterrupted();
-        if (!analyzer.isCpg() && files.isEmpty() && classes.isEmpty()) { // Check if analyzer is needed
+        if (analyzer.isEmpty()) {
             io.toolErrorRaw("Code Intelligence is empty; nothing to add");
-            // If analyzer isn't ready and we have inputs, warn but allow proceeding if possible
-            // (e.g., if only files are provided and getSkeletons doesn't strictly require CPG)
-            // For now, we require CPG for any summarization.
-            io.toolErrorRaw("Code Intelligence is not ready; cannot generate summaries.");
             return false;
         }
 
@@ -1005,7 +1002,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
      *
      * @return A collection containing one UserMessage (potentially multimodal) and one AiMessage acknowledgment, or empty if no content.
      */
-    public Collection<ChatMessage> getWorkspaceContentsMessages() {
+    public Collection<ChatMessage> getWorkspaceContentsMessages(boolean includeRelatedClasses) {
         var c = topContext();
         var allContents = new ArrayList<Content>(); // Will hold TextContent and ImageContent
 
@@ -1082,13 +1079,32 @@ public class ContextManager implements IContextManager, AutoCloseable {
                                                                      </editable>
                                                                      """.stripIndent().formatted(editableTextFragments.toString().trim());
 
+        // optional: related classes
+        String topClassesText = "";
+        if (includeRelatedClasses && getProject().getAnalyzerWrapper().isCpg()) {
+            var ac = topContext().buildAutoContext(10);
+            String topClassesRaw = ac.text();
+            if (!topClassesRaw.isBlank()) {
+                topClassesText = topClassesRaw.isBlank() ? "" : """
+                    <related_classes>
+                    Here are some classes that may be related to what is in your Workspace. They are not yet part of the Workspace!
+                    If relevant, you should explicitly add them with addClassSummariesToWorkspace or addClassesToWorkspace so they are
+                    visible to Code Agent. If they are not relevant, just ignore them.
+                    
+                    %s
+                    </related_classes>
+                    """.stripIndent().formatted(topClassesRaw);
+            }
+        }
+
         // add the Workspace text
         var workspaceText = """
                             <workspace>
                             %s
                             %s
                             </workspace>
-                            """.stripIndent().formatted(readOnlyText, editableText);
+                            %s
+                            """.stripIndent().formatted(readOnlyText, editableText, topClassesText);
 
         // text and image content must be distinct
         allContents.add(new TextContent(workspaceText));
@@ -1097,6 +1113,10 @@ public class ContextManager implements IContextManager, AutoCloseable {
         // Create the main UserMessage
         var workspaceUserMessage = UserMessage.from(allContents);
         return List.of(workspaceUserMessage, new AiMessage("Thank you for providing the Workspace contents."));
+    }
+
+    public Collection<ChatMessage> getWorkspaceContentsMessages() {
+        return getWorkspaceContentsMessages(false);
     }
 
     /**
@@ -1425,7 +1445,6 @@ public class ContextManager implements IContextManager, AutoCloseable {
         return EditBlockParser.getParserFor(allText);
     }
 
-
     @FunctionalInterface
     public interface TaskRunner {
         /**
@@ -1691,7 +1710,7 @@ public class ContextManager implements IContextManager, AutoCloseable {
                 logger.warn("Summarization failed or was cancelled.");
                 return "Summarization failed.";
             }
-            return result.chatResponse().aiMessage().text();
+            return result.chatResponse().aiMessage().text().trim();
         }
     }
 }

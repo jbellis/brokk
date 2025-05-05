@@ -221,7 +221,12 @@ public class GitLogTab extends JPanel {
             if (!e.getValueIsAdjusting() && commitsTable.getSelectedRow() != -1) {
                 int[] selectedRows = commitsTable.getSelectedRows();
                 if (selectedRows.length >= 1) {
-                    updateChangesForCommits(selectedRows);
+                    // Extract commit IDs on the EDT to avoid race conditions
+                    List<String> commitIds = new ArrayList<>();
+                    for (int row : selectedRows) {
+                        commitIds.add((String) commitsTableModel.getValueAt(row, 3));
+                    }
+                    updateChangesForCommits(commitIds);
                 }
             }
         });
@@ -936,7 +941,9 @@ public class GitLogTab extends JPanel {
 
                     if (commitsTableModel.getRowCount() > 0) {
                         commitsTable.setRowSelectionInterval(0, 0);
-                        updateChangesForCommits(new int[]{0});
+                        // Pass the commit ID of the first row
+                        String firstCommitId = (String) commitsTableModel.getValueAt(0, 3);
+                        updateChangesForCommits(List.of(firstCommitId));
                     }
                 });
             } catch (Exception e) {
@@ -955,18 +962,24 @@ public class GitLogTab extends JPanel {
     }
 
     /**
-     * Fills the "Changes" tree with files from the selected commits.
+     * Fills the "Changes" tree with files from the selected commit IDs.
      */
-    private void updateChangesForCommits(int[] selectedRows) {
+    private void updateChangesForCommits(List<String> commitIds) {
+        if (commitIds == null || commitIds.isEmpty()) {
+            changesRootNode.removeAllChildren();
+            changesTreeModel.reload();
+            return;
+        }
+
         contextManager.submitBackgroundTask("Fetching changes for commits", () -> {
             try {
+                // Aggregate changed files from all selected commit IDs
                 var allChangedFiles = new HashSet<ProjectFile>();
-                for (var row : selectedRows) {
-                    if (row >= 0 && row < commitsTableModel.getRowCount()) {
-                        var commitId = (String) commitsTableModel.getValueAt(row, 3);
-                        var changedFiles = getRepo().listChangedFilesInCommitRange(commitId, commitId);
-                        allChangedFiles.addAll(changedFiles);
-                    }
+                for (String commitId : commitIds) {
+                    // A single commit's changes are typically compared against its parent(s).
+                    // listChangedFilesInCommitRange(A, A) lists files changed *in* commit A.
+                    var changedFiles = getRepo().listChangedFilesInCommitRange(commitId, commitId);
+                    allChangedFiles.addAll(changedFiles);
                 }
 
                 SwingUtilities.invokeLater(() -> {
@@ -1299,7 +1312,9 @@ public class GitLogTab extends JPanel {
                         TableUtils.fitColumnWidth(commitsTable, 1); // Author
                         TableUtils.fitColumnWidth(commitsTable, 2); // Date
                         commitsTable.setRowSelectionInterval(0, 0);
-                        updateChangesForCommits(new int[]{0});
+                        // Pass the commit ID of the first row
+                        String firstCommitId = (String) commitsTableModel.getValueAt(0, 3);
+                        updateChangesForCommits(List.of(firstCommitId));
                     }
                 });
             } catch (Exception e) {
@@ -1544,7 +1559,7 @@ public class GitLogTab extends JPanel {
             if (commitId.equals(currentId)) {
                 commitsTable.setRowSelectionInterval(i, i);
                 commitsTable.scrollRectToVisible(commitsTable.getCellRect(i, 0, true));
-                updateChangesForCommits(new int[]{i});
+                updateChangesForCommits(List.of(commitId));
                 return;
             }
         }

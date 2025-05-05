@@ -22,24 +22,34 @@ public class CompletionsTest {
 
     private static class MockAnalyzer implements IAnalyzer {
         private final ProjectFile mockFile = new ProjectFile(null, "MockFile.java");
-        
-        private final List<CodeUnit> allClasses = Stream.of(
-                "a.b.Do",
-                "a.b.Do$Re",
-                "a.b.Do$Re$Sub",  // nested inside Re
-                "x.y.Zz",
-                "w.u.Zz",
-                "test.CamelClass"
-        ).map(name -> CodeUnit.cls(mockFile, name)).toList();
 
-        private final Map<String, List<CodeUnit>> methodsMap = Map.of(
-                "a.b.Do", Stream.of("a.b.Do.foo", "a.b.Do.bar").map(name -> CodeUnit.fn(mockFile, name)).toList(),
-                "a.b.Do$Re", Stream.of("a.b.Do$Re.baz").map(name -> CodeUnit.fn(mockFile, name)).toList(),
-                "a.b.Do$Re$Sub", Stream.of("a.b.Do$Re$Sub.qux").map(name -> CodeUnit.fn(mockFile, name)).toList(),
-                "x.y.Zz", List.of(),
-                "w.u.Zz", List.of(),
-                "test.CamelClass", Stream.of("test.CamelClass.someMethod").map(name -> CodeUnit.fn(mockFile, name)).toList()
+        private final List<CodeUnit> allClasses = List.of(
+                CodeUnit.cls(mockFile, "a.b", "Do"),
+                CodeUnit.cls(mockFile, "a.b", "Do$Re"),
+                CodeUnit.cls(mockFile, "a.b", "Do$Re$Sub"), // nested inside Re
+                CodeUnit.cls(mockFile, "x.y", "Zz"),
+                CodeUnit.cls(mockFile, "w.u", "Zz"),
+                CodeUnit.cls(mockFile, "test", "CamelClass")
         );
+
+        private final Map<String, List<CodeUnit>> methodsMap = Map.ofEntries(
+                Map.entry("a.b.Do", List.of(
+                        CodeUnit.fn(mockFile, "a.b", "Do.foo"),
+                        CodeUnit.fn(mockFile, "a.b", "Do.bar")
+                )),
+                Map.entry("a.b.Do$Re", List.of(
+                        CodeUnit.fn(mockFile, "a.b", "Do$Re.baz")
+                )),
+                Map.entry("a.b.Do$Re$Sub", List.of(
+                        CodeUnit.fn(mockFile, "a.b", "Do$Re$Sub.qux")
+                )),
+                Map.entry("x.y.Zz", List.of()),
+                Map.entry("w.u.Zz", List.of()),
+                Map.entry("test.CamelClass", List.of(
+                        CodeUnit.fn(mockFile, "test", "CamelClass.someMethod")
+                ))
+        );
+
 
         @Override
         public List<CodeUnit> getAllClasses() {

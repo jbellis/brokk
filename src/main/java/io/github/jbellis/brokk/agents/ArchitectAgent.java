@@ -121,7 +121,7 @@ public class ArchitectAgent {
      * A tool that invokes the CodeAgent to solve the current top task using the given instructions.
      * The instructions can incorporate the stack's current top task or anything else.
      */
-    @Tool("Invoke the Code Agent to solve or implement the current task. Provide complete instructions. Only the Workspace and your instructions are visible to the Code Agent.")
+    @Tool("Invoke the Code Agent to solve or implement the current task. Provide complete instructions. Only the Workspace and your instructions are visible to the Code Agent, NOT the entire chat history; you must therefore provide appropriate context for your instructions.")
     public String callCodeAgent(
             @P("Detailed instructions for the CodeAgent referencing the current project. Code Agent can figure out how to change the code at the syntax level but needs clear instructions of what exactly you want changed")
             String instructions
@@ -247,10 +247,11 @@ public class ArchitectAgent {
             contextAgent.execute();
         }
 
-        io.llmOutput("\nPlanning", ChatMessageType.AI);
         var llm = contextManager.getLlm(model, "Architect: " + goal);
 
         while (true) {
+            io.llmOutput("\nPlanning", ChatMessageType.AI);
+
             // Build the prompt messages, including history
             var messages = buildPrompt();
 
@@ -299,7 +300,7 @@ public class ArchitectAgent {
                 return;
             }
             // show thinking
-            if (!result.chatResponse().aiMessage().text().isBlank()) {
+            if (result.chatResponse().aiMessage().text() != null && !result.chatResponse().aiMessage().text().isBlank()) {
                 io.llmOutput("\n" + result.chatResponse().aiMessage().text(), ChatMessageType.AI);
             }
 
@@ -311,6 +312,7 @@ public class ArchitectAgent {
 
             var deduplicatedRequests = new LinkedHashSet<>(aiMessage.toolExecutionRequests());
             logger.debug("Unique tool requests are {}", deduplicatedRequests);
+            io.llmOutput("\nTool calls: [%s]".formatted(deduplicatedRequests.stream().map(ToolExecutionRequest::name).collect(Collectors.joining(", "))), ChatMessageType.AI);
 
             // execute tool calls in the following order:
             // 1. projectFinished
@@ -357,7 +359,7 @@ public class ArchitectAgent {
                 return Integer.compare(rank1, rank2);
             });
             for (var req : otherReqs) {
-                var toolResult = toolRegistry.executeTool(req);
+                var toolResult = toolRegistry.executeTool(this, req);
                 architectMessages.add(ToolExecutionResultMessage.from(req, toolResult.resultText()));
                 logger.debug("Executed tool '{}' => result: {}", req.name(), toolResult.resultText());
             }
@@ -445,6 +447,6 @@ public class ArchitectAgent {
     private List<ChatMessage> buildPrompt() throws InterruptedException {
         // Concatenate system prompts (which should handle incorporating history) and the latest user message
         return Streams.concat(ArchitectPrompts.instance.collectMessages(contextManager, architectMessages).stream(),
-                              Stream.of(new UserMessage(ArchitectPrompts.instance.getFinalInstructions(goal)))).toList();
+                              Stream.of(new UserMessage(ArchitectPrompts.instance.getFinalInstructions(contextManager, goal)))).toList();
     }
 }

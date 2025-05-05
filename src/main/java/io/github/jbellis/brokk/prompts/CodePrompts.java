@@ -88,7 +88,7 @@ public abstract class CodePrompts {
      * @param cm The ContextManager.
      * @return A string summarizing editable files, read-only snippets, etc.
      */
-    public static String formatWorkspaceDescriptions(ContextManager cm, boolean includeAutocontext) {
+    public static String formatWorkspaceDescriptions(ContextManager cm) {
         var editableContents = cm.getEditableSummary();
         var readOnlyContents = cm.getReadOnlySummary();
         var workspaceBuilder = new StringBuilder();
@@ -102,7 +102,7 @@ public abstract class CodePrompts {
     }
 
     protected SystemMessage systemMessage(ContextManager cm, String reminder) {
-        var workspaceSummary = formatWorkspaceDescriptions(cm, true);
+        var workspaceSummary = formatWorkspaceDescriptions(cm);
         var styleGuide = cm.getProject().getStyleGuide();
 
         var text = """

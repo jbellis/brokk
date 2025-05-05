@@ -3,7 +3,7 @@ package io.github.jbellis.brokk.prompts;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import io.github.jbellis.brokk.ContextManager;
+import io.github.jbellis.brokk.Project;
 
 import java.util.List;
 
@@ -12,10 +12,12 @@ public class CommitPrompts {
     
     private CommitPrompts() {}
 
-    public List<ChatMessage> collectMessages(String diffTxt) {
+    public List<ChatMessage> collectMessages(Project project, String diffTxt) {
         if (diffTxt.isEmpty()) {
             return List.of();
         }
+
+        var formatInstructions = project.getCommitMessageFormat();
         
         var context = """
         <diff>
@@ -25,30 +27,29 @@ public class CommitPrompts {
 
         var instructions = """
         <goal>
-        Here is my diff, please give me a concise commit message.
+        Here is my diff, please give me a concise commit message based on the format instructions provided in the system prompt.
         </goal>
         """.stripIndent();
-        return List.of(new SystemMessage(systemIntro()),
+        return List.of(new SystemMessage(systemIntro(formatInstructions)),
                        new UserMessage(context + "\n\n" + instructions));
     }
 
-    public String systemIntro() {
+    private String systemIntro(String formatInstructions) {
         return """
                You are an expert software engineer that generates concise,
                one-line Git commit messages based on the provided diffs.
                Review the provided context and diffs which are about to be committed to a git repo.
                Review the diffs carefully.
-               Generate a one-line commit message for those changes.
-               The commit message should be structured as follows: <type>: <description>
-               Use these for <type>: debug, fix, feat, chore, docs, style, refactor, perf, test, enh
-               
+               Generate a one-line commit message for those changes, following the format instructions below.
+               %s
+
                Ensure the commit message:
-               - Starts with the appropriate prefix.
+               - Follows the specified format.
                - Is in the imperative mood (e.g., "Add feature" not "Added feature" or "Adding feature").
                - Does not exceed 72 characters.
                
                Reply only with the one-line commit message, without any additional text, explanations,
                or line breaks.
-               """.stripIndent();
+               """.formatted(formatInstructions);
     }
 }

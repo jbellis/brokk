@@ -1,5 +1,6 @@
 package io.github.jbellis.brokk;
 
+// import ch.usi.si.seart.treesitter.Language; // Removed this import
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -18,12 +19,7 @@ import javax.swing.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public class Project implements IProject, AutoCloseable {
@@ -50,6 +46,12 @@ public class Project implements IProject, AutoCloseable {
     private static final String ASK_REASONING_KEY = "askReasoning";
     private static final String EDIT_REASONING_KEY = "editReasoning";
     private static final String SEARCH_REASONING_KEY = "searchReasoning";
+    private static final String COMMIT_MESSAGE_FORMAT_KEY = "commitMessageFormat";
+
+    public static final String DEFAULT_COMMIT_MESSAGE_FORMAT = """
+            The commit message should be structured as follows: <type>: <description>
+            Use these for <type>: debug, fix, feat, chore, config, docs, style, refactor, perf, test, enh
+            """.stripIndent();
 
 
     // --- Static paths ---
@@ -397,17 +399,98 @@ public class Project implements IProject, AutoCloseable {
         saveWorkspaceProperties();
     }
 
+    /**
+     * Gets the configured commit message format instruction string.
+     * @return The format string, or the default if not set.
+     */
+    public String getCommitMessageFormat() {
+        return projectProps.getProperty(COMMIT_MESSAGE_FORMAT_KEY, DEFAULT_COMMIT_MESSAGE_FORMAT);
+    }
+
+    /**
+     * Sets the commit message format instruction string.
+     * If the provided format is null, blank, or equal to the default, the property is removed.
+     */
+    public void setCommitMessageFormat(String format) {
+        if (format == null || format.isBlank() || format.trim().equals(DEFAULT_COMMIT_MESSAGE_FORMAT)) {
+            if (projectProps.containsKey(COMMIT_MESSAGE_FORMAT_KEY)) {
+                projectProps.remove(COMMIT_MESSAGE_FORMAT_KEY);
+                saveProjectProperties();
+                logger.debug("Removed commit message format, reverting to default.");
+            }
+        } else if (!format.trim().equals(projectProps.getProperty(COMMIT_MESSAGE_FORMAT_KEY))) {
+            projectProps.setProperty(COMMIT_MESSAGE_FORMAT_KEY, format.trim());
+            saveProjectProperties();
+            logger.debug("Set commit message format.");
+        }
+    }
+
+    /**
+     * Extracts the lowercase file extension from a filename string.
+     *
+     * @param filename The filename.
+     * @return The extension (without the dot), or an empty string if no extension is found.
+     */
+    private String getFileExtension(String filename) {
+        int lastDot = filename.lastIndexOf('.');
+        // Ensure dot is not the first character and is not the last character
+        if (lastDot > 0 && lastDot < filename.length() - 1) {
+            return filename.substring(lastDot + 1).toLowerCase();
+        }
+        return ""; // No extension found or invalid placement
+    }
+
+
+    @Override
     public Language getAnalyzerLanguage() {
         String lang = projectProps.getProperty("code_intelligence_language");
         if (lang == null || lang.isBlank()) {
-            return Language.JAVA;
+            // Scan project files to determine the most common language if not specified
+            var languageCounts = repo.getTrackedFiles().stream()
+                                     .map(ProjectFile::toString)              // Get relative path string via toString()
+                                     .map(this::getFileExtension)             // Extract extension
+                                     .map(Language::fromExtension)            // Map extension to Language
+                                     .filter(l -> l != Language.NONE)         // Ignore files with unknown/no extensions
+                                     .collect(Collectors.groupingBy(l -> l, Collectors.counting())); // Count occurrences
+
+            // Find the language with the highest count
+            var dominantLanguage = languageCounts.entrySet().stream()
+                                                 .max(Map.Entry.comparingByValue())
+                                                 .map(Map.Entry::getKey);
+
+            // Save and return the dominant language
+            var detectedLanguage = dominantLanguage.orElse(Language.NONE);
+            logger.debug("Detected dominant language for {} based on file extensions: {}", root, detectedLanguage);
+            projectProps.setProperty("code_intelligence_language", detectedLanguage.name());
+            saveProjectProperties();
+
+            return detectedLanguage;
         }
+
         try {
+            // Convert the stored name (e.g., "Java", "Python") to the Brokk Language enum object
             return Language.valueOf(lang.toUpperCase());
         } catch (IllegalArgumentException e) {
+            // Fallback to NONE if the stored language name is invalid
             return Language.NONE;
         }
     }
+
+    /**
+     * Sets the primary language for code intelligence.
+     * @param language The language to set.
+     */
+    public void setAnalyzerLanguage(Language language) {
+        if (language == null || language == Language.NONE) {
+            projectProps.remove("code_intelligence_language");
+        } else {
+            projectProps.setProperty("code_intelligence_language", language.name()); // Store the enum name
+        }
+        saveProjectProperties();
+        // Request analyzer rebuild if language changes, as it affects CPG generation
+        analyzerWrapper.requestRebuild();
+    }
+
 
     /**
      * Gets the name of the last used LLM model for this project.
@@ -545,7 +628,7 @@ public class Project implements IProject, AutoCloseable {
         }
     }
 
-    public void setCpgRefresh(CpgRefresh value) {
+    public void setAnalyzerRefresh(CpgRefresh value) {
         assert value != null;
         projectProps.setProperty("code_intelligence_refresh", value.name());
         saveProjectProperties();

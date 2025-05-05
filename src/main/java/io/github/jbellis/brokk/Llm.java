@@ -275,6 +275,7 @@ public class Llm {
         int attempt = 0;
         var messages = Messages.forLlm(rawMessages);
 
+        StreamingResult response = null;
         while (attempt++ < maxAttempts) {
             String description = Messages.getText(messages.getLast());
             logger.debug("Sending request to {} attempt {}: {}",
@@ -284,7 +285,7 @@ public class Llm {
                 io.showOutputSpinner("Thinking...");
             }
 
-            var response = doSingleSendMessage(model, messages, tools, toolChoice, echo);
+            response = doSingleSendMessage(model, messages, tools, toolChoice, echo);
             if (response.error == null) {
                 // Check if we got a non-empty response
                 var cr = response.chatResponse;
@@ -329,7 +330,7 @@ public class Llm {
         }
         // Return last error - log error to the current request's file
         var cr = ChatResponse.builder().aiMessage(new AiMessage("Error: " + lastError.getMessage())).build();
-        return new StreamingResult(cr, lastError);
+        return new StreamingResult(cr, response.originalResponse(), lastError);
     }
 
     /**
@@ -364,8 +365,12 @@ public class Llm {
         if (!tools.isEmpty()) {
             logger.debug("Performing native tool calls");
             var paramsBuilder = OpenAiChatRequestParameters.builder()
-                    .toolSpecifications(tools)
-                    .parallelToolCalls(true);
+                    .toolSpecifications(tools);
+            if (contextManager.getModels().supportsParallelCalls(model)) {
+                // can't just blindly call .parallelToolCalls(boolean), litellm will barf if it sees the option at all
+                paramsBuilder = paramsBuilder
+                        .parallelToolCalls(true);
+            }
             var effort = ((OpenAiChatRequestParameters) model.defaultRequestParameters()).reasoningEffort();
             if (toolChoice == ToolChoice.REQUIRED && effort == null) {
                 // Anthropic only supports TC.REQUIRED with reasoning off
@@ -950,7 +955,22 @@ public class Llm {
             var filePath = sessionHistoryDir.resolve(String.format("%s %s.log", fileTimestamp, shortDesc));
             var options = new StandardOpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE};
             logger.trace("Writing history to file {}", filePath);
-            Files.writeString(filePath, formattedRequest + formattedTools + formattedResponse, options);
+            // Ensure the filename is unique before writing
+            var uniqueFilePath = filePath;
+            int suffix = 1;
+            while (Files.exists(uniqueFilePath)) {
+                var newFilePath = filePath.toString();
+                int dotIndex = newFilePath.lastIndexOf('.');
+                if (dotIndex > 0) {
+                    newFilePath = newFilePath.substring(0, dotIndex) + "-" + suffix + newFilePath.substring(dotIndex);
+                } else {
+                    newFilePath += "-" + suffix;
+                }
+                uniqueFilePath = Path.of(newFilePath);
+                suffix++;
+            }
+            logger.trace("Writing history to file {}", uniqueFilePath);
+            Files.writeString(uniqueFilePath, formattedRequest + formattedTools + formattedResponse, options);
         } catch (IOException e) {
             logger.error("Failed to write LLM history file", e);
         }
@@ -976,7 +996,10 @@ public class Llm {
 
         public String formatted() {
             if (error != null) {
-                return "Error: " + error.getMessage();
+                return """
+                       [Error: %s]
+                       %s
+                       """.formatted(error.getMessage(), originalResponse == null ? "[Null response]" : originalResponse.toString());
             }
 
             return originalResponse.toString();

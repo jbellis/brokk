@@ -3,6 +3,7 @@ package io.github.jbellis.brokk;
 import io.github.jbellis.brokk.agents.BuildAgent;
 import io.github.jbellis.brokk.analyzer.DisabledAnalyzer;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
+import io.github.jbellis.brokk.analyzer.Language;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
 import io.github.jbellis.brokk.git.IGitRepo;
 
@@ -17,6 +18,14 @@ public interface IProject {
 
     default IGitRepo getRepo() {
         return Set::of;
+    }
+
+    /**
+     * Gets the Brokk Language enum configured for the project.
+     * @return The Language enum.
+     */
+    default io.github.jbellis.brokk.analyzer.Language getAnalyzerLanguage() {
+        throw new UnsupportedOperationException();
     }
 
     default Path getRoot() {

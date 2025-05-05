@@ -10,6 +10,9 @@ class DisabledAnalyzer extends IAnalyzer {
   override def isEmpty: Boolean =
     true
 
+  override def isCpg: Boolean =
+    false
+
   override def getAllClasses: util.List[CodeUnit] =
     Collections.emptyList()
 

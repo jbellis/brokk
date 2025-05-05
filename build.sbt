@@ -67,6 +67,10 @@ libraryDependencies ++= Seq(
   "org.jsoup" % "jsoup" % "1.19.1",
   "com.jgoodies" % "jgoodies-forms" % "1.9.0",
 
+  // TreeSitter Java parser
+  "io.github.bonede" % "tree-sitter" % "0.25.3",
+  "io.github.bonede" % "tree-sitter-python" % "0.23.4",
+  "io.github.bonede" % "tree-sitter-c-sharp" % "0.23.1",
 
   // Testing
   "org.junit.jupiter" % "junit-jupiter" % "5.10.2" % Test,

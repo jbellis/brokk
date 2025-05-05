@@ -4,6 +4,7 @@ import com.google.common.collect.Streams;
 import dev.langchain4j.data.message.ChatMessage;
 import io.github.jbellis.brokk.ContextFragment.HistoryFragment;
 import io.github.jbellis.brokk.ContextFragment.SkeletonFragment;
+import io.github.jbellis.brokk.analyzer.AbstractAnalyzer;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.IAnalyzer;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
@@ -265,7 +266,7 @@ public class Context implements Serializable {
      * 3) Build a multiline skeleton text for the top autoContextFileCount results
      * 4) Return the new AutoContext instance
      */
-    public ContextFragment.AutoContext buildAutoContext(int topK) {
+    public SkeletonFragment buildAutoContext(int topK) {
         IAnalyzer analyzer;
         analyzer = contextManager.getAnalyzerUninterrupted();
 
@@ -292,11 +293,10 @@ public class Context implements Serializable {
 
         // If no seeds, we can't compute pagerank
         if (weightedSeeds.isEmpty()) {
-            return ContextFragment.AutoContext.EMPTY;
+            return new SkeletonFragment(Map.of());
         }
 
-        var sf = buildAutoContext(analyzer, weightedSeeds, ineligibleSources, topK);
-        return sf.skeletons.isEmpty() ? ContextFragment.AutoContext.EMPTY : new ContextFragment.AutoContext(sf);
+        return buildAutoContext(analyzer, weightedSeeds, ineligibleSources, topK);
     }
 
     public static SkeletonFragment buildAutoContext(IAnalyzer analyzer, Map<String, Double> weightedSeeds, Set<CodeUnit> ineligibleSources, int topK) {
@@ -313,8 +313,22 @@ public class Context implements Serializable {
             }
             var sourceFile = sourceFileOption.get();
             // Check if the class or its parent is in ineligible classnames
-            boolean eligible = !(ineligibleSources.contains(codeUnit)
-                    || (fqcn.contains("$") && ineligibleSources.contains(CodeUnit.cls(sourceFile, fqcn.substring(0, fqcn.indexOf('$'))))));
+            boolean eligible = !(ineligibleSources.contains(codeUnit));
+            if (fqcn.contains("$")) {
+                var parentFqcn = fqcn.substring(0, fqcn.indexOf('$'));
+                // FIXME generalize this
+                // Check if the analyzer supports cuClass and cast if necessary
+                if (analyzer instanceof AbstractAnalyzer aa) {
+                    // Use the analyzer helper method which handles splitting correctly
+                    var parentUnitOpt = aa.cuClass(parentFqcn, sourceFile); // Returns scala.Option
+                    if (parentUnitOpt.isDefined() && ineligibleSources.contains(parentUnitOpt.get())) {
+                        eligible = false;
+                    }
+                } else {
+                    logger.warn("Analyzer of type {} does not support direct CodeUnit creation, skipping parent eligibility check for {}",
+                                analyzer.getClass().getSimpleName(), fqcn);
+                }
+            }
 
             if (eligible) {
                 var opt = analyzer.getSkeleton(fqcn);

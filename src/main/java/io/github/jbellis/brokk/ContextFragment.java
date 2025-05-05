@@ -879,7 +879,7 @@ public interface ContextFragment extends Serializable {
         }
 
         private Set<CodeUnit> nonDummy() {
-            return skeletons.keySet().stream().filter(k -> k.source() != AutoContext.DUMMY).collect(Collectors.toSet());
+            return skeletons.keySet();
         }
 
         private boolean isEmpty() {
@@ -1126,96 +1126,6 @@ public interface ContextFragment extends Serializable {
                 List<ChatMessage> deserializedMessages = ChatMessageDeserializer.messagesFromJson(serializedMessages);
                 return new TaskFragment(deserializedMessages, sessionName);
             }
-        }
-    }
-
-    record AutoContext(SkeletonFragment fragment, int id) implements ContextFragment {
-        private static final long serialVersionUID = 3L;
-
-        public AutoContext(SkeletonFragment fragment) {
-            this(fragment, NEXT_ID.getAndIncrement());
-        }
-
-        private static final ProjectFile DUMMY = new ProjectFile(Path.of("//dummy/share"), Path.of("dummy"));
-        // Use constants for these special values
-        private static final int EMPTY_ID = -1;
-        private static final int DISABLED_ID = -2;
-        private static final int REBUILDING_ID = -3;
-
-        public static final AutoContext EMPTY =
-                new AutoContext(new SkeletonFragment(Map.of(CodeUnit.cls(DUMMY, "Enabled, but no references found"), "")), EMPTY_ID);
-        public static final AutoContext DISABLED =
-                new AutoContext(new SkeletonFragment(Map.of(CodeUnit.cls(DUMMY, "Disabled"), "")), DISABLED_ID);
-        public static final AutoContext REBUILDING =
-                new AutoContext(new SkeletonFragment(Map.of(CodeUnit.cls(DUMMY, "Updating"), "")), REBUILDING_ID);
-
-        public AutoContext {
-            assert fragment != null;
-            assert !fragment.skeletons.isEmpty();
-        }
-
-        public boolean isEmpty() {
-            return fragment.isEmpty();
-        }
-
-        @Override
-        public String text() {
-            return fragment.text();
-        }
-
-        @Override
-        public Set<CodeUnit> sources(IProject project) {
-            return fragment.sources(project);
-        }
-
-        @Override
-        public Set<ProjectFile> files(IProject project) {
-            return fragment.files(project);
-        }
-
-        @Override
-        public String description() {
-            return "[Auto] " + fragment.skeletons.keySet().stream()
-                    .map(CodeUnit::identifier)
-                    .collect(Collectors.joining(", "));
-        }
-
-        @Override
-        public String shortDescription() {
-            if (isEmpty()) {
-                return "Autosummary " + fragment.skeletons.keySet().stream().findFirst().orElseThrow();
-            }
-            return "Autosummary of " + fragment.skeletons.keySet().stream()
-                    .map(CodeUnit::identifier)
-                    .collect(Collectors.joining(", "));
-        }
-
-        @Override
-        public boolean isEligibleForAutoContext() {
-            return false;
-        }
-
-        @Override
-        public String format() {
-            if (isEmpty()) {
-                return "";
-            }
-            return fragment.format();
-        }
-
-        @Override
-        public int id() {
-            return id;
-        }
-
-        @Override
-        public String toString() {
-            return "AutoContext('%s')".formatted(description());
-        }
-
-        @Override
-        public String syntaxStyle() {
-            return SyntaxConstants.SYNTAX_STYLE_JAVA;
         }
     }
 }
