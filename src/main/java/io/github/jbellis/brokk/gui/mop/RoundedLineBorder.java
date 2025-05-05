@@ -44,31 +44,21 @@ public class RoundedLineBorder extends AbstractBorder {
     }
 
     @Override
-    public void paintBorder(Component c, Graphics g, int x, int y, int width, int height) {
-        Graphics2D g2 = (Graphics2D) g.create();
-        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        
-        // Adjust for thickness
-        int adjustedThickness = Math.max(1, thickness);
-        int halfThickness = adjustedThickness / 2;
-        
-        // Draw the fill first if needed
-        if (fillInside && fillColor != null) {
-            g2.setColor(fillColor);
-            g2.fill(new RoundRectangle2D.Float(
-                    x, y, width - 1, height - 1, radius, radius));
-        }
-        
-        // Draw the border
-        g2.setColor(color);
-        g2.setStroke(new BasicStroke(adjustedThickness));
-        g2.draw(new RoundRectangle2D.Float(
-                x + halfThickness, y + halfThickness, 
-                width - adjustedThickness, height - adjustedThickness, 
-                radius, radius));
-        
-        g2.dispose();
-    }
+      public void paintBorder(Component c, Graphics g, int x, int y, int width, int height) {
+          Graphics2D g2 = (Graphics2D) g.create();
+          
+          // Delegate painting to the utility painter
+          // Width and height need adjustment because paintBorder provides outer bounds
+          int actualWidth = width - 1;
+          int actualHeight = height - 1;
+          
+          RoundRectPainter.paint(g2, x, y, actualWidth, actualHeight, radius, 
+                                 fillInside ? fillColor : null, // Fill color only if fillInside is true
+                                 color,                         // Border color
+                                 thickness);                    // Border thickness
+                                 
+          g2.dispose();
+      }
 
     @Override
     public Insets getBorderInsets(Component c) {

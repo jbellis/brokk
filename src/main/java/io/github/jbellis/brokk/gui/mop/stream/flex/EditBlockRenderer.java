@@ -39,10 +39,11 @@ public class EditBlockRenderer implements NodeRenderer {
         String filename = node.getFilename().toString().trim();
         int adds = node.getAdds();
         int dels = node.getDels();
+        int changed = node.getChangedLines();
         String status = node.getStatus().name().toLowerCase();
         
-        logger.debug("Rendering edit block with id={}, file={}, adds={}, dels={}, status={}", 
-                     id, filename, adds, dels, status);
+        logger.debug("Rendering edit block with id={}, file={}, adds={}, dels={}, changed={}, status={}", 
+                     id, filename, adds, dels, changed, status);
         
         // Output a self-closing placeholder tag with data attributes
         html.line();
@@ -50,10 +51,11 @@ public class EditBlockRenderer implements NodeRenderer {
         html.raw(" data-id=\"" + id + "\"");
         html.raw(" data-file=\"" + escapeHtml(filename) + "\"");
         html.raw(" data-adds=\"" + adds + "\"");
-        html.raw(" data-dels=\"" + dels + "\"");
-        html.raw(" data-status=\"" + status + "\"");
-        html.raw("></edit-block>");
-        html.line();
+          html.raw(" data-dels=\"" + dels + "\"");
+          html.raw(" data-changed=\"" + changed + "\"");
+          html.raw(" data-status=\"" + status + "\"");
+          html.raw("></edit-block>");
+          html.line();
     }
     
     /**

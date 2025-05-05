@@ -213,9 +213,10 @@ public class MiniParserTest {
         
         assertNotNull(editBlock);
         assertEquals("Main.java", editBlock.file());
-        assertEquals(10, editBlock.adds());
-        assertEquals(5, editBlock.dels());
-    }
+          assertEquals(10, editBlock.adds());
+          assertEquals(5, editBlock.dels());
+          assertEquals(5, editBlock.changed()); // changed = min(10, 5) = 5
+      }
     
     @Test
     void testMultipleCustomTagsInDifferentDepths() {

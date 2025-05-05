@@ -57,22 +57,22 @@ public class BaseChatMessagePanel extends JPanel {
             g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
             int width = getWidth();
-            int height = getHeight();
-            var roundRect = new RoundRectangle2D.Float(0, 0, width, height, arcSize, arcSize);
-
-            // 1. Paint the main background color, clipped to the rounded shape
-            g2d.setColor(backgroundColor);
-            g2d.fill(roundRect);
-
-            // 2. Paint the left highlight bar, also clipped
-            g2d.setColor(highlightColor);
-            // Use clip for safety at corners, though fillRect should be within bounds
-            Shape clip = g2d.getClip();
-            g2d.clip(roundRect);
-            g2d.fillRect(0, 0, highlightThickness, height);
-            g2d.setClip(clip);
-
-            g2d.dispose();
+              int height = getHeight();
+              
+              // 1. Paint the rounded background using the painter (no stroke here)
+              RoundRectPainter.paint(g2d, 0, 0, width, height, arcSize, backgroundColor, null, 0);
+              
+              // 2. Paint the left highlight bar, clipped to the rounded rectangle shape
+              // Need to re-create the shape for clipping
+              var roundRectClip = new RoundRectangle2D.Float(0, 0, width, height, arcSize, arcSize);
+              g2d.setColor(highlightColor);
+            // Use clip for safety at corners
+              Shape oldClip = g2d.getClip();
+              g2d.clip(roundRectClip);
+              g2d.fillRect(0, 0, highlightThickness, height);
+              g2d.setClip(oldClip); // Restore original clip
+  
+              g2d.dispose();
 
             // Children are painted after this method returns by the Swing painting mechanism
         }

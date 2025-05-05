@@ -52,6 +52,13 @@ public class EditBlockNode extends Block {
         if (content.isEmpty()) return 0;
         return (int)content.lines().count();
     }
+    
+    /**
+     * Get the number of changed lines (lines modified in place).
+     */
+    public int getChangedLines() {
+        return Math.min(getAdds(), getDels());
+    }
 
     public BasedSequence getOpeningMarker() {
         return openingMarker;

@@ -118,11 +118,12 @@ public class IncrementalBlockRendererTest {
 
         var editBlock = (EditBlockComponentData) cds.get(3);
         assertEquals(2, editBlock.id());
-        assertEquals(5, editBlock.adds());
-        assertEquals(3, editBlock.dels());
-        assertEquals("Test.java", editBlock.file());
-        assertEquals(GitStatus.UNKNOWN, editBlock.status());
-    }
+          assertEquals(5, editBlock.adds());
+          assertEquals(3, editBlock.dels());
+          assertEquals(3, editBlock.changed()); // changed = min(5, 3) = 3
+          assertEquals("Test.java", editBlock.file());
+          assertEquals(GitStatus.UNKNOWN, editBlock.status());
+      }
     
     @Test
     void compositeBuildsChildComponents() {

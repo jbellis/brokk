@@ -91,12 +91,13 @@ class BrokkMarkdownExtensionTest {
                      "should create exactly one <edit-block>");
 
         // 2) Data attributes are present and escaped properly
-        assertTrue(html.contains("data-file=\"foo.txt\""), "filename attribute missing");
-        assertTrue(html.contains("data-adds=\"1\""), "adds attribute incorrect");
-        assertTrue(html.contains("data-dels=\"1\""), "dels attribute incorrect");
-        assertTrue(html.contains("data-status=\"unknown\""), "status attribute missing");
-
-        // 3) Raw conflict markers must NOT appear in the rendered html
+          assertTrue(html.contains("data-file=\"foo.txt\""), "filename attribute missing");
+          assertTrue(html.contains("data-adds=\"1\""), "adds attribute incorrect");
+          assertTrue(html.contains("data-dels=\"1\""), "dels attribute incorrect");
+          assertTrue(html.contains("data-changed=\"1\""), "changed attribute incorrect"); // changed = min(1,1) = 1
+          assertTrue(html.contains("data-status=\"unknown\""), "status attribute missing");
+  
+          // 3) Raw conflict markers must NOT appear in the rendered html
         assertFalse(html.contains("<<<<<<<"), "raw conflict marker leaked into html");
         assertFalse(html.contains("======="), "raw conflict marker leaked into html");
         assertFalse(html.contains(">>>>>>>"), "raw conflict marker leaked into html");
@@ -255,11 +256,12 @@ class BrokkMarkdownExtensionTest {
         assertTrue(html.contains("data-lang=\"python\""), "Python language attribute missing");
 
         // 3) Edit block attributes are present
-        assertTrue(html.contains("data-file=\"example.txt\""), "filename attribute missing");
-        assertTrue(html.contains("data-adds=\"1\""), "adds attribute incorrect");
-        assertTrue(html.contains("data-dels=\"1\""), "dels attribute incorrect");
-
-        // 4) Content is properly included and escaped
+          assertTrue(html.contains("data-file=\"example.txt\""), "filename attribute missing");
+          assertTrue(html.contains("data-adds=\"1\""), "adds attribute incorrect");
+          assertTrue(html.contains("data-dels=\"1\""), "dels attribute incorrect");
+          assertTrue(html.contains("data-changed=\"1\""), "changed attribute incorrect"); // changed = min(1,1) = 1
+  
+          // 4) Content is properly included and escaped
         assertTrue(html.contains("System.out.println"), "Java code content missing");
         assertTrue(html.contains("print(&quot;Hello, Python!&quot;)"), "Python code content missing");
 
@@ -389,16 +391,18 @@ class BrokkMarkdownExtensionTest {
         // Verify first edit block attributes
         assertTrue(html.contains("data-file=\"src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/ComponentData.java\""),
                    "First file path should be correct");
-        assertTrue(html.contains("data-adds=\"37\""), "First adds count should be correct");
-        assertTrue(html.contains("data-dels=\"0\""), "First dels count should be correct");
-
-        // Verify second edit block attributes
+          assertTrue(html.contains("data-adds=\"37\""), "First adds count should be correct");
+          assertTrue(html.contains("data-dels=\"0\""), "First dels count should be correct");
+          assertTrue(html.contains("data-changed=\"0\""), "First changed count should be correct"); // changed = min(37, 0) = 0
+  
+          // Verify second edit block attributes
         assertTrue(html.contains("data-file=\"src/main/java/io/github/jbellis/brokk/gui/mop/stream/blocks/MarkdownComponentData.java\""),
                    "Second file path should be correct");
-        assertTrue(html.contains("data-adds=\"48\""), "Second adds count should be correct");
-        assertTrue(html.contains("data-dels=\"0\""), "Second dels count should be correct");
-
-        // Verify IDs are present
+          assertTrue(html.contains("data-adds=\"48\""), "Second adds count should be correct");
+          assertTrue(html.contains("data-dels=\"0\""), "Second dels count should be correct");
+          assertTrue(html.contains("data-changed=\"0\""), "Second changed count should be correct"); // changed = min(48, 0) = 0
+  
+          // Verify IDs are present
         assertTrue(html.contains("data-id=\""), "ID attributes should be present");
     }
 
