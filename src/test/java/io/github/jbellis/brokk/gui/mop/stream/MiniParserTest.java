@@ -1,5 +1,6 @@
 package io.github.jbellis.brokk.gui.mop.stream;
 
+import io.github.jbellis.brokk.git.GitStatus;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.CodeBlockComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.CodeBlockFactory;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.ComponentData;
@@ -187,7 +188,7 @@ public class MiniParserTest {
     void testEditBlockInsideBlockquote() {
         var html = "<blockquote>" +
                   "  <p>Here's an edit block:</p>" +
-                  "  <edit-block data-id=\"456\" data-file=\"Main.java\" data-adds=\"10\" data-dels=\"5\"></edit-block>" +
+                  "  <edit-block data-id=\"456\" data-file=\"Main.java\" data-adds=\"10\" data-dels=\"5\" data-status=\"unknown\"></edit-block>" +
                   "  <p>End of quote.</p>" +
                   "</blockquote>";
         var doc = Jsoup.parse(html);
@@ -224,7 +225,7 @@ public class MiniParserTest {
                   "    <code-fence data-id=\"123\" data-lang=\"java\" data-content=\"nested();\"/>" +
                   "  </blockquote>" +
                   "  <ul><li>" +
-                  "    <edit-block data-id=\"456\" data-file=\"Test.java\" data-adds=\"3\" data-dels=\"2\"></edit-block>" +
+                  "    <edit-block data-id=\"456\" data-file=\"Test.java\" data-adds=\"3\" data-dels=\"2\" data-status=\"unknown\"></edit-block>" +
                   "  </li></ul>" +
                   "  <p>Conclusion</p>" +
                   "</div>";

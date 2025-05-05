@@ -1,5 +1,6 @@
 package io.github.jbellis.brokk.gui.mop.stream.blocks;
 
+import io.github.jbellis.brokk.git.GitStatus;
 import org.jsoup.nodes.Element;
 
 /**
@@ -18,6 +19,15 @@ public class EditBlockFactory implements ComponentDataFactory {
         int dels = Integer.parseInt(element.attr("data-dels"));
         String file = element.attr("data-file");
         
-        return new EditBlockComponentData(id, adds, dels, file);
+        GitStatus status = GitStatus.UNKNOWN;
+        if (element.hasAttr("data-status")) {
+            try {
+                status = GitStatus.valueOf(element.attr("data-status").toUpperCase());
+            } catch (IllegalArgumentException e) {
+                // If status is invalid, default to UNKNOWN
+            }
+        }
+        
+        return new EditBlockComponentData(id, adds, dels, file, status);
     }
 }

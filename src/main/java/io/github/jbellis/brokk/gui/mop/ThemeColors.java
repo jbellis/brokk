@@ -62,9 +62,13 @@ public class ThemeColors {
         DARK_COLORS.put("git_status_new", new Color(88, 203, 63));
         DARK_COLORS.put("git_status_modified", new Color(71, 239, 230));
         DARK_COLORS.put("git_status_deleted", new Color(147, 99, 63));
+        DARK_COLORS.put("git_status_unknown", new Color(128, 128, 128));
+        DARK_COLORS.put("git_status_added", new Color(88, 203, 63));      // Same as new
         LIGHT_COLORS.put("git_status_new", new Color(42, 119, 34));
         LIGHT_COLORS.put("git_status_modified", new Color(60, 118, 202));
         LIGHT_COLORS.put("git_status_deleted", new Color(67, 100, 109));
+        LIGHT_COLORS.put("git_status_unknown", new Color(180, 180, 180));
+        LIGHT_COLORS.put("git_status_added", new Color(42, 119, 34));     // Same as new
 
         // File reference badge colors (same for both themes for now)
         Color badgeBorder = new Color(66, 139, 202);

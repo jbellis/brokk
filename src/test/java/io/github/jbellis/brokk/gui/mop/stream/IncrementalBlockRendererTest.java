@@ -1,5 +1,6 @@
 package io.github.jbellis.brokk.gui.mop.stream;
 
+import io.github.jbellis.brokk.git.GitStatus;
 import io.github.jbellis.brokk.gui.mop.TestUtil;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.CodeBlockComponentData;
 import io.github.jbellis.brokk.gui.mop.stream.blocks.CompositeComponentData;
@@ -120,6 +121,7 @@ public class IncrementalBlockRendererTest {
         assertEquals(5, editBlock.adds());
         assertEquals(3, editBlock.dels());
         assertEquals("Test.java", editBlock.file());
+        assertEquals(GitStatus.UNKNOWN, editBlock.status());
     }
     
     @Test

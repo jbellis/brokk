@@ -2,6 +2,7 @@ package io.github.jbellis.brokk.gui.mop.stream.flex;
 
 import com.vladsch.flexmark.util.ast.Block;
 import com.vladsch.flexmark.util.sequence.BasedSequence;
+import io.github.jbellis.brokk.git.GitStatus;
 
 /**
  * Represents an EDIT BLOCK in the Flexmark AST.
@@ -16,6 +17,7 @@ public class EditBlockNode extends Block {
     private BasedSequence replaceText;
     private BasedSequence closingMarker;
     private String filename;
+    private GitStatus status = GitStatus.UNKNOWN;
     
     /**
      * Get the filename if specified or empty sequence if not.
@@ -55,6 +57,19 @@ public class EditBlockNode extends Block {
         return openingMarker;
     }
 
+    /**
+     * Get the git status of this edit block.
+     */
+    public GitStatus getStatus() {
+        return status;
+    }
+    
+    /**
+     * Set the git status of this edit block.
+     */
+    public void setStatus(GitStatus status) {
+        this.status = status;
+    }
 
     /**
      * Set segments of this node based on parsed sequences.

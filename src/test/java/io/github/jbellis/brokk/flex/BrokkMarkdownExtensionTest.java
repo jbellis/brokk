@@ -94,6 +94,7 @@ class BrokkMarkdownExtensionTest {
         assertTrue(html.contains("data-file=\"foo.txt\""), "filename attribute missing");
         assertTrue(html.contains("data-adds=\"1\""), "adds attribute incorrect");
         assertTrue(html.contains("data-dels=\"1\""), "dels attribute incorrect");
+        assertTrue(html.contains("data-status=\"unknown\""), "status attribute missing");
 
         // 3) Raw conflict markers must NOT appear in the rendered html
         assertFalse(html.contains("<<<<<<<"), "raw conflict marker leaked into html");
