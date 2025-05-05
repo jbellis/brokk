@@ -596,4 +596,31 @@ class BrokkMarkdownExtensionTest {
         assertTrue(html.contains("<strong>Markdown</strong>"),
                    "Markdown-generated <strong> should remain");
     }
+    
+    @Test
+    void whitelistedTagsAreNotEscaped() {
+        var md = """
+                Here's some text with our special tags:
+                
+                <edit-block data-id="123" data-file="test.java" data-adds="1" data-dels="0" data-status="added"/>
+                
+                <code-fence data-id="456" data-lang="java">System.out.println("test");</code-fence>
+                
+                But <div>regular HTML</div> should still be escaped.
+                """;
+                
+        String html = renderer.render(parser.parse(md));
+        System.out.println(html);
+        
+        // Whitelisted tags should pass through unescaped
+        assertTrue(html.contains("<edit-block"), "edit-block should NOT be escaped");
+        assertFalse(html.contains("&lt;edit-block"), "edit-block should NOT be escaped");
+        
+        assertTrue(html.contains("<code-fence"), "code-fence should NOT be escaped");
+        assertFalse(html.contains("&lt;code-fence"), "code-fence should NOT be escaped");
+        
+        // But other HTML should still be escaped
+        assertFalse(html.contains("<div>"), "Regular HTML should be escaped");
+        assertTrue(html.contains("&lt;div&gt;"), "Regular HTML should be escaped");
+    }
 }

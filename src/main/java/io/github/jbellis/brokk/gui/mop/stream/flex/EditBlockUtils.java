@@ -13,6 +13,11 @@ import java.util.regex.Pattern;
  * Used by both the prompt parser and the flexmark markdown parser.
  */
 public final class EditBlockUtils {
+    /**
+     * List of custom HTML tag prefixes that should not be escaped in rendered output.
+     */
+    public static final Set<String> WHITELISTED_HTML_TAGS = Set.of("<edit-block", "<code-fence");
+    
     // Pattern for the "<<<<<<< SEARCH [filename]" line (filename optional)
     public static final Pattern HEAD =
             Pattern.compile("^ {0,3}<{5,9}\\s+SEARCH(?:\\s+(\\S.*))?\\s*$", Pattern.MULTILINE);

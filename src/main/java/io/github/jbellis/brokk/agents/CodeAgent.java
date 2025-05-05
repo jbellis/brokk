@@ -10,6 +10,8 @@ import io.github.jbellis.brokk.Llm.StreamingResult;
 import io.github.jbellis.brokk.agents.BuildAgent.BuildDetails;
 import io.github.jbellis.brokk.analyzer.CodeUnit;
 import io.github.jbellis.brokk.analyzer.ProjectFile;
+import io.github.jbellis.brokk.git.GitStatus;
+import io.github.jbellis.brokk.gui.mop.stream.blocks.EditBlockHtml;
 import io.github.jbellis.brokk.prompts.CodePrompts;
 import io.github.jbellis.brokk.prompts.EditBlockParser;
 import io.github.jbellis.brokk.prompts.QuickEditPrompts;
@@ -447,30 +449,28 @@ public class CodeAgent {
                                 return Stream.of(new AiMessage(summaries.get(aiMessage)));
                             }
 
-                            // No summary needed/available, process normally with placeholders
-                            var outputTexts = new ArrayList<String>();
+                            // Process results and create edit block HTML
                             var parseResult = parser.parse(aiMessage.text(), trackedFiles);
-                            boolean lastBlockWasEdit = false; // Track if the immediately preceding block was an edit block
-
-                            for (var outputBlock : parseResult.blocks()) {
-                                if (outputBlock.block() != null) { // It's an edit block
-                                    if (!outputTexts.isEmpty() && !lastBlockWasEdit) {
-                                        // Append placeholder to the last text block added
-                                        int lastIndex = outputTexts.size() - 1;
-                                        outputTexts.set(lastIndex, outputTexts.get(lastIndex) + " [elided SEARCH/REPLACE block]");
+                            var processedBlocks = parseResult.blocks().stream()
+                                .map(ob -> {
+                                    if (ob.block() == null) {
+                                        return ob.text();
                                     } else {
-                                        // Insert a new placeholder text block if last was edit or list is empty
-                                        outputTexts.add("[elided SEARCH/REPLACE block]");
+                                        // Use EditBlockHtml to create HTML placeholder
+                                        var block = ob.block();
+                                        return EditBlockHtml.toHtml(
+                                            block.hashCode(),
+                                            block.filename(),
+                                            (int)block.afterText().lines().count(),
+                                            (int)block.beforeText().lines().count(),
+                                            Math.min((int)block.afterText().lines().count(), (int)block.beforeText().lines().count()),
+                                            GitStatus.UNKNOWN
+                                        );
                                     }
-                                    lastBlockWasEdit = true; // Mark that this block was an edit block
-                                } else { // It's a text block
-                                    outputTexts.add(outputBlock.text());
-                                    lastBlockWasEdit = false; // Mark that this block was a text block
-                                }
-                            }
-                            // Join text, strip ends, and filter out blank results
-                            var joinedText = String.join("", outputTexts).strip();
-                            return joinedText.isBlank() ? Stream.empty() : Stream.of(new AiMessage(joinedText));
+                                })
+                                .collect(Collectors.joining());
+                            
+                            return processedBlocks.isBlank() ? Stream.empty() : Stream.of(new AiMessage(processedBlocks));
 
                         // Ignore SYSTEM/TOOL messages for history purposes
                         case SYSTEM, TOOL_EXECUTION_RESULT:
