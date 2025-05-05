@@ -5,6 +5,7 @@ import com.vladsch.flexmark.html.renderer.NodeRenderer;
 import com.vladsch.flexmark.html.renderer.NodeRendererContext;
 import com.vladsch.flexmark.html.renderer.NodeRenderingHandler;
 import com.vladsch.flexmark.util.data.DataHolder;
+import io.github.jbellis.brokk.gui.mop.stream.blocks.EditBlockHtml;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -40,32 +41,14 @@ public class EditBlockRenderer implements NodeRenderer {
         int adds = node.getAdds();
         int dels = node.getDels();
         int changed = node.getChangedLines();
-        String status = node.getStatus().name().toLowerCase();
         
         logger.debug("Rendering edit block with id={}, file={}, adds={}, dels={}, changed={}, status={}", 
-                     id, filename, adds, dels, changed, status);
+                     id, filename, adds, dels, changed, node.getStatus());
         
         // Output a self-closing placeholder tag with data attributes
         html.line();
-        html.raw("<edit-block");
-        html.raw(" data-id=\"" + id + "\"");
-        html.raw(" data-file=\"" + escapeHtml(filename) + "\"");
-        html.raw(" data-adds=\"" + adds + "\"");
-          html.raw(" data-dels=\"" + dels + "\"");
-          html.raw(" data-changed=\"" + changed + "\"");
-          html.raw(" data-status=\"" + status + "\"");
-          html.raw("></edit-block>");
-          html.line();
-    }
-    
-    /**
-     * Basic HTML escaping for attribute values.
-     */
-    private String escapeHtml(String text) {
-        return text.replace("&", "&amp;")
-                  .replace("<", "&lt;")
-                  .replace(">", "&gt;")
-                  .replace("\"", "&quot;");
+        html.raw(EditBlockHtml.toHtml(id, filename, adds, dels, changed, node.getStatus()));
+        html.line();
     }
     
     /**

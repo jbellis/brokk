@@ -1,8 +1,11 @@
 package io.github.jbellis.brokk.gui.mop.stream.flex;
 
 import io.github.jbellis.brokk.analyzer.ProjectFile;
+
 import java.io.File;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
