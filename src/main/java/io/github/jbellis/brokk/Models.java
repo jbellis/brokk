@@ -22,6 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import static java.lang.Math.log;
 import static java.lang.Math.min;
 
 /**
@@ -183,21 +184,27 @@ public final class Models {
     }
 
     public float getUserBalance() throws IOException {
-        var kp = parseKey(Project.getBrokkKey());
+        return getUserBalance(Project.getBrokkKey());
+    }
+
+    public static float getUserBalance(String key) throws IOException {
+        var kp = parseKey(key);
         String url = "https://app.brokk.ai/api/payments/balance-lookup/" + kp.userId();
-        logger.trace(url);
         Request request = new Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer " + kp.token())
                 .get()
                 .build();
         try (Response response = httpClient.newCall(request).execute()) {
+            // TODO
+            System.out.println(response);
             if (!response.isSuccessful()) {
                 String errorBody = response.body() != null ? response.body().string() : "(no body)";
                 throw new IOException("Failed to fetch user balance: "
                                               + response.code() + " - " + errorBody);
             }
             String responseBody = response.body() != null ? response.body().string() : "";
+            var objectMapper = new ObjectMapper();
             JsonNode rootNode = objectMapper.readTree(responseBody);
             if (rootNode.has("available_balance") && rootNode.get("available_balance").isNumber()) {
                 return rootNode.get("available_balance").floatValue();
@@ -207,6 +214,11 @@ public final class Models {
                 throw new IOException("Unexpected balance response format: " + responseBody);
             }
         }
+    }
+
+    public static void validateKey(String key) throws IOException {
+        parseKey(key);
+        getUserBalance(key);
     }
 
     /**
@@ -223,7 +235,7 @@ public final class Models {
         var authHeader = "Bearer dummy-key";
         if (isBrokk) {
             var kp = parseKey(Project.getBrokkKey());
-            // Use proToken to check available models and balance
+            // Use token to check available models and balance
             authHeader = "Bearer " + kp.token();
         }
         Request request = new Request.Builder()
@@ -465,7 +477,6 @@ public final class Models {
 
             if (Project.getLlmProxySetting() == Project.LlmProxySetting.BROKK) {
                 var kp = parseKey(Project.getBrokkKey());
-                // Select token based on balance status
                 builder = builder
                         .apiKey(kp.token)
                         .customHeaders(Map.of("Authorization", "Bearer " + kp.token))
