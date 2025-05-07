@@ -351,7 +351,24 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
             }
         });
         referenceFileTable.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        referenceFileTable.setRowHeight(23);                 // match ContextPanel
+        // Dynamically set row height based on renderer's preferred size
+        var sampleFileRefData = new FileReferenceData("sample.txt", "/sample.txt", null);
+        var cellRenderer = new TableUtils.FileReferencesTableCellRenderer();
+        Component rendererComponent = cellRenderer.getTableCellRendererComponent(
+                referenceFileTable, List.of(sampleFileRefData), false, false, 0, 0);
+        int dynamicRowHeight = rendererComponent.getPreferredSize().height;
+
+        // Fallback if preferred size calculation is problematic (e.g. returns 0)
+        if (dynamicRowHeight <= 0) {
+            Object lafRowHeight = UIManager.get("Table.rowHeight");
+            if (lafRowHeight instanceof Integer && (Integer) lafRowHeight > 0) {
+                dynamicRowHeight = (Integer) lafRowHeight;
+            } else {
+                dynamicRowHeight = 23; // Original hardcoded value as a last resort
+            }
+        }
+        referenceFileTable.setRowHeight(dynamicRowHeight);
+
         referenceFileTable.setTableHeader(null);             // single-column ⇒ header not needed
         referenceFileTable.setShowGrid(false);
         referenceFileTable.getColumnModel()
@@ -496,11 +513,11 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
         suggestionAreaPanel.add(suggestionContentPanel, BorderLayout.CENTER);
 
         // Apply height constraints to the container panel
-        int rowHeight = referenceFileTable.getRowHeight();
-        int fixedHeight = rowHeight + 2; // +2 for a tiny margin (match table row height)
+        int currentPanelRowHeight = referenceFileTable.getRowHeight(); // This now uses the dynamic height
+        int fixedHeight = currentPanelRowHeight + 2; // +2 for a tiny margin for the panel itself
         suggestionAreaPanel.setPreferredSize(new Dimension(600, fixedHeight));
         suggestionAreaPanel.setMinimumSize(new Dimension(100, fixedHeight));
-        suggestionAreaPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, fixedHeight));
+        // setMaximumSize removed to allow panel to grow as needed
 
         // Insert the container panel beneath the command-input area (index 1)
         centerPanel.add(suggestionAreaPanel, 1);
@@ -521,19 +538,23 @@ public class InstructionsPanel extends JPanel implements IContextManager.Context
         if (xInCell < 0 || yInCell < 0) return null;
 
         // Badge layout parameters – keep in sync with FileReferenceList
-        final int hgap = 4;     // FlowLayout hgap
-        final int horizontalPadding = 12;    // label internal padding (6 px each side)
-        final int borderThickness = 3;     // stroke + antialias buffer
+        final int hgap = 4;     // FlowLayout hgap in FileReferenceList
 
-        // Font used inside the badges (85 % of table font size)
+        // Font used inside the badges (85 % of table font size) - must match FileReferenceList.createBadgeLabel
         var baseFont = referenceFileTable.getFont();
         var badgeFont = baseFont.deriveFont(Font.PLAIN, baseFont.getSize() * 0.85f);
         var fm = referenceFileTable.getFontMetrics(badgeFont);
 
         int currentX = 0;
+        // Calculate insets based on BORDER_THICKNESS and text padding (matching createBadgeLabel)
+        int borderStrokeInset = (int) Math.ceil(TableUtils.FileReferenceList.BORDER_THICKNESS);
+        int textPaddingHorizontal = 6; // As defined in createBadgeLabel's EmptyBorder logic
+        int totalInsetsPerSide = borderStrokeInset + textPaddingHorizontal;
+
         for (var ref : references) {
             int textWidth = fm.stringWidth(ref.getFileName());
-            int labelWidth = textWidth + horizontalPadding + borderThickness;
+            // Label width is text width + total left inset + total right inset
+            int labelWidth = textWidth + (2 * totalInsetsPerSide);
             if (xInCell >= currentX && xInCell <= currentX + labelWidth) {
                 return ref;
             }

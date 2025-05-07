@@ -104,7 +104,7 @@ public class TableUtils {
         private boolean selected = false;
 
         private static final int BADGE_ARC_WIDTH = 10;
-        private static final float BORDER_THICKNESS = 1.5f;
+        public static final float BORDER_THICKNESS = 1.5f; // Made public
 
         public FileReferenceList() {
             setLayout(new FlowLayout(FlowLayout.LEFT, 4, 2));
@@ -226,7 +226,17 @@ public class TableUtils {
 
             // Set foreground color based on selection state
             label.setForeground(selected ? selectedBadgeForeground : badgeForeground);
-            label.setBorder(new EmptyBorder(1, 6, 1, 6));
+
+            // Combine border for stroke painting space and text padding
+            int borderStrokeInset = (int) Math.ceil(BORDER_THICKNESS);
+            int textPaddingVertical = 1;
+            int textPaddingHorizontal = 6;
+            label.setBorder(new EmptyBorder(
+                    borderStrokeInset + textPaddingVertical,
+                    borderStrokeInset + textPaddingHorizontal,
+                    borderStrokeInset + textPaddingVertical,
+                    borderStrokeInset + textPaddingHorizontal
+            ));
 
             return label;
         }
