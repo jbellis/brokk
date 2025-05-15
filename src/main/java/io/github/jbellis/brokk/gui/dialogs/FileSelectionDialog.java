@@ -54,7 +54,9 @@ public class FileSelectionDialog extends JDialog {
                 fileFilter,
                 autocompleteCandidates,
                 false, // multiSelect = false
-                this::handlePanelSingleFileConfirmed // Action for double-click confirm from panel
+                this::handlePanelSingleFileConfirmed, // Action for double-click confirm from panel
+                true, // includeProjectFilesInAutocomplete
+                null  // customHintText
         );
         fileSelectionPanel = new FileSelectionPanel(panelConfig);
 

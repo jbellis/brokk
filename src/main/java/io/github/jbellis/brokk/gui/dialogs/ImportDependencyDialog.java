@@ -193,14 +193,30 @@ public class ImportDependencyDialog {
                 candidates = CompletableFuture.completedFuture(List.of());
             }
 
-            FileSelectionPanel.Config fspConfig = new FileSelectionPanel.Config(
-                    chrome.getProject(),
-                    true, // allowExternalFiles
-                    filter,
-                    candidates,
-                    false, // multiSelect = false
-                    this::handleFspSingleFileConfirmed
-            );
+            FileSelectionPanel.Config fspConfig;
+            if (currentSourceType == SourceType.JAR) {
+                fspConfig = new FileSelectionPanel.Config(
+                        chrome.getProject(),
+                        true, // allowExternalFiles
+                        filter,
+                        candidates,
+                        false, // multiSelect = false
+                        this::handleFspSingleFileConfirmed,
+                        true, // includeProjectFilesInAutocomplete for JARs
+                        "Ctrl+Space to autocomplete common dependency JARs.\nSelected JAR will be decompiled and its sources added to the project."
+                );
+            } else { // DIRECTORY
+                fspConfig = new FileSelectionPanel.Config(
+                        chrome.getProject(),
+                        true, // allowExternalFiles
+                        filter,
+                        candidates, // CompletableFuture.completedFuture(List.of())
+                        false, // multiSelect = false
+                        this::handleFspSingleFileConfirmed,
+                        false, // includeProjectFilesInAutocomplete for Directories
+                        "Select an external directory. Its contents will be copied into the project.\nProject's own directories cannot be selected."
+                );
+            }
 
             currentFileSelectionPanel = new FileSelectionPanel(fspConfig);
 

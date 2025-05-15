@@ -45,12 +45,15 @@ public class FileSelectionPanel extends JPanel {
                          Predicate<File> fileFilter,
                          Future<List<Path>> autocompleteCandidates, // Generalize to List<Path>
                          boolean multiSelect,
-                         Consumer<BrokkFile> onSingleFileConfirmed // Optional: action for single file confirmation (e.g., double-click)
+                         Consumer<BrokkFile> onSingleFileConfirmed, // Optional: action for single file confirmation (e.g., double-click)
+                         boolean includeProjectFilesInAutocomplete,
+                         String customHintText
                          ) {
         public Config {
             Objects.requireNonNull(fileFilter, "fileFilter cannot be null");
             Objects.requireNonNull(autocompleteCandidates, "autocompleteCandidates cannot be null");
             // project can be null if allowExternalFiles is true and no project context is needed for tree/completion
+            // customHintText can be null or empty
         }
     }
 
@@ -91,7 +94,8 @@ public class FileSelectionPanel extends JPanel {
                 this.project,
                 config.autocompleteCandidates(),
                 config.allowExternalFiles(),
-                config.multiSelect()
+                config.multiSelect(),
+                config.includeProjectFilesInAutocomplete()
         );
         autoCompletion = new AutoCompletion(provider);
         autoCompletion.setAutoActivationEnabled(false);
@@ -107,23 +111,31 @@ public class FileSelectionPanel extends JPanel {
         inputPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0)); // Space below input
         if (config.multiSelect()) {
             inputPanel.add(new JScrollPane(fileInputComponent), BorderLayout.CENTER);
-        } else {
-            inputPanel.add(fileInputComponent, BorderLayout.CENTER);
-        }
+    } else {
+        inputPanel.add(fileInputComponent, BorderLayout.CENTER);
+    }
 
-        // Hints below input
-        JPanel labelsPanel = new JPanel(new GridLayout(config.multiSelect() ? 2 : 1, 1));
-        String hintText = config.allowExternalFiles() && project != null
-                          ? "Ctrl-space to autocomplete project/candidate files. External files may be selected from tree."
-                          : (project != null ? "Ctrl-space to autocomplete project/candidate files." : "Ctrl-space to autocomplete files.");
-        labelsPanel.add(new JLabel(hintText));
-        if (config.multiSelect() && project != null) { // Globbing hint only for multi-select with a project
-            labelsPanel.add(new JLabel("*/? to glob (project files only); ** to glob recursively"));
+    // Hints below input
+    JPanel labelsPanel = new JPanel();
+    labelsPanel.setLayout(new BoxLayout(labelsPanel, BoxLayout.PAGE_AXIS));
+
+    if (config.customHintText() != null && !config.customHintText().isBlank()) {
+        for (String line : config.customHintText().split("\n")) {
+            labelsPanel.add(new JLabel(line));
         }
+    }
+
+    if (config.multiSelect() && project != null && config.includeProjectFilesInAutocomplete()) {
+        labelsPanel.add(new JLabel("*/? to glob (project files only); ** to glob recursively"));
+    }
+
+    if (labelsPanel.getComponentCount() > 0) {
+        labelsPanel.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0)); // Small top padding
         inputPanel.add(labelsPanel, BorderLayout.SOUTH);
-        add(inputPanel, BorderLayout.NORTH);
+    }
+    add(inputPanel, BorderLayout.NORTH);
 
-        JScrollPane treeScrollPane = new JScrollPane(fileTree);
+    JScrollPane treeScrollPane = new JScrollPane(fileTree);
         treeScrollPane.setPreferredSize(new Dimension(450, 300)); // Default size, can be overridden
         add(treeScrollPane, BorderLayout.CENTER);
 
@@ -397,16 +409,19 @@ public class FileSelectionPanel extends JPanel {
         private final Future<List<Path>> autocompleteCandidatesFuture;
         private final boolean allowExternalFiles;
         private final boolean multiSelectMode; // To determine how to get_already_entered_text
+        private final boolean includeProjectFilesInAutocomplete;
 
         public FilePanelCompletionProvider(Project project,
                                            Future<List<Path>> autocompleteCandidatesFuture,
                                            boolean allowExternalFiles,
-                                           boolean multiSelectMode) {
+                                           boolean multiSelectMode,
+                                           boolean includeProjectFilesInAutocomplete) {
             super();
             this.project = project;
             this.autocompleteCandidatesFuture = autocompleteCandidatesFuture;
             this.allowExternalFiles = allowExternalFiles;
             this.multiSelectMode = multiSelectMode;
+            this.includeProjectFilesInAutocomplete = includeProjectFilesInAutocomplete;
         }
 
         @Override
@@ -460,11 +475,7 @@ public class FileSelectionPanel extends JPanel {
             // For simplicity, we assume `autocompleteCandidatesFuture` contains all relevant paths (project + external).
             // Or, we can merge if project exists:
             Set<Path> allCandidatePaths = new java.util.HashSet<>(candidates);
-            if (project != null && project.getRepo() != null) { // Assuming project files come from repo's tracked files
-                // This is a simplification. Original FSD used `Completions.scoreShortAndLong` with `project.getRepo().getTrackedFiles()` implicitly
-                // and MFSD used `completableFiles` future.
-                // For now, let's assume `autocompleteCandidatesFuture` is comprehensive enough or this part needs more complex merging.
-                // A simple merge:
+            if (this.includeProjectFilesInAutocomplete && project != null && project.getRepo() != null) {
                  project.getRepo().getTrackedFiles().stream().map(ProjectFile::absPath).forEach(allCandidatePaths::add);
             }
 
