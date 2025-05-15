@@ -87,10 +87,11 @@ libraryDependencies ++= Seq(
   "com.jetbrains.intellij.java" % "java-decompiler-engine" % "243.25659.59",
 
   // Maven Resolver to find sources jars
+  "org.apache.maven" % "maven-resolver-provider" % "3.9.9",
   "org.apache.maven.resolver" % "maven-resolver-impl"            % "2.0.8",
   "org.apache.maven.resolver" % "maven-resolver-connector-basic" % "2.0.8",
-  "org.apache.maven.resolver" % "maven-resolver-transport-file"  % "2.0.8", // optional, but handy for file:// repos
-  "org.apache.maven.resolver" % "maven-resolver-transport-jdk"   % "2.0.8"
+  "org.apache.maven.resolver" % "maven-resolver-transport-file"  % "2.0.8",
+  "org.apache.maven.resolver" % "maven-resolver-transport-jdk"   % "2.0.8",
 )
 
 enablePlugins(BuildInfoPlugin)
