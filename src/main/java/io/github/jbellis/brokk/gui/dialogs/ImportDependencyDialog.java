@@ -186,7 +186,8 @@ public class ImportDependencyDialog {
             Future<List<Path>> candidates;
 
             if (currentSourceType == SourceType.JAR) {
-                filter = file -> file.isDirectory() || file.getName().toLowerCase().endsWith(".jar");
+                filter = file -> file.isDirectory() ||
+                                 (file.getName().toLowerCase().endsWith(".jar")); // findCommonDependencyJars already filters -javadoc etc.
                 candidates = chrome.getContextManager().submitBackgroundTask("Scanning for JAR files", Decompiler::findCommonDependencyJars);
             } else { // DIRECTORY
                 filter = File::isDirectory;
@@ -303,12 +304,13 @@ public class ImportDependencyDialog {
 
             Path path = file.absPath();
             if (!Files.exists(path)) {
-                previewArea.setText("");
+                previewArea.setText("File or directory does not exist: " + path.getFileName());
                 return;
             }
 
             if (currentSourceType == SourceType.JAR) {
-                if (Files.isRegularFile(path) && path.toString().toLowerCase().endsWith(".jar")) {
+                String lowerCaseName = path.toString().toLowerCase();
+                if (Files.isRegularFile(path) && lowerCaseName.endsWith(".jar")) {
                     selectedBrokkFileForImport = file;
                     previewArea.setText(generateJarPreviewText(path));
                     importButton.setEnabled(true);
@@ -337,29 +339,73 @@ public class ImportDependencyDialog {
         }
 
         private String generateJarPreviewText(Path jarPath) {
-            Map<String, Integer> classCountsByPackage = new HashMap<>();
+            StringBuilder previewText = new StringBuilder();
+            boolean isSourcesJar = jarPath.getFileName().toString().toLowerCase().endsWith("-sources.jar");
+
+            Decompiler.MavenCoordinates coords = Decompiler.findMavenCoordinates(jarPath).orElse(null);
+            if (coords != null) {
+                previewText.append("Maven: ").append(coords.groupId())
+                           .append(':').append(coords.artifactId())
+                           .append(':').append(coords.version()).append("\n\n");
+            }
+
+            if (isSourcesJar) {
+                previewText.append("Type: Source Code Archive (will be extracted)\n");
+                Map<String, Long> javaFileCounts = countFilesByExtension(jarPath, ".java");
+                if (javaFileCounts.isEmpty()) {
+                    previewText.append("No .java files found in JAR.");
+                } else {
+                    previewText.append("Java files by top-level directory:\n");
+                    javaFileCounts.entrySet().stream()
+                                  .sorted(Map.Entry.comparingByKey())
+                                  .map(e -> "  " + e.getKey() + ": " + e.getValue() + " file(s)")
+                                  .forEach(s -> previewText.append(s).append("\n"));
+                }
+            } else {
+                previewText.append("Type: Binary Archive (will attempt to find sources or decompile)\n");
+                Map<String, Long> classFileCounts = countFilesByExtension(jarPath, ".class");
+                if (classFileCounts.isEmpty()) {
+                    previewText.append("No .class files found in JAR.");
+                } else {
+                    previewText.append("Class files by package (top-level):\n");
+                     classFileCounts.entrySet().stream()
+                                   .sorted(Map.Entry.comparingByKey())
+                                   .map(e -> "  " + e.getKey() + ": " + e.getValue() + " class(es)")
+                                   .forEach(s -> previewText.append(s).append("\n"));
+                }
+            }
+            return previewText.toString().stripTrailing();
+        }
+
+        private Map<String, Long> countFilesByExtension(Path jarPath, String extension) {
+            Map<String, Long> counts = new TreeMap<>();
             try (JarFile jarFile = new JarFile(jarPath.toFile())) {
                 Enumeration<JarEntry> entries = jarFile.entries();
                 while (entries.hasMoreElements()) {
                     JarEntry entry = entries.nextElement();
-                    if (!entry.isDirectory() && entry.getName().endsWith(".class")) {
-                        String className = entry.getName().replace('/', '.');
-                        className = className.substring(0, className.length() - ".class".length());
-                        int lastDot = className.lastIndexOf('.');
-                        String packageName = (lastDot == -1) ? "(default package)" : className.substring(0, lastDot);
-                        classCountsByPackage.merge(packageName, 1, Integer::sum);
+                    if (!entry.isDirectory() && entry.getName().toLowerCase().endsWith(extension)) {
+                        String path = entry.getName();
+                        // For package-like structure, get the first component
+                        int firstSlash = path.indexOf('/');
+                        String topLevelDir = (firstSlash == -1) ? "(root)" : path.substring(0, firstSlash);
+                        if (extension.equals(".class")) { // convert to package name
+                            topLevelDir = topLevelDir.replace('/', '.');
+                             if (topLevelDir.equals("(root)") && path.contains(".")) { // default package class
+                                 topLevelDir = "(default package)";
+                             } else if (path.lastIndexOf('/') == -1 && path.contains(".")) { // class in root, but not default package (e.g. module-info)
+                                 topLevelDir = "(root files)";
+                             }
+                        }
+                        counts.merge(topLevelDir, 1L, Long::sum);
                     }
                 }
             } catch (IOException e) {
-                logger.warn("Error reading JAR for preview: {}", jarPath, e);
-                return "Error reading JAR: " + e.getMessage();
+                logger.warn("Error reading JAR {} for previewing {} files: {}", jarPath, extension, e.getMessage());
+                counts.put("(Error reading JAR: " + e.getMessage() + ")", 0L);
             }
-            if (classCountsByPackage.isEmpty()) return "No classes found in JAR.";
-            return classCountsByPackage.entrySet().stream()
-                                       .sorted(Map.Entry.comparingByKey())
-                                       .map(e -> e.getKey() + ": " + e.getValue() + " class(es)")
-                                       .collect(Collectors.joining("\n"));
+            return counts;
         }
+
 
         private String generateDirectoryPreviewText(Path dirPath) {
             List<String> extensions = chrome.getProject().getAnalyzerLanguage().getExtensions();
