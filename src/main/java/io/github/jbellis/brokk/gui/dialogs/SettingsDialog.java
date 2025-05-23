@@ -595,6 +595,20 @@ public class SettingsDialog extends JDialog {
         buildPanel.add(excludedButtonsPanel, gbc);
         gbc.insets = new Insets(2, 2, 2, 2); // Reset insets
 
+        // Add "Re-Run Build Details" Button
+        var reRunBuildButton = new JButton("Re-Run Build Details");
+        gbc.gridx = 1;
+        gbc.gridy = row + 2; // Position below excludedScrollPane (row) and excludedButtonsPanel (row + 1)
+        gbc.weightx = 0.0;
+        gbc.weighty = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.anchor = GridBagConstraints.NORTHWEST; // Align with excludedButtonsPanel
+        gbc.insets = new Insets(2, 0, 2, 2); // Align left, similar to excludedButtonsPanel
+        buildPanel.add(reRunBuildButton, gbc);
+        gbc.insets = new Insets(2, 2, 2, 2); // Reset insets
+
+        row += 3; // Increment row to account for the rows used by excludedScrollPane, excludedButtonsPanel, and reRunBuildButton
+
         // Add button action
         // row is already incremented from excludedScrollPane
         addButton.addActionListener(e -> {
@@ -626,8 +640,6 @@ public class SettingsDialog extends JDialog {
                 excludedDirectoriesListModel.removeElementAt(selectedIndices[i]);
             }
         });
-
-        row++; // Increment row counter for the buttons panel
 
         // ----- Other Tab -----
         var otherPanel = new JPanel(new GridBagLayout());
