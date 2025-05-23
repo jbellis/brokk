@@ -30,6 +30,9 @@ public class SettingsDialog extends JDialog {
     private final Chrome chrome;
     private final JTabbedPane tabbedPane;
     private final JPanel projectPanel; // Keep a reference to enable/disable
+    // Main dialog buttons
+    private JButton okButton;
+    private JButton applyButton;
     // Brokk Key field (Global)
     private JTextField brokkKeyField;
     // Global proxy selection
@@ -62,6 +65,9 @@ public class SettingsDialog extends JDialog {
     // Project -> Build tab specific fields
     private JList<String> excludedDirectoriesList;
     private DefaultListModel<String> excludedDirectoriesListModel;
+    private JButton addExcludedDirButton;
+    private JButton removeExcludedDirButton;
+    private JButton reRunBuildButton;
     private JRadioButton runAllTestsRadio;
     private JRadioButton runTestsInWorkspaceRadio;
     // Quick Models Tab components
@@ -122,17 +128,17 @@ public class SettingsDialog extends JDialog {
 
         // Buttons Panel
         var buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        var okButton = new JButton("OK");
+        this.okButton = new JButton("OK"); // Assign to member field
         var cancelButton = new JButton("Cancel");
-        var applyButton = new JButton("Apply"); // Added Apply button
+        this.applyButton = new JButton("Apply"); // Assign to member field
 
-        okButton.addActionListener(e -> {
+        this.okButton.addActionListener(e -> {
             if (applySettings()) {
                 dispose();
             }
         });
         cancelButton.addActionListener(e -> dispose());
-        applyButton.addActionListener(e -> applySettings()); // applySettings shows errors, dialog stays open
+        this.applyButton.addActionListener(e -> applySettings()); // applySettings shows errors, dialog stays open
 
         // Add Escape key binding to close the dialog (like Cancel)
         getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
@@ -580,10 +586,10 @@ public class SettingsDialog extends JDialog {
 
         // Buttons for Excluded Directories
         var excludedButtonsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-        var addButton = new JButton("Add");
-        var removeButton = new JButton("Remove");
-        excludedButtonsPanel.add(addButton);
-        excludedButtonsPanel.add(removeButton);
+        addExcludedDirButton = new JButton("Add");
+        removeExcludedDirButton = new JButton("Remove");
+        excludedButtonsPanel.add(addExcludedDirButton);
+        excludedButtonsPanel.add(removeExcludedDirButton);
 
         gbc.gridx = 1;
         gbc.gridy = row + 1; // Position buttons below the list
@@ -596,7 +602,7 @@ public class SettingsDialog extends JDialog {
         gbc.insets = new Insets(2, 2, 2, 2); // Reset insets
 
         // Add "Re-Run Build Details" Button
-        var reRunBuildButton = new JButton("Re-Run Build Details");
+        this.reRunBuildButton = new JButton("Re-Run Build Details");
         gbc.gridx = 1;
         gbc.gridy = row + 2; // Position below excludedScrollPane (row) and excludedButtonsPanel (row + 1)
         gbc.weightx = 0.0;
@@ -604,14 +610,96 @@ public class SettingsDialog extends JDialog {
         gbc.fill = GridBagConstraints.NONE;
         gbc.anchor = GridBagConstraints.NORTHWEST; // Align with excludedButtonsPanel
         gbc.insets = new Insets(2, 0, 2, 2); // Align left, similar to excludedButtonsPanel
-        buildPanel.add(reRunBuildButton, gbc);
+        buildPanel.add(this.reRunBuildButton, gbc);
         gbc.insets = new Insets(2, 2, 2, 2); // Reset insets
 
         row += 3; // Increment row to account for the rows used by excludedScrollPane, excludedButtonsPanel, and reRunBuildButton
 
+        // Action listener for "Re-Run Build Details" button
+        this.reRunBuildButton.addActionListener(e -> {
+            setBuildRelatedControlsEnabled(false);
+
+            // Use the 'project' variable from the outer scope of createProjectPanel()
+            if (project == null) {
+                logger.warn("Re-infer build details button clicked but no project is open.");
+                JOptionPane.showMessageDialog(SettingsDialog.this,
+                                              "No project is open. Cannot infer build details.",
+                                              "Error",
+                                              JOptionPane.ERROR_MESSAGE);
+                setBuildRelatedControlsEnabled(true);
+                return;
+            }
+
+            var contextManager = chrome.getContextManager();
+            var llm = contextManager.getLlm(contextManager.getModels().quickModel(), "Infer build details");
+            var toolRegistry = contextManager.getToolRegistry();
+
+            contextManager.submitBackgroundTask("Re-inferring build details...", () -> {
+                try {
+                    var agent = new BuildAgent(project, llm, toolRegistry);
+                    BuildAgent.BuildDetails newDetails = agent.execute();
+                    // Post-execution handling (on EDT)
+                    SwingUtilities.invokeLater(() -> {
+                        try {
+                            if (newDetails != null && !newDetails.equals(BuildAgent.BuildDetails.EMPTY)) {
+                                populateBuildFields(newDetails);
+                                logger.info("Successfully inferred and populated new build details.");
+                                JOptionPane.showMessageDialog(SettingsDialog.this,
+                                                              "Build details re-inferred successfully.",
+                                                              "Success",
+                                                              JOptionPane.INFORMATION_MESSAGE);
+                            } else if (newDetails == BuildAgent.BuildDetails.EMPTY) {
+                                logger.warn("Build agent aborted or could not determine details.");
+                                JOptionPane.showMessageDialog(SettingsDialog.this,
+                                                              "Build agent could not determine build details.",
+                                                              "Inference Aborted",
+                                                              JOptionPane.WARNING_MESSAGE);
+                            } else { // newDetails is null (should have been caught as an exception by background task)
+                                logger.error("Build agent returned null details unexpectedly from background task.");
+                                JOptionPane.showMessageDialog(SettingsDialog.this,
+                                                              "An unexpected error occurred while inferring build details (null result).",
+                                                              "Error",
+                                                              JOptionPane.ERROR_MESSAGE);
+                            }
+                        } finally {
+                            setBuildRelatedControlsEnabled(true);
+                        }
+                    });
+                    return newDetails; // Return the result for the background task
+                } catch (InterruptedException interruptedException) {
+                    Thread.currentThread().interrupt();
+                    logger.warn("Build agent execution was interrupted.", interruptedException);
+                    SwingUtilities.invokeLater(() -> {
+                        try {
+                            JOptionPane.showMessageDialog(SettingsDialog.this,
+                                                          "Build inference was interrupted.",
+                                                          "Interrupted",
+                                                          JOptionPane.WARNING_MESSAGE);
+                        } finally {
+                            setBuildRelatedControlsEnabled(true);
+                        }
+                    });
+                    return BuildAgent.BuildDetails.EMPTY; // Indicate failure
+                } catch (Exception ex) {
+                    logger.error("Error executing BuildAgent in background.", ex);
+                    SwingUtilities.invokeLater(() -> {
+                        try {
+                            JOptionPane.showMessageDialog(SettingsDialog.this,
+                                                          "Error re-inferring build details: " + ex.getMessage(),
+                                                          "Error",
+                                                          JOptionPane.ERROR_MESSAGE);
+                        } finally {
+                            setBuildRelatedControlsEnabled(true);
+                        }
+                    });
+                    return BuildAgent.BuildDetails.EMPTY; // Indicate failure
+                }
+            });
+        });
+
         // Add button action
         // row is already incremented from excludedScrollPane
-        addButton.addActionListener(e -> {
+        addExcludedDirButton.addActionListener(e -> {
             String newDir = JOptionPane.showInputDialog(SettingsDialog.this,
                                                         "Enter directory to exclude (e.g., target/, build/):",
                                                         "Add Excluded Directory",
@@ -633,7 +721,7 @@ public class SettingsDialog extends JDialog {
         });
 
         // Remove button action
-        removeButton.addActionListener(e -> {
+        removeExcludedDirButton.addActionListener(e -> {
             int[] selectedIndices = excludedDirectoriesList.getSelectedIndices();
             // Iterate backwards to avoid issues with index shifting after removal
             for (int i = selectedIndices.length - 1; i >= 0; i--) {
@@ -775,6 +863,46 @@ public class SettingsDialog extends JDialog {
 
         projectTabRootPanel.add(subTabbedPane, BorderLayout.CENTER);
         return projectTabRootPanel;
+    }
+
+    private void populateBuildFields(BuildAgent.BuildDetails details) {
+        if (details == null) {
+            logger.warn("Attempted to populate build fields with null details.");
+            return;
+        }
+        assert SwingUtilities.isEventDispatchThread() : "UI updates must be on EDT";
+
+        if (buildCleanCommandField != null) buildCleanCommandField.setText(details.buildLintCommand());
+        if (allTestsCommandField != null) allTestsCommandField.setText(details.testAllCommand());
+        if (buildInstructionsArea != null) buildInstructionsArea.setText(details.instructions());
+
+        if (excludedDirectoriesListModel != null) {
+            excludedDirectoriesListModel.clear();
+            if (details.excludedDirectories() != null) {
+                var sortedExcludes = details.excludedDirectories().stream().sorted().toList();
+                for (String dir : sortedExcludes) {
+                    excludedDirectoriesListModel.addElement(dir);
+                }
+            }
+        }
+        logger.trace("Populated build fields with: {}", details);
+    }
+
+    private void setBuildRelatedControlsEnabled(boolean enabled) {
+        // Dialog-level buttons
+        if (okButton != null) okButton.setEnabled(enabled);
+        if (applyButton != null) applyButton.setEnabled(enabled);
+
+        // Build tab specific controls
+        if (reRunBuildButton != null) reRunBuildButton.setEnabled(enabled);
+        if (buildCleanCommandField != null) buildCleanCommandField.setEnabled(enabled);
+        if (allTestsCommandField != null) allTestsCommandField.setEnabled(enabled);
+        if (buildInstructionsArea != null) buildInstructionsArea.setEnabled(enabled);
+        if (excludedDirectoriesList != null) excludedDirectoriesList.setEnabled(enabled);
+        if (addExcludedDirButton != null) addExcludedDirButton.setEnabled(enabled);
+        if (removeExcludedDirButton != null) removeExcludedDirButton.setEnabled(enabled);
+        // Radio buttons for test scope are generally not involved in the re-infer data population
+        // so their enabled state can remain independent unless specified otherwise.
     }
 
     /**
