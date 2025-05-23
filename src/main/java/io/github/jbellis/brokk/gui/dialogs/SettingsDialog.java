@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.concurrent.Future;
 
 public class SettingsDialog extends JDialog {
     public static final String MODELS_TAB = "Models";
@@ -65,18 +66,19 @@ public class SettingsDialog extends JDialog {
     // Project -> Build tab specific fields
     private JList<String> excludedDirectoriesList;
     private DefaultListModel<String> excludedDirectoriesListModel;
-    private JButton addExcludedDirButton;
-    private JButton removeExcludedDirButton;
+    private JButton addButton;
+    private JButton removeButton;
     private JButton reRunBuildButton;
     private JProgressBar reRunBuildProgressBar;
     private JRadioButton runAllTestsRadio;
     private JRadioButton runTestsInWorkspaceRadio;
+    private Future<?> reRunBuildTaskFuture;
+
     // Quick Models Tab components
     private JTable quickModelsTable;
     private FavoriteModelsTableModel quickModelsTableModel;
     // Balance field (Global -> Service)
     private JTextField balanceField;
-
 
     public SettingsDialog(Frame owner, Chrome chrome) {
         super(owner, "Settings", true); // Modal dialog
@@ -129,17 +131,17 @@ public class SettingsDialog extends JDialog {
 
         // Buttons Panel
         var buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        this.okButton = new JButton("OK"); // Assign to member field
+        okButton = new JButton("OK");
         var cancelButton = new JButton("Cancel");
-        this.applyButton = new JButton("Apply"); // Assign to member field
+        applyButton = new JButton("Apply");
 
-        this.okButton.addActionListener(e -> {
+        okButton.addActionListener(e -> {
             if (applySettings()) {
                 dispose();
             }
         });
         cancelButton.addActionListener(e -> dispose());
-        this.applyButton.addActionListener(e -> applySettings()); // applySettings shows errors, dialog stays open
+        applyButton.addActionListener(e -> applySettings()); // applySettings shows errors, dialog stays open
 
         // Add Escape key binding to close the dialog (like Cancel)
         getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
@@ -482,15 +484,8 @@ public class SettingsDialog extends JDialog {
         instructionsScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         instructionsScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 
-        // Initialize Excluded Directories model, list, and scroll pane *before* populating
-        excludedDirectoriesListModel = new DefaultListModel<>();
-        excludedDirectoriesList = new JList<>(excludedDirectoriesListModel);
-        excludedDirectoriesList.setVisibleRowCount(5);
-        var excludedScrollPane = new JScrollPane(excludedDirectoriesList); // Ensure this var is used when adding to panel
-
         var details = project.getBuildDetails();
         logger.trace("Initial Build Details: {}", details);
-        populateBuildFields(details); // Centralized population
         // Build/Lint Command
         gbc.gridx = 0;
         gbc.gridy = row;
@@ -558,6 +553,12 @@ public class SettingsDialog extends JDialog {
         row++; // Move to the next conceptual row
 
         // Excluded Directories
+        excludedDirectoriesListModel = new DefaultListModel<>();
+        excludedDirectoriesList = new JList<>(excludedDirectoriesListModel);
+        excludedDirectoriesList.setVisibleRowCount(5);
+        var excludedScrollPane = new JScrollPane(excludedDirectoriesList);
+        populateBuildFields(details);
+
         // Create a panel for the labels
         var labelsPanel = new JPanel(new GridLayout(2, 1, 0, 4));
         labelsPanel.setOpaque(false);
@@ -572,8 +573,6 @@ public class SettingsDialog extends JDialog {
         gbc.fill = GridBagConstraints.NONE;
         buildPanel.add(labelsPanel, gbc);
 
-        // Note: excludedDirectoriesListModel, excludedDirectoriesList, and the local variable
-        // 'excludedScrollPane' are now initialized *before* populateBuildFields is called.
         // The 'excludedScrollPane' variable from that earlier initialization is used when adding to the panel below.
         gbc.gridx = 1;
         gbc.gridy = row;
@@ -585,10 +584,10 @@ public class SettingsDialog extends JDialog {
 
         // Buttons for Excluded Directories
         var excludedButtonsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-        addExcludedDirButton = new JButton("Add");
-        removeExcludedDirButton = new JButton("Remove");
-        excludedButtonsPanel.add(addExcludedDirButton);
-        excludedButtonsPanel.add(removeExcludedDirButton);
+        addButton = new JButton("Add");
+        removeButton = new JButton("Remove");
+        excludedButtonsPanel.add(addButton);
+        excludedButtonsPanel.add(removeButton);
 
         gbc.gridx = 1;
         gbc.gridy = row + 1; // Position buttons below the list
@@ -628,6 +627,10 @@ public class SettingsDialog extends JDialog {
 
         // Action listener for "Re-Run Build Details" button
         this.reRunBuildButton.addActionListener(e -> {
+            if (this.reRunBuildTaskFuture != null && !this.reRunBuildTaskFuture.isDone()) {
+                this.reRunBuildTaskFuture.cancel(true);
+            }
+
             setBuildRelatedControlsEnabled(false);
             assert reRunBuildProgressBar != null : "reRunBuildProgressBar should be initialized when this action is performed";
             reRunBuildProgressBar.setVisible(true);
@@ -648,7 +651,7 @@ public class SettingsDialog extends JDialog {
             var llm = contextManager.getLlm(contextManager.getModels().quickModel(), "Infer build details");
             var toolRegistry = contextManager.getToolRegistry();
 
-            contextManager.submitBackgroundTask("Re-inferring build details...", () -> {
+            this.reRunBuildTaskFuture = contextManager.submitBackgroundTask("Re-inferring build details...", () -> {
                 try {
                     var agent = new BuildAgent(project, llm, toolRegistry);
                     BuildAgent.BuildDetails newDetails = agent.execute();
@@ -716,7 +719,7 @@ public class SettingsDialog extends JDialog {
 
         // Add button action
         // row is already incremented from excludedScrollPane
-        addExcludedDirButton.addActionListener(e -> {
+        addButton.addActionListener(e -> {
             String newDir = JOptionPane.showInputDialog(SettingsDialog.this,
                                                         "Enter directory to exclude (e.g., target/, build/):",
                                                         "Add Excluded Directory",
@@ -738,7 +741,7 @@ public class SettingsDialog extends JDialog {
         });
 
         // Remove button action
-        removeExcludedDirButton.addActionListener(e -> {
+        removeButton.addActionListener(e -> {
             int[] selectedIndices = excludedDirectoriesList.getSelectedIndices();
             // Iterate backwards to avoid issues with index shifting after removal
             for (int i = selectedIndices.length - 1; i >= 0; i--) {
@@ -916,8 +919,8 @@ public class SettingsDialog extends JDialog {
         if (allTestsCommandField != null) allTestsCommandField.setEnabled(enabled);
         if (buildInstructionsArea != null) buildInstructionsArea.setEnabled(enabled);
         if (excludedDirectoriesList != null) excludedDirectoriesList.setEnabled(enabled);
-        if (addExcludedDirButton != null) addExcludedDirButton.setEnabled(enabled);
-        if (removeExcludedDirButton != null) removeExcludedDirButton.setEnabled(enabled);
+        if (addButton != null) addButton.setEnabled(enabled);
+        if (removeButton != null) removeButton.setEnabled(enabled);
         // Radio buttons for test scope are generally not involved in the re-infer data population
         // so their enabled state can remain independent unless specified otherwise.
     }
@@ -1157,6 +1160,15 @@ public class SettingsDialog extends JDialog {
                 project.setDataRetentionPolicy(selectedPolicy);
             }
         }
+    }
+
+    @Override
+    public void dispose() {
+        if (this.reRunBuildTaskFuture != null && !this.reRunBuildTaskFuture.isDone()) {
+            logger.warn("Cancelling re-run build task on dispose.");
+            this.reRunBuildTaskFuture.cancel(true);
+        }
+        super.dispose();
     }
 
     /**
