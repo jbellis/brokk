@@ -482,14 +482,20 @@ public class SettingsDialog extends JDialog {
         instructionsScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         instructionsScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 
+        // Initialize Excluded Directories model, list, and scroll pane *before* populating
+        excludedDirectoriesListModel = new DefaultListModel<>();
+        excludedDirectoriesList = new JList<>(excludedDirectoriesListModel);
+        excludedDirectoriesList.setVisibleRowCount(5);
+        var excludedScrollPane = new JScrollPane(excludedDirectoriesList); // Ensure this var is used when adding to panel
+
         var details = project.getBuildDetails();
         logger.trace("Initial Build Details: {}", details);
+        populateBuildFields(details); // Centralized population
         // Build/Lint Command
         gbc.gridx = 0;
         gbc.gridy = row;
         gbc.weightx = 0.0;
         buildPanel.add(new JLabel("Build/Lint Command:"), gbc);
-        buildCleanCommandField.setText(details.buildLintCommand());
         gbc.gridx = 1;
         gbc.gridy = row++;
         gbc.weightx = 1.0;
@@ -500,7 +506,6 @@ public class SettingsDialog extends JDialog {
         gbc.gridy = row;
         gbc.weightx = 0.0;
         buildPanel.add(new JLabel("Test All Command:"), gbc);
-        allTestsCommandField.setText(details.testAllCommand());
         gbc.gridx = 1;
         gbc.gridy = row++;
         gbc.weightx = 1.0;
@@ -544,7 +549,6 @@ public class SettingsDialog extends JDialog {
         gbc.weightx = 0.0;
         gbc.anchor = GridBagConstraints.NORTHWEST;
         buildPanel.add(new JLabel("Build Instructions:"), gbc);
-        buildInstructionsArea.setText(details.instructions());
         gbc.gridx = 1;
         gbc.gridy = row;
         gbc.weightx = 1.0;
@@ -568,15 +572,9 @@ public class SettingsDialog extends JDialog {
         gbc.fill = GridBagConstraints.NONE;
         buildPanel.add(labelsPanel, gbc);
 
-        excludedDirectoriesListModel = new DefaultListModel<>();
-        var sortedExcludedDirs = details.excludedDirectories().stream().sorted().toList();
-        for (String dir : sortedExcludedDirs) {
-            excludedDirectoriesListModel.addElement(dir);
-        }
-        excludedDirectoriesList = new JList<>(excludedDirectoriesListModel);
-        excludedDirectoriesList.setVisibleRowCount(5);
-        var excludedScrollPane = new JScrollPane(excludedDirectoriesList);
-
+        // Note: excludedDirectoriesListModel, excludedDirectoriesList, and the local variable
+        // 'excludedScrollPane' are now initialized *before* populateBuildFields is called.
+        // The 'excludedScrollPane' variable from that earlier initialization is used when adding to the panel below.
         gbc.gridx = 1;
         gbc.gridy = row;
         gbc.weightx = 1.0;
