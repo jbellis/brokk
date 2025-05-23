@@ -68,6 +68,7 @@ public class SettingsDialog extends JDialog {
     private JButton addExcludedDirButton;
     private JButton removeExcludedDirButton;
     private JButton reRunBuildButton;
+    private JProgressBar reRunBuildProgressBar;
     private JRadioButton runAllTestsRadio;
     private JRadioButton runTestsInWorkspaceRadio;
     // Quick Models Tab components
@@ -611,13 +612,27 @@ public class SettingsDialog extends JDialog {
         gbc.anchor = GridBagConstraints.NORTHWEST; // Align with excludedButtonsPanel
         gbc.insets = new Insets(2, 0, 2, 2); // Align left, similar to excludedButtonsPanel
         buildPanel.add(this.reRunBuildButton, gbc);
+
+        // Add progress bar for re-run build
+        this.reRunBuildProgressBar = new JProgressBar();
+        this.reRunBuildProgressBar.setIndeterminate(true);
+        this.reRunBuildProgressBar.setVisible(false);
+        gbc.gridx = 1;
+        gbc.gridy = row + 3; // Position below reRunBuildButton
+        gbc.weightx = 1.0; // Allow it to take available horizontal space
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.anchor = GridBagConstraints.NORTHWEST;
+        gbc.insets = new Insets(2, 0, 2, 2);
+        buildPanel.add(this.reRunBuildProgressBar, gbc);
         gbc.insets = new Insets(2, 2, 2, 2); // Reset insets
 
-        row += 3; // Increment row to account for the rows used by excludedScrollPane, excludedButtonsPanel, and reRunBuildButton
+        row += 4; // Increment row to account for the rows used by excludedScrollPane, excludedButtonsPanel, reRunBuildButton, and progressBar
 
         // Action listener for "Re-Run Build Details" button
         this.reRunBuildButton.addActionListener(e -> {
             setBuildRelatedControlsEnabled(false);
+            assert reRunBuildProgressBar != null : "reRunBuildProgressBar should be initialized when this action is performed";
+            reRunBuildProgressBar.setVisible(true);
 
             // Use the 'project' variable from the outer scope of createProjectPanel()
             if (project == null) {
@@ -627,6 +642,7 @@ public class SettingsDialog extends JDialog {
                                               "Error",
                                               JOptionPane.ERROR_MESSAGE);
                 setBuildRelatedControlsEnabled(true);
+                reRunBuildProgressBar.setVisible(false);
                 return;
             }
 
@@ -663,6 +679,7 @@ public class SettingsDialog extends JDialog {
                             }
                         } finally {
                             setBuildRelatedControlsEnabled(true);
+                            reRunBuildProgressBar.setVisible(false);
                         }
                     });
                     return newDetails; // Return the result for the background task
@@ -677,6 +694,7 @@ public class SettingsDialog extends JDialog {
                                                           JOptionPane.WARNING_MESSAGE);
                         } finally {
                             setBuildRelatedControlsEnabled(true);
+                            reRunBuildProgressBar.setVisible(false);
                         }
                     });
                     return BuildAgent.BuildDetails.EMPTY; // Indicate failure
@@ -690,6 +708,7 @@ public class SettingsDialog extends JDialog {
                                                           JOptionPane.ERROR_MESSAGE);
                         } finally {
                             setBuildRelatedControlsEnabled(true);
+                            reRunBuildProgressBar.setVisible(false);
                         }
                     });
                     return BuildAgent.BuildDetails.EMPTY; // Indicate failure
