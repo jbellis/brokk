@@ -69,7 +69,7 @@ public class SettingsDialog extends JDialog {
     private JButton addButton;
     private JButton removeButton;
     private JButton reRunBuildButton;
-    private JProgressBar reRunBuildProgressBar;
+    private JProgressBar buildAgentProgress;
     private JRadioButton runAllTestsRadio;
     private JRadioButton runTestsInWorkspaceRadio;
     private Future<?> reRunBuildTaskFuture;
@@ -573,7 +573,6 @@ public class SettingsDialog extends JDialog {
         gbc.fill = GridBagConstraints.NONE;
         buildPanel.add(labelsPanel, gbc);
 
-        // The 'excludedScrollPane' variable from that earlier initialization is used when adding to the panel below.
         gbc.gridx = 1;
         gbc.gridy = row;
         gbc.weightx = 1.0;
@@ -600,7 +599,7 @@ public class SettingsDialog extends JDialog {
         gbc.insets = new Insets(2, 2, 2, 2); // Reset insets
 
         // Add "Re-Run Build Details" Button
-        this.reRunBuildButton = new JButton("Re-Run Build Details");
+        reRunBuildButton = new JButton("Re-Run Build Details");
         gbc.gridx = 1;
         gbc.gridy = row + 2; // Position below excludedScrollPane (row) and excludedButtonsPanel (row + 1)
         gbc.weightx = 0.0;
@@ -608,32 +607,32 @@ public class SettingsDialog extends JDialog {
         gbc.fill = GridBagConstraints.NONE;
         gbc.anchor = GridBagConstraints.NORTHWEST; // Align with excludedButtonsPanel
         gbc.insets = new Insets(2, 0, 2, 2); // Align left, similar to excludedButtonsPanel
-        buildPanel.add(this.reRunBuildButton, gbc);
+        buildPanel.add(reRunBuildButton, gbc);
 
         // Add progress bar for re-run build
-        this.reRunBuildProgressBar = new JProgressBar();
-        this.reRunBuildProgressBar.setIndeterminate(true);
-        this.reRunBuildProgressBar.setVisible(false);
+        buildAgentProgress = new JProgressBar();
+        buildAgentProgress.setIndeterminate(true);
+        buildAgentProgress.setVisible(false);
         gbc.gridx = 1;
         gbc.gridy = row + 3; // Position below reRunBuildButton
         gbc.weightx = 1.0; // Allow it to take available horizontal space
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.anchor = GridBagConstraints.NORTHWEST;
         gbc.insets = new Insets(2, 0, 2, 2);
-        buildPanel.add(this.reRunBuildProgressBar, gbc);
+        buildPanel.add(buildAgentProgress, gbc);
         gbc.insets = new Insets(2, 2, 2, 2); // Reset insets
 
         row += 4; // Increment row to account for the rows used by excludedScrollPane, excludedButtonsPanel, reRunBuildButton, and progressBar
 
         // Action listener for "Re-Run Build Details" button
-        this.reRunBuildButton.addActionListener(e -> {
-            if (this.reRunBuildTaskFuture != null && !this.reRunBuildTaskFuture.isDone()) {
-                this.reRunBuildTaskFuture.cancel(true);
+        reRunBuildButton.addActionListener(e -> {
+            if (reRunBuildTaskFuture != null && !reRunBuildTaskFuture.isDone()) {
+                reRunBuildTaskFuture.cancel(true);
             }
 
-            setBuildRelatedControlsEnabled(false);
-            assert reRunBuildProgressBar != null : "reRunBuildProgressBar should be initialized when this action is performed";
-            reRunBuildProgressBar.setVisible(true);
+            setBuildControlsState(false);
+            assert buildAgentProgress != null : "buildAgentProgress should be initialized when this action is performed";
+            buildAgentProgress.setVisible(true);
 
             // Use the 'project' variable from the outer scope of createProjectPanel()
             if (project == null) {
@@ -642,8 +641,8 @@ public class SettingsDialog extends JDialog {
                                               "No project is open. Cannot infer build details.",
                                               "Error",
                                               JOptionPane.ERROR_MESSAGE);
-                setBuildRelatedControlsEnabled(true);
-                reRunBuildProgressBar.setVisible(false);
+                setBuildControlsState(true);
+                buildAgentProgress.setVisible(false);
                 return;
             }
 
@@ -651,67 +650,33 @@ public class SettingsDialog extends JDialog {
             var llm = contextManager.getLlm(contextManager.getModels().quickModel(), "Infer build details");
             var toolRegistry = contextManager.getToolRegistry();
 
-            this.reRunBuildTaskFuture = contextManager.submitBackgroundTask("Re-inferring build details...", () -> {
+            reRunBuildTaskFuture = contextManager.submitBackgroundTask("Re-inferring build details...", () -> {
                 try {
                     var agent = new BuildAgent(project, llm, toolRegistry);
                     BuildAgent.BuildDetails newDetails = agent.execute();
                     // Post-execution handling (on EDT)
                     SwingUtilities.invokeLater(() -> {
-                        try {
-                            if (newDetails != null && !newDetails.equals(BuildAgent.BuildDetails.EMPTY)) {
-                                populateBuildFields(newDetails);
-                                logger.info("Successfully inferred and populated new build details.");
-                                JOptionPane.showMessageDialog(SettingsDialog.this,
-                                                              "Build details re-inferred successfully.",
-                                                              "Success",
-                                                              JOptionPane.INFORMATION_MESSAGE);
-                            } else if (newDetails == BuildAgent.BuildDetails.EMPTY) {
-                                logger.warn("Build agent aborted or could not determine details.");
-                                JOptionPane.showMessageDialog(SettingsDialog.this,
-                                                              "Build agent could not determine build details.",
-                                                              "Inference Aborted",
-                                                              JOptionPane.WARNING_MESSAGE);
-                            } else { // newDetails is null (should have been caught as an exception by background task)
-                                logger.error("Build agent returned null details unexpectedly from background task.");
-                                JOptionPane.showMessageDialog(SettingsDialog.this,
-                                                              "An unexpected error occurred while inferring build details (null result).",
-                                                              "Error",
-                                                              JOptionPane.ERROR_MESSAGE);
-                            }
-                        } finally {
-                            setBuildRelatedControlsEnabled(true);
-                            reRunBuildProgressBar.setVisible(false);
+                        if (newDetails != null && !newDetails.equals(BuildAgent.BuildDetails.EMPTY)) {
+                            populateBuildFields(newDetails);
+                            logger.info("Successfully inferred and populated new build details.");
+                            showReRunCompletionDialog("Success", "Build details re-inferred successfully.", JOptionPane.INFORMATION_MESSAGE);
+                        } else if (newDetails == BuildAgent.BuildDetails.EMPTY) {
+                            logger.warn("Build agent aborted or could not determine details.");
+                            showReRunCompletionDialog("Inference Aborted", "Build agent could not determine build details.", JOptionPane.WARNING_MESSAGE);
+                        } else { // newDetails is null
+                            logger.error("Build agent returned null details unexpectedly from background task.");
+                            showReRunCompletionDialog("Error", "An unexpected error occurred while inferring build details (null result).", JOptionPane.ERROR_MESSAGE);
                         }
                     });
                     return newDetails; // Return the result for the background task
                 } catch (InterruptedException interruptedException) {
                     Thread.currentThread().interrupt();
                     logger.warn("Build agent execution was interrupted.", interruptedException);
-                    SwingUtilities.invokeLater(() -> {
-                        try {
-                            JOptionPane.showMessageDialog(SettingsDialog.this,
-                                                          "Build inference was interrupted.",
-                                                          "Interrupted",
-                                                          JOptionPane.WARNING_MESSAGE);
-                        } finally {
-                            setBuildRelatedControlsEnabled(true);
-                            reRunBuildProgressBar.setVisible(false);
-                        }
-                    });
+                    SwingUtilities.invokeLater(() -> showReRunCompletionDialog("Interrupted", "Build inference was interrupted.", JOptionPane.WARNING_MESSAGE));
                     return BuildAgent.BuildDetails.EMPTY; // Indicate failure
                 } catch (Exception ex) {
                     logger.error("Error executing BuildAgent in background.", ex);
-                    SwingUtilities.invokeLater(() -> {
-                        try {
-                            JOptionPane.showMessageDialog(SettingsDialog.this,
-                                                          "Error re-inferring build details: " + ex.getMessage(),
-                                                          "Error",
-                                                          JOptionPane.ERROR_MESSAGE);
-                        } finally {
-                            setBuildRelatedControlsEnabled(true);
-                            reRunBuildProgressBar.setVisible(false);
-                        }
-                    });
+                    SwingUtilities.invokeLater(() -> showReRunCompletionDialog("Error", "Error re-inferring build details: " + ex.getMessage(), JOptionPane.ERROR_MESSAGE));
                     return BuildAgent.BuildDetails.EMPTY; // Indicate failure
                 }
             });
@@ -892,37 +857,45 @@ public class SettingsDialog extends JDialog {
         }
         assert SwingUtilities.isEventDispatchThread() : "UI updates must be on EDT";
 
-        if (buildCleanCommandField != null) buildCleanCommandField.setText(details.buildLintCommand());
-        if (allTestsCommandField != null) allTestsCommandField.setText(details.testAllCommand());
-        if (buildInstructionsArea != null) buildInstructionsArea.setText(details.instructions());
+        buildCleanCommandField.setText(details.buildLintCommand());
+        allTestsCommandField.setText(details.testAllCommand());
+        buildInstructionsArea.setText(details.instructions());
 
-        if (excludedDirectoriesListModel != null) {
-            excludedDirectoriesListModel.clear();
-            if (details.excludedDirectories() != null) {
-                var sortedExcludes = details.excludedDirectories().stream().sorted().toList();
-                for (String dir : sortedExcludes) {
-                    excludedDirectoriesListModel.addElement(dir);
-                }
-            }
+        excludedDirectoriesListModel.clear();
+        var sortedExcludes = details.excludedDirectories().stream().sorted().toList();
+        for (String dir : sortedExcludes) {
+            excludedDirectoriesListModel.addElement(dir);
         }
         logger.trace("Populated build fields with: {}", details);
     }
 
-    private void setBuildRelatedControlsEnabled(boolean enabled) {
+    private void setBuildControlsState(boolean enabled) {
         // Dialog-level buttons
-        if (okButton != null) okButton.setEnabled(enabled);
-        if (applyButton != null) applyButton.setEnabled(enabled);
+        okButton.setEnabled(enabled);
+        applyButton.setEnabled(enabled);
 
         // Build tab specific controls
-        if (reRunBuildButton != null) reRunBuildButton.setEnabled(enabled);
-        if (buildCleanCommandField != null) buildCleanCommandField.setEnabled(enabled);
-        if (allTestsCommandField != null) allTestsCommandField.setEnabled(enabled);
-        if (buildInstructionsArea != null) buildInstructionsArea.setEnabled(enabled);
-        if (excludedDirectoriesList != null) excludedDirectoriesList.setEnabled(enabled);
-        if (addButton != null) addButton.setEnabled(enabled);
-        if (removeButton != null) removeButton.setEnabled(enabled);
-        if (runAllTestsRadio != null) runAllTestsRadio.setEnabled(enabled);
-        if (runTestsInWorkspaceRadio != null) runTestsInWorkspaceRadio.setEnabled(enabled);
+        reRunBuildButton.setEnabled(enabled);
+        buildCleanCommandField.setEnabled(enabled);
+        allTestsCommandField.setEnabled(enabled);
+        buildInstructionsArea.setEnabled(enabled);
+        excludedDirectoriesList.setEnabled(enabled);
+        addButton.setEnabled(enabled);
+        removeButton.setEnabled(enabled);
+        runAllTestsRadio.setEnabled(enabled);
+        runTestsInWorkspaceRadio.setEnabled(enabled);
+    }
+
+    private void showReRunCompletionDialog(String title, String message, int messageType) {
+        assert SwingUtilities.isEventDispatchThread() : "UI updates must be on EDT";
+        try {
+            Component parentComponent = isVisible() ? SettingsDialog.this : chrome.getFrame();
+            JOptionPane.showMessageDialog(parentComponent, message, title, messageType);
+        } finally {
+            setBuildControlsState(true);
+            buildAgentProgress.setVisible(false);
+            reRunBuildTaskFuture = null; // Task is complete, clear the future
+        }
     }
 
     /**
