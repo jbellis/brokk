@@ -921,8 +921,8 @@ public class SettingsDialog extends JDialog {
         if (excludedDirectoriesList != null) excludedDirectoriesList.setEnabled(enabled);
         if (addButton != null) addButton.setEnabled(enabled);
         if (removeButton != null) removeButton.setEnabled(enabled);
-        // Radio buttons for test scope are generally not involved in the re-infer data population
-        // so their enabled state can remain independent unless specified otherwise.
+        if (runAllTestsRadio != null) runAllTestsRadio.setEnabled(enabled);
+        if (runTestsInWorkspaceRadio != null) runTestsInWorkspaceRadio.setEnabled(enabled);
     }
 
     /**
